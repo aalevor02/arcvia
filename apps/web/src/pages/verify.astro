@@ -1,0 +1,89 @@
+---
+import Base from '../layouts/Base.astro'
+---
+
+<Base title="Verify your mobile" noindex>
+  <section class="shell grid min-h-[70vh] max-w-md place-items-center py-16">
+    <div class="card w-full">
+      <h1 class="h3">Verify your mobile</h1>
+      <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+        We sent a 6-digit code to the number you registered. Enter it below.
+      </p>
+
+      <form id="otp-form" novalidate class="mt-6 space-y-4">
+        <div>
+          <label for="code" class="mb-1.5 block text-sm font-medium">Code</label>
+          <input
+            id="code"
+            name="code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            required
+            class="w-full rounded-lg border border-line px-3.5 py-2.5 text-center font-mono text-lg tracking-[0.4em] outline-none focus:border-accent"
+          />
+        </div>
+
+        <p id="otp-status" role="alert" class="hidden text-sm"></p>
+
+        <button type="submit" id="otp-submit" class="btn-primary w-full">
+          Verify
+        </button>
+        <button type="button" id="otp-resend" class="btn-secondary w-full">
+          Resend code
+        </button>
+      </form>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { verifyOtp, sendOtp } from '../lib/auth'
+  import { getUser } from '../lib/api'
+
+  const form = document.getElementById('otp-form') as HTMLFormElement | null
+  const status = document.getElementById('otp-status') as HTMLElement | null
+  const resend = document.getElementById('otp-resend') as HTMLButtonElement | null
+
+  // The phone lives on the session the register step just stored, so the user
+  // never has to retype it.
+  const phone = (getUser() as { phone?: string } | null)?.phone ?? ''
+
+  function say(message: string, ok = false) {
+    if (!status) return
+    status.textContent = message
+    status.className = `text-sm ${ok ? 'text-signal' : 'text-danger'}`
+  }
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const code = String(new FormData(form).get('code') ?? '').trim()
+
+    if (!/^\d{6}$/.test(code)) {
+      say('Enter the 6-digit code.')
+      return
+    }
+
+    try {
+      await verifyOtp(phone, code)
+      window.location.href = '/welcome/'
+    } catch (err) {
+      say(err instanceof Error ? err.message : 'That code did not work.')
+    }
+  })
+
+  resend?.addEventListener('click', async () => {
+    resend.disabled = true
+    try {
+      await sendOtp(phone)
+      say('New code sent.', true)
+    } catch {
+      say('Could not resend. Try again in a moment.')
+    } finally {
+      // A short lockout stops someone hammering the SMS endpoint — every send
+      // costs money and repeated sends look like abuse to the SMS provider.
+      setTimeout(() => (resend.disabled = false), 30_000)
+    }
+  })
+</script>

@@ -1,0 +1,16 @@
+{
+  "name": "@arcvia/planviewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Master-plan hotspot editor — draw zones on a site plan, export a self-contained HTML viewer.",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --port 5174"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

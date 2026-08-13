@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plan Editor — Arcvia</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e9edf5;
+        --soft: #8b95a7;
+        --bg: #0f1319;
+        --panel: #161b23;
+        --line: #242b36;
+        --accent: #2f6df6;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+        overflow: hidden;
+      }
+      aside {
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        padding: 18px 16px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      h1 { font-size: 14px; font-weight: 600; }
+      .lbl {
+        font-size: 10px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: .08em; color: var(--soft); display: block; margin-bottom: 6px;
+      }
+      input[type=text], input[type=url], textarea, select {
+        width: 100%; padding: 7px 9px; border-radius: 7px;
+        border: 1px solid var(--line); background: #0e1218; color: var(--ink);
+        font: inherit; outline: none;
+      }
+      input:focus, textarea:focus { border-color: var(--accent); }
+      textarea { resize: vertical; min-height: 56px; }
+      button {
+        padding: 8px 12px; border-radius: 7px; border: 1px solid var(--line);
+        background: transparent; color: var(--ink); font: inherit; cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      .zones { display: flex; flex-direction: column; gap: 4px; }
+      .zone-item {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 8px; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line);
+        cursor: pointer; font-size: 12px;
+      }
+      .zone-item.sel { border-color: var(--accent); background: rgba(47,109,246,.12); }
+      .zone-item button { padding: 2px 6px; font-size: 11px; border: none; color: var(--soft); }
+      .hint { font-size: 11px; color: var(--soft); line-height: 1.5; }
+      main { position: relative; overflow: hidden; display: grid; place-items: center; }
+      #stage { position: relative; max-width: 100%; max-height: 100%; }
+      #stage img { display: block; max-width: 100%; max-height: 100vh; }
+      #draw {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        cursor: crosshair;
+      }
+      .empty { color: var(--soft); font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Plan Editor</h1>
+
+      <div>
+        <label class="lbl" for="file">Plan image</label>
+        <input type="file" id="file" accept="image/*" />
+      </div>
+
+      <div>
+        <label class="lbl" for="title">Title</label>
+        <input type="text" id="title" value="Master Plan" />
+      </div>
+
+      <div>
+        <label class="lbl" for="accent">Accent colour</label>
+        <input type="text" id="accent" value="#2f6df6" />
+      </div>
+
+      <div>
+        <span class="lbl">Zones</span>
+        <p class="hint" id="drawHint">
+          Click on the plan to place points. Press <b>Enter</b> to close the
+          shape, <b>Esc</b> to cancel, <b>Backspace</b> to undo a point.
+        </p>
+        <div class="zones" id="zoneList"></div>
+      </div>
+
+      <div id="editor" hidden>
+        <span class="lbl">Selected zone</span>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input type="text" id="zLabel" placeholder="Label (e.g. Floor 12)" />
+          <input type="text" id="zTitle" placeholder="Popup title" />
+          <textarea id="zBody" placeholder="Popup text"></textarea>
+          <div class="row">
+            <input type="text" id="zLinkText" placeholder="Link text" />
+            <input type="url" id="zLinkUrl" placeholder="https://…" />
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:auto">
+        <button id="export" class="primary" disabled>Export HTML</button>
+        <button id="clear">Clear</button>
+      </div>
+      <p class="hint" id="sizeHint"></p>
+    </aside>
+
+    <main>
+      <div id="stage" hidden>
+        <img id="plan" alt="Plan" />
+        <svg id="draw" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+      </div>
+      <p class="empty" id="empty">Load a plan image to begin</p>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

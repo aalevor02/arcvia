@@ -1,0 +1,43 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+---
+
+<Base title="About us" description={`About ${brand.legalName}.`}>
+  <section class="shell max-w-3xl py-20">
+    <p class="eyebrow">About</p>
+    <h1 class="h2 mt-3 text-balance">
+      Drawings are precise. What people picture from them is not.
+    </h1>
+
+    <div class="mt-8 space-y-5 text-base leading-relaxed text-ink-soft">
+      <p>
+        Every construction project runs on documents that only a trained reader
+        can decode. The architect sees the finished building. The client sees
+        lines. The gap between those two pictures is where revisions, delays and
+        arguments come from.
+      </p>
+      <p>
+        {brand.name} closes that gap. Upload the drawing you already have and get
+        back a space anyone can walk through — on a laptop, a phone, or a
+        headset — and change while they are standing in it.
+      </p>
+      <p>
+        We build for the people doing the work: architects who need to present
+        without hiring a visualisation studio, developers who need to sell before
+        the foundation is poured, and construction teams who need everyone
+        looking at the same thing.
+      </p>
+    </div>
+
+    <div class="mt-12 rounded-card border border-line bg-surface-alt p-8">
+      <h2 class="h3">Free while we are in beta</h2>
+      <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+        We would rather have the product in real projects than behind a paywall.
+        Every account gets everything, including GPU renders, at no cost. When we
+        do introduce paid plans you will hear about it well in advance.
+      </p>
+      <a href="/register/" class="btn-primary mt-6">Create an account</a>
+    </div>
+  </section>
+</Base>

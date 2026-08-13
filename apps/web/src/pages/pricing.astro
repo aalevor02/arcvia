@@ -1,0 +1,147 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+import { billingEnabled, plans, creditCost } from '@arcvia/brand/plans'
+import FaqAccordion from '../components/FaqAccordion.tsx'
+import { faqs } from '../data/faqs'
+
+const free = plans.free
+
+// Everything metered, so people can see exactly what a credit buys before we
+// ever charge for one. Being upfront about this now avoids the "wait, renders
+// cost money?" conversation later.
+const meter = [
+  { label: 'Create and save a scene', cost: creditCost.sceneSave },
+  { label: 'Detect a floor plan', cost: creditCost.floorplanDetect },
+  { label: 'Preview render (thumbnail)', cost: creditCost.previewRender },
+  { label: 'Isometric render (1920×1080)', cost: creditCost.isometricRender },
+  { label: 'Full-resolution still', cost: creditCost.fullRender },
+  { label: 'Full scene lightmap bake', cost: creditCost.lightmapBake },
+]
+---
+
+<Base
+  title="Pricing"
+  description={`${brand.name} is free while in beta — every account gets the full feature set.`}
+>
+  <section class="border-b border-line bg-accent-soft/50">
+    <div class="shell py-20 text-center sm:py-24">
+      <p class="eyebrow">Pricing</p>
+      <h1 class="h1 mx-auto mt-4 max-w-2xl text-balance">
+        {
+          billingEnabled
+            ? 'Choose your plan'
+            : 'Free while we are in beta'
+        }
+      </h1>
+      <p class="lede mx-auto mt-5 max-w-xl text-pretty">
+        {
+          billingEnabled
+            ? 'Start free and upgrade when your team outgrows the allocation.'
+            : `Every ${brand.name} account gets the complete product — walkthroughs, the configurator, the modelling tool and GPU renders — at no cost. We will announce paid plans well before anything changes.`
+        }
+      </p>
+    </div>
+  </section>
+
+  {
+    /* When billing flips on, this page grows a tier grid. Until then it stays a
+       single honest card rather than a fake comparison table. */
+  }
+  <section class="py-section">
+    <div class="shell max-w-3xl">
+      <div class="rounded-card border-2 border-accent bg-surface p-8 sm:p-10">
+        <div class="flex flex-wrap items-baseline justify-between gap-4">
+          <div>
+            <h2 class="h3">{free.label}</h2>
+            <p class="mt-1 text-sm text-ink-soft">Everything, for everyone</p>
+          </div>
+          <p class="text-4xl font-semibold tracking-tight">
+            ₹0<span class="text-base font-normal text-ink-soft">/month</span>
+          </p>
+        </div>
+
+        <ul class="mt-8 grid gap-3 sm:grid-cols-2">
+          {
+            [
+              `Up to ${free.seats} team members`,
+              `${free.creditsPerSeat} render credits per member, monthly`,
+              'Unused credits roll over',
+              'Unlimited projects and storage',
+              'Interactive, configurable walkthroughs',
+              'In-browser modelling tool',
+              'Automatic floor-plan detection',
+              'BOQ & BOM generation',
+              'Downloadable 3D models',
+              'Email support',
+            ].map((f) => (
+              <li class="flex items-start gap-2.5 text-sm">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                  class="mt-0.5 shrink-0 text-signal"
+                >
+                  <path
+                    d="M13 4.5 6.5 11 3 7.5"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span>{f}</span>
+              </li>
+            ))
+          }
+        </ul>
+
+        <a href="/register/" class="btn-primary mt-9 w-full">Create a free account</a>
+        <p class="mt-3 text-center text-xs text-ink-soft">
+          No card required.
+        </p>
+      </div>
+
+      <!-- ── What a credit buys ─────────────────────────────────────────── -->
+      <div class="mt-14">
+        <h2 class="h3">What uses a credit</h2>
+        <p class="mt-2 text-sm leading-relaxed text-ink-soft">
+          Credits meter time on our GPU render machines. Anything that happens in
+          your browser is free and always will be.
+        </p>
+
+        <div class="mt-6 overflow-x-auto">
+          <table class="w-full min-w-[420px] border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-line text-left">
+                <th scope="col" class="py-3 font-medium">Action</th>
+                <th scope="col" class="py-3 text-right font-medium">Credits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {
+                meter.map((m) => (
+                  <tr class="border-b border-line/60">
+                    <td class="py-3 text-ink-soft">{m.label}</td>
+                    <td class="py-3 text-right font-mono">
+                      {m.cost === 0 ? 'Free' : m.cost}
+                    </td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-section">
+    <div class="shell max-w-3xl">
+      <h2 class="h2">Questions</h2>
+      <FaqAccordion client:visible items={faqs} initialOpen={null} />
+    </div>
+  </section>
+</Base>

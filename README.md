@@ -1,0 +1,80 @@
+# Arcvia
+
+Real-estate visualisation platform: marketing site, in-browser 3D studio,
+Blender render pipeline, floor-plan detection, and a master-plan hotspot tool.
+
+Rebuilt from a teardown of an existing production system — see
+[`docs/architecture.md`](docs/architecture.md) for what was inherited, what was
+deliberately changed, and why.
+
+**Billing is off.** Everything is free. The plan and credit model exists and
+meters usage, but no payment path is active. See
+[`packages/brand/plans.config.mjs`](packages/brand/plans.config.mjs).
+
+---
+
+## Layout
+
+```
+apps/
+  web/           Astro 5 marketing site        -> static files, any host
+  studio/        Vite + React + Three.js       -> the 3D editor
+  planviewer/    Hotspot editor + exporter     -> self-contained HTML output
+services/
+  api/           Fastify — auth, orgs, scenes, credits, render jobs
+  render-worker/ Headless Blender Cycles script
+  floorplan-ai/  FastAPI symbol detection
+packages/
+  brand/         Brand tokens + plan/credit model (single source of truth)
+```
+
+## Running it
+
+Everything runs locally with no cloud account and no Docker.
+
+```bash
+npm install
+
+npm run dev:api      # http://localhost:8787
+npm run dev:web      # http://localhost:4321
+npm run dev:studio   # http://localhost:5173
+npm run dev:plan     # http://localhost:5174
+```
+
+Floor-plan detection is a separate Python service:
+
+```bash
+cd services/floorplan-ai
+python -m venv .venv && .venv/Scripts/activate   # Windows
+pip install -r requirements.txt
+uvicorn main:app --port 8090
+```
+
+Copy `.env.example` to `.env` first if you want to change any defaults. You do
+not have to — every value has a working development default.
+
+### Renders
+
+`RENDER_MODE=local` (the default) spawns Blender on your own machine. Point
+`BLENDER_PATH` at your install and renders cost you nothing but electricity.
+
+`RENDER_MODE=remote` sends jobs to a GPU worker pool. **That is the mode that
+bills per second.** Read [`docs/costs.md`](docs/costs.md) before switching.
+
+## Rebranding
+
+Edit [`packages/brand/brand.config.mjs`](packages/brand/brand.config.mjs). Name,
+domains, colours and type all flow from that one file into every app.
+
+## What still needs your input
+
+Two decisions are marked `TODO(you)` in the source because they are business
+judgements, not engineering ones:
+
+| Where | Decision |
+|---|---|
+| `apps/web/src/lib/auth.ts` | Session expiry policy — hard, sliding, or hybrid |
+| `services/api/src/lib/credits.js` | What happens when someone runs out of credits mid-render |
+
+Both have working defaults and a written-out comparison of the options in the
+comments above them.

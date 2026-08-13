@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    /* Anchor links land below the sticky header instead of under it. */
+    scroll-padding-top: 6rem;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+  }
+
+  /* A visible focus ring is the single highest-value accessibility default.
+     Scoped to :focus-visible so mouse users never see it. */
+  :focus-visible {
+    outline: 2px solid theme('colors.accent.DEFAULT');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .shell {
+    @apply mx-auto w-full max-w-shell px-5 sm:px-8;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3
+           text-sm font-semibold transition-colors duration-200
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-accent-hover;
+  }
+
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-surface-alt;
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.14em] text-accent;
+  }
+
+  /* Section headings share one ramp so the page reads as a single document
+     rather than a stack of independently-designed blocks. */
+  .h1 {
+    @apply text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl;
+  }
+
+  .h2 {
+    @apply text-3xl font-semibold leading-[1.15] tracking-tight sm:text-4xl;
+  }
+
+  .h3 {
+    @apply text-lg font-semibold leading-snug;
+  }
+
+  .lede {
+    @apply text-base leading-relaxed text-ink-soft sm:text-lg;
+  }
+
+  .card {
+    @apply rounded-card border border-line bg-surface p-6;
+  }
+}

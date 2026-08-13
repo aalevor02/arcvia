@@ -1,0 +1,14 @@
+# Core service — this is all you need for the default heuristic backend.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+
+# Classical CV. headless avoids pulling in GTK/Qt, which a server does not have
+# and which turns a 40 MB install into a 400 MB one.
+opencv-python-headless==4.10.0.84
+numpy==2.2.1
+
+# Trained detector backend. Commented out on purpose: it drags in torch
+# (~2.5 GB) and is only needed once you set FLOORPLAN_BACKEND=yolo.
+# ultralytics==8.3.55

@@ -1,0 +1,11 @@
+{
+  "name": "@arcvia/brand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared brand tokens and plan/credit model.",
+  "exports": {
+    ".": "./brand.config.mjs",
+    "./plans": "./plans.config.mjs"
+  }
+}

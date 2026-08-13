@@ -1,0 +1,83 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+
+const pillars = [
+  {
+    title: 'One model, many architects',
+    body: 'Changes sync live between everyone in the scene. No more emailing versions and reconciling them by hand.',
+  },
+  {
+    title: 'Automated BOQ and BOM',
+    body: 'Quantities come straight off the model, so the bill matches the drawing instead of drifting from it.',
+  },
+  {
+    title: 'Standardised output',
+    body: 'Every team, city and project presents the same way. Clients see one company, not twelve house styles.',
+  },
+  {
+    title: 'Fewer revision cycles',
+    body: 'When the client can walk the space, misreadings surface before they become rework.',
+  },
+]
+---
+
+<Base
+  title="Enterprise"
+  description={`${brand.name} for construction companies, developers and large design teams.`}
+>
+  <section class="border-b border-line bg-ink text-white">
+    <div class="shell py-20 sm:py-28">
+      <p class="text-xs font-semibold uppercase tracking-[0.14em] text-accent">
+        Enterprise
+      </p>
+      <h1 class="h1 mt-4 max-w-3xl text-balance">
+        Build, present and sell projects faster — at scale
+      </h1>
+      <p class="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">
+        For construction companies, developers and design teams turning 2D plans
+        into walkthroughs in minutes, with the control and collaboration a large
+        organisation actually needs.
+      </p>
+      <div class="mt-9 flex flex-wrap gap-3">
+        <a href="/contact/" class="btn-primary">Book a demo</a>
+        <a
+          href="/register/"
+          class="btn border border-white/25 text-white hover:bg-white/10"
+          >Start free</a
+        >
+      </div>
+    </div>
+  </section>
+
+  <section class="py-section">
+    <div class="shell">
+      <h2 class="h2 max-w-2xl text-balance">
+        Projects stall because people read drawings differently
+      </h2>
+      <div class="mt-12 grid gap-6 sm:grid-cols-2">
+        {
+          pillars.map((p) => (
+            <article class="card">
+              <h3 class="h3">{p.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-ink-soft">{p.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-section">
+    <div class="shell">
+      <div class="rounded-card border border-line bg-surface-alt p-8 text-center sm:p-12">
+        <h2 class="h3">Fits the tools your teams already use</h2>
+        <p class="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-soft">
+          Import from CAD, SketchUp, Revit and PDF. Single sign-on, audit trails
+          and dedicated support are available on enterprise agreements.
+        </p>
+        <a href="/contact/" class="btn-primary mt-7">Talk to us</a>
+      </div>
+    </div>
+  </section>
+</Base>

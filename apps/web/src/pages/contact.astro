@@ -1,0 +1,104 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+---
+
+<Base
+  title="Contact us"
+  description={`Get in touch with the ${brand.name} team.`}
+>
+  <section class="shell grid max-w-5xl gap-14 py-16 lg:grid-cols-2">
+    <div>
+      <p class="eyebrow">Contact</p>
+      <h1 class="h2 mt-3 text-balance">Tell us about your project</h1>
+      <p class="lede mt-4 text-pretty">
+        Whether you want a walkthrough of the product or you are sizing this up
+        for a whole practice, we will get back to you within one working day.
+      </p>
+    </div>
+
+    <form id="contact-form" novalidate class="card space-y-4">
+      <div>
+        <label for="c-name" class="mb-1.5 block text-sm font-medium">Name</label>
+        <input
+          id="c-name"
+          name="name"
+          type="text"
+          required
+          class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label for="c-email" class="mb-1.5 block text-sm font-medium">Email</label>
+        <input
+          id="c-email"
+          name="email"
+          type="email"
+          required
+          class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label for="c-org" class="mb-1.5 block text-sm font-medium"
+          >Company (optional)</label
+        >
+        <input
+          id="c-org"
+          name="organisation"
+          type="text"
+          class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+        />
+      </div>
+      <div>
+        <label for="c-msg" class="mb-1.5 block text-sm font-medium">Message</label>
+        <textarea
+          id="c-msg"
+          name="message"
+          rows="4"
+          required
+          class="w-full resize-y rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+        ></textarea>
+      </div>
+
+      <p id="c-status" role="status" class="hidden text-sm"></p>
+      <button type="submit" id="c-submit" class="btn-primary w-full">Send</button>
+    </form>
+  </section>
+</Base>
+
+<script>
+  import { api } from '../lib/api'
+
+  const form = document.getElementById('contact-form') as HTMLFormElement | null
+  const status = document.getElementById('c-status') as HTMLElement | null
+  const submit = document.getElementById('c-submit') as HTMLButtonElement | null
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const data = Object.fromEntries(new FormData(form))
+
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = 'Sending…'
+    }
+
+    try {
+      await api('/leads', { method: 'POST', body: { ...data, source: 'contact' }, auth: false })
+      if (status) {
+        status.textContent = 'Thanks — we will be in touch shortly.'
+        status.className = 'text-sm text-signal'
+      }
+      form.reset()
+    } catch {
+      if (status) {
+        status.textContent = 'Could not send that. Please try again.'
+        status.className = 'text-sm text-danger'
+      }
+    } finally {
+      if (submit) {
+        submit.disabled = false
+        submit.textContent = 'Send'
+      }
+    }
+  })
+</script>

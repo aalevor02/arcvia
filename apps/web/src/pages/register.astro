@@ -1,0 +1,185 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+---
+
+<Base
+  title="Create your account"
+  description={`Create a free ${brand.name} account. No card required.`}
+  noindex
+>
+  <section class="shell grid min-h-[70vh] max-w-5xl items-center gap-14 py-16 lg:grid-cols-2">
+    <div>
+      <p class="eyebrow">Free while in beta</p>
+      <h1 class="h2 mt-3 text-balance">Create your account</h1>
+      <p class="lede mt-4 text-pretty">
+        Full access to the studio, the configurator and GPU renders. No card, no
+        trial clock, nothing to cancel.
+      </p>
+
+      <ul class="mt-8 space-y-3 text-sm text-ink-soft">
+        {
+          [
+            'Unlimited projects and storage',
+            'Invite up to 5 team members',
+            '100 render credits per member each month',
+            'Export your models and stills at any time',
+          ].map((f) => (
+            <li class="flex items-start gap-2.5">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+              {f}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <div class="card">
+      <form id="register-form" novalidate class="space-y-4">
+        <div>
+          <label for="name" class="mb-1.5 block text-sm font-medium">Full name</label>
+          <input
+            id="name"
+            name="name"
+            type="text"
+            autocomplete="name"
+            required
+            class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label for="email" class="mb-1.5 block text-sm font-medium">Work email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            required
+            class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label for="organisation" class="mb-1.5 block text-sm font-medium"
+            >Practice or company</label
+          >
+          <input
+            id="organisation"
+            name="organisation"
+            type="text"
+            autocomplete="organization"
+            required
+            class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label for="phone" class="mb-1.5 block text-sm font-medium">Mobile</label>
+          <div class="flex gap-2">
+            <span
+              class="grid shrink-0 place-items-center rounded-lg border border-line px-3 text-sm text-ink-soft"
+              >+91</span
+            >
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              inputmode="numeric"
+              autocomplete="tel-national"
+              maxlength="10"
+              required
+              class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <p class="mt-1.5 text-xs text-ink-soft">
+            We send a one-time code to verify it.
+          </p>
+        </div>
+
+        <div>
+          <label for="password" class="mb-1.5 block text-sm font-medium">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+            required
+            class="w-full rounded-lg border border-line px-3.5 py-2.5 text-sm outline-none focus:border-accent"
+          />
+        </div>
+
+        <p
+          id="form-error"
+          role="alert"
+          class="hidden rounded-lg bg-danger/10 px-3.5 py-2.5 text-sm text-danger"
+        >
+        </p>
+
+        <button type="submit" id="submit" class="btn-primary w-full">
+          Create account
+        </button>
+
+        <p class="text-center text-xs leading-relaxed text-ink-soft">
+          By continuing you agree to our
+          <a href="/terms/" class="underline">terms</a> and
+          <a href="/privacy/" class="underline">privacy policy</a>.
+        </p>
+      </form>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { register } from '../lib/auth'
+
+  const form = document.getElementById('register-form') as HTMLFormElement | null
+  const errorBox = document.getElementById('form-error') as HTMLElement | null
+  const submit = document.getElementById('submit') as HTMLButtonElement | null
+
+  function showError(message: string) {
+    if (!errorBox) return
+    errorBox.textContent = message
+    errorBox.classList.remove('hidden')
+  }
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    errorBox?.classList.add('hidden')
+
+    const data = new FormData(form)
+    const payload = {
+      name: String(data.get('name') ?? '').trim(),
+      email: String(data.get('email') ?? '').trim().toLowerCase(),
+      organisation: String(data.get('organisation') ?? '').trim(),
+      phone: String(data.get('phone') ?? '').trim(),
+      password: String(data.get('password') ?? ''),
+    }
+
+    if (payload.password.length < 8) {
+      showError('Password must be at least 8 characters.')
+      return
+    }
+    if (!/^\d{10}$/.test(payload.phone)) {
+      showError('Enter a 10-digit mobile number.')
+      return
+    }
+
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = 'Creating account…'
+    }
+
+    try {
+      await register(payload)
+      window.location.href = '/verify/'
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Something went wrong.')
+      if (submit) {
+        submit.disabled = false
+        submit.textContent = 'Create account'
+      }
+    }
+  })
+</script>

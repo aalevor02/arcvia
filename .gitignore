@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.astro/
+.data/
+.venv/
+.env
+*.log
+det.json
+test-plan.png
+__pycache__/

@@ -1,0 +1,86 @@
+---
+import brand from '@arcvia/brand'
+
+const nav = [
+  { label: 'How it works', href: '/#how-it-works' },
+  { label: 'Features', href: '/#features' },
+  { label: 'Enterprise', href: '/enterprise/' },
+  { label: 'Pricing', href: '/pricing/' },
+  { label: 'FAQs', href: '/#faq' },
+]
+---
+
+<header
+  class="sticky top-0 z-40 border-b border-line/70 bg-surface/85 backdrop-blur-md"
+>
+  <div class="shell flex h-16 items-center justify-between gap-6">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+      <span
+        class="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-bold text-white"
+        aria-hidden="true">{brand.name.charAt(0)}</span
+      >
+      <span>{brand.name}</span>
+    </a>
+
+    <nav aria-label="Primary" class="hidden items-center gap-7 lg:flex">
+      {
+        nav.map((item) => (
+          <a
+            href={item.href}
+            class="text-sm text-ink-soft transition-colors hover:text-ink"
+          >
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <div class="flex items-center gap-3">
+      <!-- Rendered server-side as the signed-out state. The island below swaps
+           it for the account menu once it reads a session from storage. -->
+      <a href="/register/" class="hidden text-sm font-medium sm:inline-flex"
+        >Sign in</a
+      >
+      <a href="/register/" class="btn-primary !py-2 !px-4">Get started free</a>
+
+      <button
+        type="button"
+        id="nav-toggle"
+        class="grid h-9 w-9 place-items-center rounded-lg border border-line lg:hidden"
+        aria-label="Open menu"
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <path d="M2 5h14M2 9h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="mobile-nav" class="hidden border-t border-line bg-surface lg:hidden">
+    <nav aria-label="Mobile" class="shell flex flex-col py-3">
+      {
+        nav.map((item) => (
+          <a href={item.href} class="py-2.5 text-sm text-ink-soft hover:text-ink">
+            {item.label}
+          </a>
+        ))
+      }
+      <a href="/register/" class="py-2.5 text-sm font-medium">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<script>
+  // Plain DOM, no framework. A hamburger toggle does not justify shipping a
+  // component runtime to every visitor.
+  const toggle = document.getElementById('nav-toggle')
+  const panel = document.getElementById('mobile-nav')
+
+  toggle?.addEventListener('click', () => {
+    const open = panel?.classList.toggle('hidden') === false
+    toggle.setAttribute('aria-expanded', String(open))
+    toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu')
+  })
+</script>
