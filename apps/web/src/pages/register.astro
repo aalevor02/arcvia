@@ -1,6 +1,9 @@
 ---
 import brand from '@arcvia/brand'
 import Base from '../layouts/Base.astro'
+import { plans } from '@arcvia/brand/plans'
+
+const free = plans.free
 ---
 
 <Base
@@ -21,8 +24,8 @@ import Base from '../layouts/Base.astro'
         {
           [
             'Unlimited projects and storage',
-            'Invite up to 5 team members',
-            '100 render credits per member each month',
+            `Invite up to ${free.seats} team members`,
+            `${free.creditsPerSeat.toLocaleString('en-IN')} render credits per member each month`,
             'Export your models and stills at any time',
           ].map((f) => (
             <li class="flex items-start gap-2.5">

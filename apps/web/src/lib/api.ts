@@ -11,7 +11,29 @@
  * browser should ever know about.
  */
 
-const BASE = import.meta.env.PUBLIC_API_URL ?? 'http://localhost:8787'
+const API_PORT = 8787
+
+/**
+ * Where the API lives.
+ *
+ * An explicit PUBLIC_API_URL always wins — that is what production uses.
+ *
+ * Without one, we derive the API host from *the page's own hostname* rather
+ * than hard-coding `localhost`. This matters the moment anyone opens the site
+ * from a second device: on a phone at `http://192.168.1.36:4321`, `localhost`
+ * means the phone, so every request dies. Deriving the host means the same
+ * build works from the dev machine and from any device on the network, with no
+ * rebuild and no IP baked into the bundle.
+ */
+function resolveApiBase(): string {
+  const configured = import.meta.env.PUBLIC_API_URL
+  if (configured) return String(configured).replace(/\/$/, '')
+
+  if (typeof window === 'undefined') return `http://localhost:${API_PORT}`
+  return `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
+}
+
+const BASE = resolveApiBase()
 
 export class ApiError extends Error {
   constructor(
@@ -58,9 +80,19 @@ export async function api<T = unknown>(
             : JSON.stringify(body),
     })
   } catch {
-    // A network-level failure is not the same as a rejected request, and the
-    // user needs to be told which one happened.
-    throw new ApiError('Could not reach the server. Check your connection.', 0)
+    // `fetch` rejects identically for a dead server and for a CORS refusal —
+    // the browser deliberately withholds the difference from scripts. So the
+    // message names both possibilities instead of asserting the wrong one, and
+    // logs the URL that was actually attempted, which is the single most useful
+    // fact when the cause turns out to be a stale API host.
+    console.error(
+      `[api] request to ${BASE}${path} failed. Either the API is not running, ` +
+        `or it refused this origin (${globalThis.location?.origin}) via CORS.`,
+    )
+    throw new ApiError(
+      'Could not reach the server. It may be offline, or not accepting requests from this address.',
+      0,
+    )
   }
 
   if (response.status === 204) return undefined as T

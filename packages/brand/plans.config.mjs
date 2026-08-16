@@ -41,7 +41,16 @@ export const plans = {
     currency: 'INR',
     interval: null,
     seats: 5,
-    creditsPerSeat: 100,
+    // Effectively unlimited while the product is free. At this level the credit
+    // ledger is still recording every render — which is the point, because that
+    // usage data is what tells you where to set real limits later — but nobody
+    // will ever hit the ceiling in normal use.
+    //
+    // NOTE: this is no longer the thing protecting your GPU bill. The real
+    // guard is now RENDER_DAILY_CAP in services/api/src/lib/renderQueue.js
+    // (default 500 jobs/day across the whole install). Raise credits freely;
+    // raise that one deliberately.
+    creditsPerSeat: 100000,
     features: {
       walkthroughs: true,
       configurator: true,

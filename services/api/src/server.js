@@ -22,6 +22,36 @@ const ORIGINS = (
   .map((s) => s.trim())
   .filter(Boolean)
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
+/** Loopback, or an RFC1918 private LAN address. */
+const PRIVATE_HOST =
+  /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/
+
+/**
+ * Decide whether an Origin may call this API.
+ *
+ * Outside production we accept any origin on the local machine or the local
+ * network. The reason is practical: testing "works on any device" means opening
+ * the site from a phone, which arrives as `http://192.168.x.x:4321` — an origin
+ * nobody thought to allowlist, and whose IP changes whenever DHCP feels like it.
+ * Pinning the list to `localhost` makes every cross-device test fail with what
+ * looks like a server outage.
+ *
+ * In production this is strictly the configured list. No pattern matching.
+ */
+function isOriginAllowed(origin) {
+  if (ORIGINS.includes(origin)) return true
+  if (IS_PRODUCTION) return false
+
+  try {
+    const { hostname, protocol } = new URL(origin)
+    return protocol === 'http:' && PRIVATE_HOST.test(hostname)
+  } catch {
+    return false
+  }
+}
+
 const app = Fastify({
   logger: {
     level: process.env.LOG_LEVEL ?? 'info',
@@ -37,7 +67,15 @@ await app.register(cors, {
   origin(origin, cb) {
     // Same-origin and server-to-server calls arrive with no Origin header.
     if (!origin) return cb(null, true)
-    cb(null, ORIGINS.includes(origin))
+
+    const allowed = isOriginAllowed(origin)
+    if (!allowed) {
+      // Log it. A rejected origin surfaces in the browser as a generic network
+      // error with no server-side trace, which is close to undebuggable unless
+      // the refusal is written down somewhere.
+      app.log.warn({ origin }, 'CORS: origin rejected')
+    }
+    cb(null, allowed)
   },
   credentials: true,
 })

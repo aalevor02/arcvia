@@ -1,4 +1,13 @@
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8787'
+const API_PORT = 8787
+
+/**
+ * Derive the API host from the page's own hostname unless told otherwise.
+ * Hard-coding `localhost` breaks the moment the studio is opened from another
+ * device on the network — see the same note in apps/web/src/lib/api.ts.
+ */
+const API: string = import.meta.env.VITE_API_URL
+  ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
+  : `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
 
 export type RenderPreset = 'preview' | 'isometric' | 'full' | 'bake'
 
