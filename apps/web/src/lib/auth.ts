@@ -11,6 +11,9 @@ import {
 interface AuthResponse {
   token: string
   user: StoredUser
+  otpSent?: boolean
+  /** Present only in development when no SMS provider is configured. */
+  devCode?: string
 }
 
 export interface RegisterInput {
@@ -21,6 +24,9 @@ export interface RegisterInput {
   password: string
 }
 
+/** Where the development-only OTP is parked for the verify page to display. */
+export const DEV_CODE_KEY = 'arcvia.dev_otp'
+
 export async function register(input: RegisterInput): Promise<AuthResponse> {
   const result = await api<AuthResponse>('/auth/register', {
     method: 'POST',
@@ -28,6 +34,17 @@ export async function register(input: RegisterInput): Promise<AuthResponse> {
     auth: false,
   })
   saveSession(result.token, result.user)
+
+  // sessionStorage, not localStorage: this is a throwaway development
+  // convenience and it should not outlive the tab.
+  if (result.devCode) {
+    try {
+      sessionStorage.setItem(DEV_CODE_KEY, result.devCode)
+    } catch {
+      /* private mode — the code is still in the server log */
+    }
+  }
+
   return result
 }
 
@@ -44,19 +61,34 @@ export async function login(
   return result
 }
 
-export async function sendOtp(phone: string): Promise<void> {
-  await api('/auth/otp/send', {
+export interface OtpSendResult {
+  sent: boolean
+  phone?: string
+  expiresInSeconds?: number
+  alreadyVerified?: boolean
+  /** Present only in development when no SMS provider is configured. */
+  devCode?: string
+}
+
+/**
+ * Request a code for the signed-in user.
+ *
+ * Note what is *not* here: no `+91` prefixing. The client used to add it, which
+ * meant passing back an already-normalised number produced `+91+9198…` and a
+ * silent 400. The server owns normalisation now; callers send whatever they
+ * have, including nothing at all to reuse the number already on the account.
+ */
+export async function sendOtp(phone?: string): Promise<OtpSendResult> {
+  return api<OtpSendResult>('/auth/otp/send', {
     method: 'POST',
-    body: { phone: `+91${phone}` },
-    auth: false,
+    body: phone ? { phone } : {},
   })
 }
 
-export async function verifyOtp(phone: string, code: string): Promise<void> {
-  await api('/auth/otp/verify', {
+export async function verifyOtp(code: string): Promise<{ verified: boolean }> {
+  return api<{ verified: boolean }>('/auth/otp/verify', {
     method: 'POST',
-    body: { phone: `+91${phone}`, code },
-    auth: false,
+    body: { code },
   })
 }
 

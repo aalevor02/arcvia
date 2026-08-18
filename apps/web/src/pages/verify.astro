@@ -7,7 +7,16 @@ import Base from '../layouts/Base.astro'
     <div class="card w-full">
       <h1 class="h3">Verify your mobile</h1>
       <p class="mt-2 text-sm leading-relaxed text-ink-soft">
-        We sent a 6-digit code to the number you registered. Enter it below.
+        We sent a 6-digit code to <span id="otp-target" class="font-medium text-ink"
+          >the number you registered</span
+        >. Enter it below.
+      </p>
+
+      <p
+        id="otp-dev"
+        hidden
+        class="mt-4 rounded-lg border border-warn/40 bg-warn/10 px-3.5 py-2.5 font-mono text-sm text-ink"
+      >
       </p>
 
       <form id="otp-form" novalidate class="mt-6 space-y-4">
@@ -25,7 +34,7 @@ import Base from '../layouts/Base.astro'
           />
         </div>
 
-        <p id="otp-status" role="alert" class="hidden text-sm"></p>
+        <p id="otp-status" role="alert" hidden class="text-sm"></p>
 
         <button type="submit" id="otp-submit" class="btn-primary w-full">
           Verify
@@ -39,21 +48,41 @@ import Base from '../layouts/Base.astro'
 </Base>
 
 <script>
-  import { verifyOtp, sendOtp } from '../lib/auth'
+  import { verifyOtp, sendOtp, DEV_CODE_KEY } from '../lib/auth'
   import { getUser } from '../lib/api'
 
   const form = document.getElementById('otp-form') as HTMLFormElement | null
+  const input = document.getElementById('code') as HTMLInputElement | null
   const status = document.getElementById('otp-status') as HTMLElement | null
+  const submit = document.getElementById('otp-submit') as HTMLButtonElement | null
   const resend = document.getElementById('otp-resend') as HTMLButtonElement | null
+  const target = document.getElementById('otp-target') as HTMLElement | null
+  const devBox = document.getElementById('otp-dev') as HTMLElement | null
 
-  // The phone lives on the session the register step just stored, so the user
-  // never has to retype it.
-  const phone = (getUser() as { phone?: string } | null)?.phone ?? ''
+  // Nobody should reach this page without an account. Bounce them rather than
+  // showing a form whose every request will 401.
+  const user = getUser() as ({ phone?: string } | null)
+  if (!user) window.location.href = '/register/'
+
+  if (target && user?.phone) {
+    target.textContent = `+91 •••••${user.phone.slice(-5)}`
+  }
+
+  /** Development affordance: show the code when there is no SMS provider. */
+  function showDevCode(code: string | null) {
+    if (!code || !devBox) return
+    devBox.textContent = `Development mode — your code is ${code}`
+    devBox.hidden = false
+    if (input && !input.value) input.value = code
+  }
+
+  showDevCode(sessionStorage.getItem(DEV_CODE_KEY))
 
   function say(message: string, ok = false) {
     if (!status) return
     status.textContent = message
     status.className = `text-sm ${ok ? 'text-signal' : 'text-danger'}`
+    status.hidden = false
   }
 
   form?.addEventListener('submit', async (event) => {
@@ -65,25 +94,52 @@ import Base from '../layouts/Base.astro'
       return
     }
 
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = 'Verifying…'
+    }
+
     try {
-      await verifyOtp(phone, code)
+      await verifyOtp(code)
+      sessionStorage.removeItem(DEV_CODE_KEY)
       window.location.href = '/welcome/'
     } catch (err) {
       say(err instanceof Error ? err.message : 'That code did not work.')
+      if (submit) {
+        submit.disabled = false
+        submit.textContent = 'Verify'
+      }
     }
   })
 
   resend?.addEventListener('click', async () => {
     resend.disabled = true
     try {
-      await sendOtp(phone)
+      const result = await sendOtp()
+      if (result.alreadyVerified) {
+        window.location.href = '/welcome/'
+        return
+      }
       say('New code sent.', true)
-    } catch {
-      say('Could not resend. Try again in a moment.')
-    } finally {
-      // A short lockout stops someone hammering the SMS endpoint — every send
-      // costs money and repeated sends look like abuse to the SMS provider.
-      setTimeout(() => (resend.disabled = false), 30_000)
+      if (result.devCode) {
+        sessionStorage.setItem(DEV_CODE_KEY, result.devCode)
+        showDevCode(result.devCode)
+      }
+    } catch (err) {
+      say(err instanceof Error ? err.message : 'Could not resend. Try again shortly.')
     }
+
+    // Mirror the server's 30s cooldown so the button state matches reality
+    // instead of inviting a click that will 429.
+    let remaining = 30
+    const tick = setInterval(() => {
+      remaining -= 1
+      resend.textContent = remaining > 0 ? `Resend in ${remaining}s` : 'Resend code'
+      if (remaining <= 0) {
+        clearInterval(tick)
+        resend.disabled = false
+      }
+    }, 1000)
+    resend.textContent = `Resend in ${remaining}s`
   })
 </script>
