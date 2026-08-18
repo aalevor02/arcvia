@@ -8,3 +8,5 @@ dist/
 det.json
 test-plan.png
 __pycache__/
+.test/
+.test-api.log

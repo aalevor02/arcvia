@@ -270,13 +270,33 @@ def render_still(out_path: str) -> None:
 
 def bake_lightmap(out_path: str, spec: dict) -> None:
     """
-    Bake indirect lighting into textures.
+    Bake indirect lighting into a single shared texture atlas.
 
     This is the expensive one — it renders every surface in the scene rather
-    than one camera view. The payoff is that the published walkthrough then
-    plays back with photoreal lighting at real-time frame rates on a phone,
-    because the lighting is already in the texture.
+    than one camera view. The payoff is that the published walkthrough plays
+    back with photoreal lighting at real-time frame rates on a phone, because
+    the lighting is already in the texture.
+
+    ── The part that is easy to get wrong ───────────────────────────────────
+    Creating a UV layer with `uv_layers.new()` does NOT unwrap anything. The new
+    layer spans the full 0-1 square for every object, so every object bakes over
+    every other one. The result is a texture at 100% coverage with no gutters,
+    which looks like a successful bake right up until you apply it and every
+    surface is showing someone else's lighting.
+
+    A correct lightmap needs two things:
+
+      1. Per-object unwrapping with no self-overlap  (smart_project)
+      2. Each object occupying its OWN region of the shared atlas
+
+    Step 2 uses a uniform grid here: ceil(sqrt(n)) cells, one per object, UVs
+    scaled and offset into their cell. That is not an optimal packing — a large
+    floor gets the same texel budget as a doorknob — but it is correct, and
+    correctness was the thing missing. Area-weighted allocation is the obvious
+    next improvement.
     """
+    import math
+
     scene = bpy.context.scene
     scene.cycles.bake_type = "COMBINED"
     scene.render.bake.use_pass_direct = True
@@ -288,12 +308,69 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     if not meshes:
         raise RuntimeError("scene contains no mesh objects to bake")
 
-    image = bpy.data.images.new("ArcviaLightmap", width=size, height=size, float_buffer=True)
+    image = bpy.data.images.new(
+        "ArcviaLightmap", width=size, height=size, float_buffer=True
+    )
 
-    for obj in meshes:
+    cells = math.ceil(math.sqrt(len(meshes)))
+    cell = 1.0 / cells
+    # Keep islands off the cell boundary so the bake margin cannot bleed one
+    # object's lighting into its neighbour's region.
+    inset = 0.02 * cell
+
+    for index, obj in enumerate(meshes):
+        # Deselect INSIDE the loop, every iteration.
+        #
+        # This is not defensive tidying, it is load-bearing. `mode_set('EDIT')`
+        # enters multi-object edit mode for everything currently selected, and
+        # `smart_project` then unwraps all of them into the full 0-1 square. Let
+        # selections accumulate and each pass silently re-unwraps every object
+        # handled so far, destroying the atlas cells already assigned to them.
+        # Only the final object survives correctly — and the bake looks
+        # plausible enough that the corruption is easy to miss.
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+
+        # 1. A dedicated lightmap UV channel, kept separate from the artist's
+        #    texture UVs (which usually overlap deliberately, for tiling).
+        uv_name = "ArcviaLightmapUV"
+        if uv_name in obj.data.uv_layers:
+            obj.data.uv_layers.remove(obj.data.uv_layers[uv_name])
+        uv_layer = obj.data.uv_layers.new(name=uv_name)
+        obj.data.uv_layers.active = uv_layer
+
+        # BOTH of these are required, and they are not the same thing.
+        #
+        #   .active        = the row highlighted in the UI list. This is what
+        #                    smart_project unwraps into.
+        #   .active_render = the layer with the camera icon. This is what the
+        #                    renderer and the BAKE actually read.
+        #
+        # Setting only `.active` produces a bake that silently ignores the
+        # atlas and uses whatever UV map came in with the model — every object
+        # spanning 0-1, all stacked on top of each other. It looks like a
+        # successful bake and the output is worthless.
+        uv_layer.active_render = True
+
+        # 2. Actually unwrap. This is the step whose absence caused the bug.
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.04)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        # 3. Squeeze this object's unwrap into its own atlas cell.
+        col, row = index % cells, index // cells
+        for loop_uv in obj.data.uv_layers[uv_name].data:
+            u, v = loop_uv.uv
+            loop_uv.uv = (
+                col * cell + inset + u * (cell - 2 * inset),
+                row * cell + inset + v * (cell - 2 * inset),
+            )
+
+        # 4. Point every material at the shared bake target.
         if not obj.data.materials:
             obj.data.materials.append(bpy.data.materials.new(f"{obj.name}_mat"))
-
         for material in obj.data.materials:
             if material is None:
                 continue
@@ -303,22 +380,18 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
             node.select = True
             material.node_tree.nodes.active = node
 
-        # A second UV channel keeps the bake's non-overlapping layout separate
-        # from the artist's texture UVs, which usually do overlap deliberately.
-        if "ArcviaLightmapUV" not in obj.data.uv_layers:
-            obj.data.uv_layers.new(name="ArcviaLightmapUV")
-        obj.data.uv_layers.active = obj.data.uv_layers["ArcviaLightmapUV"]
+        obj.select_set(True)
 
-    bpy.ops.object.select_all(action="DESELECT")
     for obj in meshes:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = meshes[0]
-
     bpy.ops.object.bake(type="COMBINED", use_clear=True)
 
     image.filepath_raw = out_path
     image.file_format = "PNG"
     image.save()
+
+    print(f"ARCVIA_BAKE_CELLS:{cells}x{cells} objects:{len(meshes)}", flush=True)
 
 
 # --------------------------------------------------------------------------
