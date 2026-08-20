@@ -217,3 +217,40 @@ Cheap, and each one removes a specific tell:
 - Window reveals and cills as separate profiles rather than a flat cut.
 - Real GLB furniture. The parametric stand-ins are correctly *dimensioned*,
   which is what they are for; they are not what makes a render sell a flat.
+
+### The bake, verified end to end
+
+One button in the studio: export the live scene to GLB with its lightmap UVs,
+upload, queue, poll, apply the returned atlas, stand the real-time rig down.
+
+Measured on a furnished 6.4 x 4.6 m living room, 79 meshes, CPU Cycles:
+
+| | |
+|---|---|
+| bake time | ~30 min (no CUDA/HIP device on this machine) |
+| atlas | 2048², 8-bit, 9x9 grid, 69 of 79 cells lit |
+| download | 2.4 MB denoised (5.9 MB before) |
+| runtime cost | nothing — it is a texture |
+
+What it buys, visibly: warm daylight pooling on the wall under each window,
+soft falloff across the wall opposite, the window wall correctly sitting in its
+own shade, and colour bleeding up from the timber floor. None of that is
+reachable from the real-time path at any setting.
+
+**Denoising is not optional, and Cycles will not do it for you.** There is no
+`bake.use_denoising`; `cycles.use_denoising` is the render path only. A raw
+256-sample atlas is covered in speckle that more samples barely touch. Routing
+it through the compositor's Denoise node fixed it *and* cut the file to 40% —
+denoised images compress far better, which is a second win nobody mentions.
+
+**Adaptive sampling is wrong for bakes.** It is tuned against what a camera
+will show, and an atlas has no camera. Worse, the texels it retires early are
+the low-variance ones, so the noise it leaves sits precisely in the indirect
+light that is the reason for baking.
+
+### The gap that remains is assets, not code
+
+The parametric catalogue is correctly *dimensioned* — that is what it is for,
+and it is what makes clearances checkable. It is not what sells a flat. Real
+GLB furniture is the remaining distance to the reference page, and it is a
+sourcing decision rather than an engineering one.
