@@ -5,7 +5,7 @@ import multipart from '@fastify/multipart'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerOrgRoutes } from './routes/organisation.js'
 import { registerSceneRoutes } from './routes/scenes.js'
-import { registerRenderRoutes } from './routes/render.js'
+import { registerRenderRoutes, reconcileRenderJobs } from './routes/render.js'
 import { registerLeadRoutes } from './routes/leads.js'
 import { registerBillingRoutes } from './routes/billing.js'
 import { registerReferralRoutes } from './routes/referral.js'
@@ -77,6 +77,13 @@ app.setErrorHandler((error, request, reply) => {
     code: error.code,
   })
 })
+
+// Before accepting traffic: nothing from a previous life of this process is
+// still running, so any job that still claims to be is abandoned. Failing and
+// refunding them here is the difference between a deploy costing users credits
+// and a deploy being invisible.
+const reclaimed = await reconcileRenderJobs()
+if (reclaimed > 0) app.log.warn(`Reclaimed ${reclaimed} render job(s) orphaned by a restart`)
 
 try {
   await app.listen({ port: PORT, host: HOST })

@@ -45,14 +45,14 @@ function uvBounds(mesh: THREE.Mesh) {
   const g = group(9)
   const result = assignLightmapUVs(g)
 
-  check('grid is ceil(sqrt(n))', result.cells === 3, String(result.cells))
+  check('grid is ceil(sqrt(n))', result.grid === 3, String(result.grid))
   check('every mesh counted', result.meshes === 9, String(result.meshes))
   check('every mesh got uv1', meshesOf(g).every((m) => Boolean(m.geometry.getAttribute('uv1'))))
   check('every mesh got uv2 as well', meshesOf(g).every((m) => Boolean(m.geometry.getAttribute('uv2'))))
 
   // 10 meshes needs a 4x4 grid, not 3x3.
-  check('grid grows with mesh count', assignLightmapUVs(group(10)).cells === 4)
-  check('a single mesh needs one cell', assignLightmapUVs(group(1)).cells === 1)
+  check('grid grows with mesh count', assignLightmapUVs(group(10)).grid === 4)
+  check('a single mesh needs one cell', assignLightmapUVs(group(1)).grid === 1)
   check('an empty group is handled', assignLightmapUVs(new THREE.Group()).meshes === 0)
 }
 
@@ -94,8 +94,8 @@ function uvBounds(mesh: THREE.Mesh) {
 // lands on the neighbouring cell.
 {
   const g = group(4)
-  const { cells } = assignLightmapUVs(g)
-  const step = 1 / cells
+  const { grid } = assignLightmapUVs(g)
+  const step = 1 / grid
   const b = uvBounds(meshesOf(g)[0])
 
   check('each cell is inset from its edges',

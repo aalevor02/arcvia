@@ -139,3 +139,81 @@ app; `apps/visualisation` publishes output but has no authoring console.
 - **Payment gates and trial clocks.** `billingEnabled: false` is a product
   decision, and every feature here respects it rather than working around it.
 - **A licensed third-party walkthrough exporter.** `packages/viewer` is ours.
+
+---
+
+## Realism: what actually closes the gap
+
+Recorded after a session spent measuring rather than guessing, because most of
+the intuitive answers here turned out to be wrong.
+
+### The gap is not texture resolution
+
+The reference walkthrough (`visualisation.propall.tech/raghava-linq-a-2388-40-48`)
+is a Shapespark export of a **studio-modelled** scene: 5.8M faces, 520
+materials, 5 baked atlases. Their own *editor* renders untextured grey — the
+polish is in the asset, not the renderer. So "make the editor output look like
+that page" is two separate problems, and only one of them is code:
+
+1. lighting that knows the room is enclosed — **solved by baking**
+2. geometry and materials at furniture-catalogue quality — **an asset problem**
+
+### Image-based lighting has no occlusion, and that is the whole story
+
+`RoomEnvironment` lights every surface from every direction with no regard for
+what is in the way. An enclosed room is therefore lit as though it had no
+walls: uniform, sourceless, and instantly readable as computer graphics. No
+amount of tuning the sun, the exposure or the materials fixes it, because
+nothing in the real-time path knows the room is a room.
+
+A baked lightmap does know. It path-traces the actual enclosure once, offline,
+and stores the answer — so corners darken, light pools where a window lets it
+in, and colour bleeds between surfaces. Then it costs nothing per frame,
+because it is a texture. This is why the reference bakes, and it is the single
+highest-value thing in this whole document.
+
+### Measured, on an Intel Iris Xe
+
+| | per frame |
+|---|---|
+| plain render, 664 triangles | ~1.4 ms |
+| with the GTAO post chain | ~2.2 ms |
+| first frame (shader compilation, once) | 12–30 s |
+
+Screen-space AO is affordable and is on by default. It is the stand-in that
+makes the editor look right *while you work* — including furniture the instant
+it is placed — and the bake is the finish.
+
+**Do not measure frame cost from an automated browser.** A tab that is not
+visible has `requestAnimationFrame` throttled *and* stops presenting frames, so
+the swap chain fills and the draw call itself starts blocking. Both methods
+then report seconds per frame for a scene that draws in two milliseconds. This
+produced a completely wrong conclusion once already ("GTAO is unusable on
+integrated graphics") and cost an afternoon. `SceneViewer.lastFrameMs` is
+guarded on `document.visibilityState` for the same reason — without it,
+switching tabs would permanently disable AO for real users.
+
+### Small geometry, large effect
+
+Cheap, and each one removes a specific tell:
+
+- **Skirting boards.** A wall meeting a floor at a perfectly clean line is
+  wrong in a way the eye catches before the mind does.
+- **Corner posts.** Walls are boxes centred on their graph edge, so every
+  external corner had a wedge of daylight missing from it.
+- **A sky background.** Windows are the brightest thing in an interior
+  photograph and the eye calibrates on them. Against a black void they came out
+  *darker* than the walls, and the whole image read as an object floating in
+  space rather than a room inside a building.
+- **Glass must not cast shadows.** Three.js shadow maps store depth only, so a
+  transparent material casts a fully opaque shadow — every glazed window was
+  blocking daylight exactly as well as the wall around it.
+
+### Still open
+
+- Normal maps on plaster, timber and tile. Surfaces catch light flatly without
+  them.
+- A cornice or shadow gap at the wall/ceiling junction.
+- Window reveals and cills as separate profiles rather than a flat cut.
+- Real GLB furniture. The parametric stand-ins are correctly *dimensioned*,
+  which is what they are for; they are not what makes a render sell a flat.

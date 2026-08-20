@@ -311,7 +311,14 @@ function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
       return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
     }
     case 'fabric': {
-      const { map, roughness } = fabric(220, 46)
+      // Warm oatmeal, not navy.
+      //
+      // A dark saturated blue is the wrong default for upholstery and badly
+      // wrong for curtains: a 2.3 m panel of it beside a bright window becomes
+      // the darkest thing in the frame, so the eye goes straight to it and
+      // reads the room as a set of coloured blocks. Undyed linen is both the
+      // commonest real finish and the one that lets everything else be seen.
+      const { map, roughness } = fabric(34, 70)
       map.repeat.set(2, 2)
       roughness.repeat.copy(map.repeat)
       return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })

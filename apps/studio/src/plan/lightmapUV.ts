@@ -31,22 +31,24 @@ const CELL_INSET = 0.06
  *
  * Returns the grid size, which the baker needs in its spec.
  */
-export function assignLightmapUVs(root: THREE.Object3D): { cells: number; meshes: number } {
+export function assignLightmapUVs(root: THREE.Object3D): { grid: number; meshes: number } {
   const meshes: THREE.Mesh[] = []
   root.traverse((child) => {
     if (child instanceof THREE.Mesh && child.geometry) meshes.push(child)
   })
 
-  if (meshes.length === 0) return { cells: 0, meshes: 0 }
+  if (meshes.length === 0) return { grid: 0, meshes: 0 }
 
-  const cells = Math.ceil(Math.sqrt(meshes.length))
+  // The side of a square grid, not a count of occupied cells: 5 meshes get a
+  // 3x3 grid and leave four cells empty.
+  const grid = Math.ceil(Math.sqrt(meshes.length))
 
   meshes.forEach((mesh, index) => {
-    const column = index % cells
-    const row = Math.floor(index / cells)
+    const column = index % grid
+    const row = Math.floor(index / grid)
 
     const uv = unwrap(mesh.geometry)
-    packIntoCell(uv, column, row, cells)
+    packIntoCell(uv, column, row, grid)
 
     // glTF calls this TEXCOORD_1; Three calls it uv1 (r152+) or uv2 (earlier).
     // Setting both keeps the exporter and the material happy across versions.
@@ -54,7 +56,7 @@ export function assignLightmapUVs(root: THREE.Object3D): { cells: number; meshes
     mesh.geometry.setAttribute('uv2', uv.clone())
   })
 
-  return { cells, meshes: meshes.length }
+  return { grid, meshes: meshes.length }
 }
 
 /**
@@ -127,9 +129,9 @@ function packIntoCell(
   uv: THREE.BufferAttribute,
   column: number,
   row: number,
-  cells: number,
+  grid: number,
 ): void {
-  const step = 1 / cells
+  const step = 1 / grid
   const inset = step * CELL_INSET
   const span = step - inset * 2
 

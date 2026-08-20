@@ -106,8 +106,98 @@ def apply_environment(hdri_path: str | None, strength: float = 1.0) -> None:
         env = nodes.new("ShaderNodeTexEnvironment")
         env.image = bpy.data.images.load(hdri_path)
         links.new(env.outputs["Color"], background.inputs["Color"])
-    else:
-        background.inputs["Color"].default_value = (0.05, 0.05, 0.06, 1.0)
+        return
+
+    # No HDRI: a physical sky, not a dark grey constant.
+    #
+    # ── Why the old default was the single worst thing here ─────────────────
+    # It was (0.05, 0.05, 0.06) — very nearly black. With no lights either, a
+    # bake of an unlit scene came back almost entirely dark: the first verified
+    # atlas measured 0.062 mean brightness. Applied as a lightmap it *darkens*
+    # the model, so the feature that exists to make interiors look real was
+    # making them look worse, and doing it without any error.
+    #
+    # A sky texture also gives the thing an interior most needs: light arriving
+    # through the window openings from a bright hemisphere, rather than uniform
+    # ambient from nowhere. That is the difference between a room and a box.
+    try:
+        sky = nodes.new("ShaderNodeTexSky")
+
+        # Chosen from the enum this Blender actually has, rather than named.
+        # The physical sky was `NISHITA` in 3.x and 4.0 and is
+        # `MULTIPLE_SCATTERING` in 5.1; hard-coding either one means the other
+        # version quietly falls through to the fallback colour and the bake
+        # loses its sky without saying so. That is exactly what happened here
+        # the first time, and the only visible symptom was a flatter image.
+        available = {item.identifier for item in sky.bl_rna.properties["sky_type"].enum_items}
+        for candidate in ("MULTIPLE_SCATTERING", "NISHITA", "HOSEK_WILKIE", "PREETHAM"):
+            if candidate in available:
+                sky.sky_type = candidate
+                break
+
+        # Every one of these is optional: the property set differs per sky type
+        # and per version, and a missing one must cost us that single setting
+        # rather than the whole sky.
+        for name, value in (
+            ("sun_elevation", 0.94),  # ~54 degrees, mid-morning
+            ("sun_rotation", 2.4),
+            ("altitude", 0.0),
+            # Slightly hazy. A perfectly clear sky is a very small, very hard
+            # source, which puts razor-edged shadows in an interior and reads
+            # as unfinished rather than as sunny.
+            ("air_density", 1.6),
+            ("dust_density", 2.2),
+        ):
+            if hasattr(sky, name):
+                try:
+                    setattr(sky, name, value)
+                except (AttributeError, TypeError):
+                    pass
+
+        links.new(sky.outputs["Color"], background.inputs["Color"])
+        print(f"ARCVIA_WORLD:sky:{sky.sky_type}", flush=True)
+    except (AttributeError, TypeError, RuntimeError) as exc:
+        # A bright neutral is a poor substitute for a sky, but an immeasurably
+        # better failure than the near-black this used to default to.
+        background.inputs["Color"].default_value = (0.55, 0.62, 0.74, 1.0)
+        print(f"ARCVIA_WARN:sky unavailable ({exc}); using flat daylight", flush=True)
+
+
+def default_daylight() -> None:
+    """
+    A sun, when the scene arrived without a light rig.
+
+    Mirrors `addDefaultRig()` in packages/viewer — deliberately, and this is the
+    one thing in this file that must be kept in step with the browser by hand.
+    The whole premise of the viewer living in a shared package is that the
+    editor preview and the published walkthrough cannot drift apart; a bake lit
+    differently from the preview reintroduces exactly that drift, in the one
+    operation whose entire purpose is to make the preview permanent.
+
+    Browser rig: DirectionalLight(0xfff2e0, 2.6) at (6, 9, 4) aimed at origin,
+    in Three.js Y-up. Converted here to Blender's Z-up as (x, -z, y).
+    """
+    from mathutils import Vector
+
+    light = bpy.data.lights.new("ArcviaSun", type="SUN")
+    light.color = (1.0, 0.949, 0.878)  # 0xfff2e0
+    # Watts per square metre, not a Three.js intensity — the two scales are
+    # unrelated. 3.2 is a bright but not blown-out daylight sun.
+    light.energy = 3.2
+    # Angular diameter. The real sun is about half a degree; opening it up
+    # softens shadow edges, which is most of what separates a photograph from a
+    # ray-traced image.
+    light.angle = 0.035
+
+    sun = bpy.data.objects.new("ArcviaSun", light)
+    bpy.context.scene.collection.objects.link(sun)
+
+    # (6, 9, 4) in Three.js -> (6, -4, 9) in Blender.
+    position = Vector((6.0, -4.0, 9.0))
+    sun.location = position
+    # A sun lamp emits along its local -Z, so rotate that axis onto the
+    # direction from the lamp toward the origin.
+    sun.rotation_euler = Vector((0.0, 0.0, -1.0)).rotation_difference(-position.normalized()).to_euler()
 
 
 def apply_lights(lights: list[dict]) -> None:
@@ -298,9 +388,26 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     import math
 
     scene = bpy.context.scene
-    scene.cycles.bake_type = "COMBINED"
+
+    # DIFFUSE without the colour pass — not COMBINED.
+    #
+    # ── The distinction, and why it is not cosmetic ─────────────────────────
+    # COMBINED bakes fully shaded output: light *times* surface colour. That is
+    # a finished picture of the surface.
+    #
+    # The browser attaches this atlas as a Three.js `lightMap`, and a lightMap
+    # is **multiplied** by the material's albedo. Feed it COMBINED and albedo is
+    # applied twice — a mid-grey wall renders at a quarter of its brightness,
+    # timber goes muddy, and every colour in the scene oversaturates. It looks
+    # like a lighting problem and it is a units problem.
+    #
+    # What a lightMap wants is irradiance: how much light *arrives* at the
+    # surface, with no colour of its own. That is DIFFUSE with direct and
+    # indirect on and `use_pass_color` off.
+    scene.cycles.bake_type = "DIFFUSE"
     scene.render.bake.use_pass_direct = True
     scene.render.bake.use_pass_indirect = True
+    scene.render.bake.use_pass_color = False
     scene.render.bake.margin = int(spec.get("bakeMargin", 8))
 
     size = int(spec.get("width", 2048))
@@ -411,13 +518,69 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     for obj in meshes:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = meshes[0]
-    bpy.ops.object.bake(type="COMBINED", use_clear=True)
+    bpy.ops.object.bake(type="DIFFUSE", use_clear=True)
 
-    image.filepath_raw = out_path
-    image.file_format = "PNG"
-    image.save()
+    # Save through the scene's image settings rather than image.save(), which
+    # writes the float buffer at 16 bits per channel: a 2048 atlas came out at
+    # 6.1 MB, and that file is downloaded by every browser that opens the
+    # walkthrough.
+    #
+    # 8 bits is the right depth for this particular image. A lightmap is
+    # low-frequency — broad gradients of shade, no detail — and it is
+    # *multiplied* over an albedo texture rather than shown directly, so
+    # banding that would be visible in a photograph is not visible here. The
+    # extra 8 bits per channel buy nothing anybody can see and roughly quadruple
+    # the download.
+    settings = bpy.context.scene.render.image_settings
+    settings.file_format = "PNG"
+    settings.color_mode = "RGB"
+    settings.color_depth = "8"
+    settings.compression = 90
+
+    # `save_render` applies the scene's view transform, and modern Blender
+    # defaults that to AgX — a film emulation designed to make a *photograph*
+    # look good. This atlas is not a photograph, it is a table of irradiance
+    # values that the browser multiplies by albedo. Grading it rolls off the
+    # highlights and lifts the shadows, so every baked room comes back flatter
+    # and greyer than it was lit, and no setting in the viewer can undo it.
+    #
+    # Standard is a plain sRGB encode: what was computed is what is stored.
+    view = bpy.context.scene.view_settings
+    previous = view.view_transform
+    for candidate in ("Standard", "Raw", "None"):
+        try:
+            view.view_transform = candidate
+            break
+        except TypeError:
+            continue
+    try:
+        view.look = "None"
+    except TypeError:
+        pass
+
+    # Said out loud, because the failure is otherwise invisible: a graded atlas
+    # still bakes, still saves, still loads, and merely makes every room flatter
+    # than it was lit. The names come from the OCIO config, so a future Blender
+    # renaming them must not fail quietly.
+    if view.view_transform not in ("Standard", "Raw", "None"):
+        print(
+            f"ARCVIA_WARN:could not disable the view transform (still {view.view_transform}); "
+            "the lightmap will be tone-mapped and will bake flat",
+            flush=True,
+        )
+
+    # 8-bit means irradiance above 1.0 clips — a patch of direct sun on a floor
+    # saturates. That is an accepted trade for quartering the download: interior
+    # irradiance is below 1.0 nearly everywhere, and a blown-out sun patch is
+    # what a photograph of that floor would show anyway.
+    image.save_render(filepath=out_path, scene=bpy.context.scene)
+    view.view_transform = previous
 
     print(f"ARCVIA_BAKE_CELLS:{cells}x{cells} objects:{len(meshes)}", flush=True)
+    try:
+        print(f"ARCVIA_BAKE_BYTES:{Path(out_path).stat().st_size}", flush=True)
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -442,6 +605,13 @@ def main() -> int:
     if spec.get("lightsUrl"):
         with open(fetch(spec["lightsUrl"], ".json"), encoding="utf-8") as handle:
             apply_lights(json.load(handle).get("lights", []))
+    elif not hdri_path:
+        # Nothing authored a rig and there is no environment map, so the scene
+        # would render with sky light alone: soft, directionless, and with no
+        # daylight falling through the windows. The editor is not showing that,
+        # so neither should this.
+        default_daylight()
+        print("ARCVIA_LIGHTS:default-daylight", flush=True)
 
     setup_camera(spec.get("camera"))
     configure_cycles(spec)

@@ -53,6 +53,22 @@ interface Box {
   height: number
 }
 
+/**
+ * Tones that must not cast a shadow.
+ *
+ * Three.js shadow maps store depth only, so a transparent material casts a
+ * *fully opaque* shadow — the shadow map has no idea the surface can be seen
+ * through. Left alone, a glazed window blocks the sun exactly as well as the
+ * wall around it, and the daylight that should be pouring across the floor
+ * never arrives. The room then looks evenly, sourcelessly lit, which is the
+ * single most reliable way to make an interior read as a computer model.
+ *
+ * A set rather than a `transparent` check on the material, because a material
+ * can legitimately be transparent and still block light — frosted glass, a
+ * blind. This is the list of things daylight passes through.
+ */
+const TRANSMITS_LIGHT = new Set(['glass'])
+
 /** A box positioned by its centre, in the object's local frame. */
 function block(
   group: THREE.Group,
@@ -62,7 +78,7 @@ function block(
 ): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material(tone))
   mesh.position.set(...at)
-  mesh.castShadow = true
+  mesh.castShadow = !TRANSMITS_LIGHT.has(tone)
   mesh.receiveShadow = true
   group.add(mesh)
 }
@@ -79,7 +95,7 @@ function cylinder(
     material(tone),
   )
   mesh.position.set(...at)
-  mesh.castShadow = true
+  mesh.castShadow = !TRANSMITS_LIGHT.has(tone)
   group.add(mesh)
 }
 

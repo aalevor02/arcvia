@@ -4,13 +4,28 @@ import { allowedTypes, open, put, UnsupportedType } from '../lib/storage.js'
 /**
  * File uploads, and serving them back.
  *
- * Only floor-plan rasters for now — the drawings people trace over. Models and
- * HDRIs are much larger and should go straight to object storage when that path
- * exists, rather than being routed through here because it was convenient.
+ * Two kinds, deliberately on separate routes rather than one endpoint that
+ * sniffs and decides: they have different size limits, different prefixes and
+ * different lifetimes, and a single route would have to grow a mode flag to
+ * express that anyway.
+ *
+ *   /floorplan  drawings to trace over
+ *   /scene      generated geometry on its way to the render worker
+ *
+ * HDRIs and anything else genuinely large should go to object storage through
+ * a presigned URL when that path exists, rather than being added here because
+ * it was convenient.
  */
 
 /** Floor plans are photographs of drawings, not textures. 12 MB is generous. */
 const MAX_BYTES = 12 * 1024 * 1024
+
+/**
+ * Generated scenes are bigger, and they are transient — they exist to be handed
+ * to Blender and are content-addressed, so re-baking an unchanged scene reuses
+ * the same file rather than adding another.
+ */
+const MAX_SCENE_BYTES = 64 * 1024 * 1024
 
 export async function registerUploadRoutes(app) {
   app.post('/floorplan', { preHandler: requireAuth }, async (request, reply) => {
@@ -52,6 +67,37 @@ export async function registerUploadRoutes(app) {
       }
       throw error
     }
+  })
+
+  /**
+   * Scene geometry, on its way to the render worker.
+   *
+   * The studio exports what it has generated and posts it here; the render job
+   * then names the stored URL as its input. The worker fetches it over HTTP,
+   * which is why this has to be servable and not just written to a temp path.
+   */
+  app.post('/scene', { preHandler: requireAuth }, async (request, reply) => {
+    const file = await request.file()
+    if (!file) return reply.status(400).send({ message: 'No file was uploaded.' })
+
+    const buffer = await file.toBuffer()
+
+    if (buffer.length > MAX_SCENE_BYTES) {
+      return reply.status(413).send({
+        message: `That scene is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_SCENE_BYTES / 1024 / 1024} MB.`,
+      })
+    }
+
+    if (sniff(buffer) !== 'model/gltf-binary') {
+      return reply
+        .status(415)
+        .send({ message: 'A scene must be a binary glTF (.glb).' })
+    }
+
+    const stored = await put(buffer, 'model/gltf-binary', {
+      prefix: `scenes/${request.auth.userId}`,
+    })
+    return reply.status(201).send(stored)
   })
 
   /**
@@ -107,6 +153,9 @@ function sniff(buffer) {
   if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
     return 'image/jpeg'
   }
+
+  // glTF binary: magic 'glTF' followed by a version word.
+  if (buffer.toString('ascii', 0, 4) === 'glTF') return 'model/gltf-binary'
 
   // WebP: "RIFF" .... "WEBP"
   if (

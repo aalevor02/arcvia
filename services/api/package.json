@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch src/server.js",
     "start": "node --env-file-if-exists=../../.env src/server.js",
-    "test": "node test/referral-and-reset.mjs && node test/uploads.mjs && node test/detect.mjs"
+    "test": "node test/referral-and-reset.mjs && node test/uploads.mjs && node test/detect.mjs && node test/bake.mjs"
   },
   "dependencies": {
     "@arcvia/brand": "*",

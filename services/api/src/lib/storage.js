@@ -45,6 +45,10 @@ const ALLOWED = new Map([
   ['image/png', '.png'],
   ['image/jpeg', '.jpg'],
   ['image/webp', '.webp'],
+  // Scene geometry on its way to the render worker, and baked results coming
+  // back. Binary glTF only — the .gltf + separate-buffer form is several files
+  // that have to stay together, and half an upload is worse than none.
+  ['model/gltf-binary', '.glb'],
 ])
 
 export const allowedTypes = () => [...ALLOWED.keys()]
@@ -131,3 +135,26 @@ function pathFor(key) {
 
 /** A short opaque id, for keys that should not be content-addressed. */
 export const opaqueId = () => randomBytes(12).toString('hex')
+
+/**
+ * Turn a stored public URL back into something the render worker can open.
+ *
+ * The studio stores `/uploads/scenes/<user>/<hash>.glb` — a relative path,
+ * deliberately. Storing the absolute URL instead would bake in whichever
+ * hostname the browser happened to use, so a scene saved from `192.168.1.36`
+ * would be unreachable from a worker resolving `localhost`, and vice versa.
+ *
+ * With a local worker the file is already on disk, so hand it the path and skip
+ * the HTTP round trip entirely. Anything already absolute is somebody else's
+ * URL and passes through untouched.
+ *
+ * Returns null for a path that is ours but escapes the storage root — the
+ * caller should refuse the job rather than hand the worker a surprise.
+ */
+export function resolveUrl(url) {
+  if (!url) return null
+  if (/^https?:\/\//i.test(url)) return url
+  if (!url.startsWith(`${PUBLIC_PREFIX}/`)) return url
+
+  return pathFor(url.slice(PUBLIC_PREFIX.length + 1))
+}

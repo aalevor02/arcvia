@@ -2,6 +2,7 @@ import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
 import { spend, refund, InsufficientCredits } from '../lib/credits.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
+import { resolveUrl } from '../lib/storage.js'
 
 /**
  * Render jobs.
@@ -52,6 +53,43 @@ const PRESETS = {
   },
 }
 
+/**
+ * Reclaim jobs that a restart orphaned.
+ *
+ * The queue's `running` map is in memory. When the process goes down — a
+ * deploy, a crash, a file watcher noticing an edit — the Blender child dies
+ * with it, so nothing is ever going to call `finish()` for the jobs it was
+ * tracking. Left alone they sit at `rendering` forever: the client polls until
+ * its own timeout, the row never resolves, and the credits stay spent for work
+ * that produced nothing.
+ *
+ * So on boot, anything still claiming to be queued or rendering is by
+ * definition abandoned — this process has just started and is running none of
+ * them — and is failed and refunded.
+ *
+ * Refunds at the current tariff rather than the recorded `creditsCharged`,
+ * which is what the cancel and callback paths already do. If prices ever move,
+ * all three want changing together.
+ */
+export async function reconcileRenderJobs() {
+  const orphans = await db.find(
+    'renderJobs',
+    (j) => j.status === 'queued' || j.status === 'rendering',
+  )
+
+  for (const job of orphans) {
+    await db.update('renderJobs', job.id, {
+      status: 'failed',
+      error: 'The render server restarted while this job was running.',
+    })
+    if (PRESETS[job.preset]) {
+      await refund(job.ownerId, PRESETS[job.preset].action, { jobId: job.id, reason: 'restart' })
+    }
+  }
+
+  return orphans.length
+}
+
 export async function registerRenderRoutes(app) {
   // ---- Submit a job ------------------------------------------------------
   app.post('/jobs', { preHandler: requireAuth }, async (request, reply) => {
@@ -79,6 +117,16 @@ export async function registerRenderRoutes(app) {
       return reply
         .status(409)
         .send({ message: 'Save the scene before rendering it.' })
+    }
+
+    // Resolved here rather than at the worker, because only this side knows
+    // where the storage root is. Null means the stored URL points outside it,
+    // which is not a render failure to be retried — it is a broken record.
+    const inputUrl = resolveUrl(scene.modelUrl)
+    if (!inputUrl) {
+      return reply
+        .status(409)
+        .send({ message: "That scene's model file could not be located." })
     }
 
     // Charge before queueing. Charging on completion sounds fairer but lets a
@@ -109,9 +157,9 @@ export async function registerRenderRoutes(app) {
       // The browser works in Y-up (Three.js); Blender is Z-up. Getting this
       // wrong produces a render that is silently rotated 90 degrees.
       spec: {
-        inputUrl: scene.modelUrl,
-        lightsUrl: scene.lightsUrl ?? null,
-        hdriUrl: hdriUrl ?? scene.hdriUrl ?? null,
+        inputUrl,
+        lightsUrl: resolveUrl(scene.lightsUrl),
+        hdriUrl: resolveUrl(hdriUrl ?? scene.hdriUrl),
         camera: {
           position: toBlenderVec(cameraPosition),
           rotation: cameraRotation ?? null,
@@ -122,6 +170,14 @@ export async function registerRenderRoutes(app) {
         maxBounces: config.maxBounces,
         diffuseBounces: config.diffuseBounces,
         type: preset === 'bake' ? 'bake' : 'render',
+        // The studio lays out lightmap UVs itself before exporting, so the
+        // worker must bake into the channel it was sent rather than unwrapping
+        // its own. See apps/studio/src/plan/lightmapUV.ts — if the two layouts
+        // disagree, every surface lights with some other surface's bake.
+        //
+        // Only claimed when the caller says so: a model uploaded from outside
+        // the studio has no such channel and does need unwrapping.
+        prebakedUv: preset === 'bake' && Boolean(request.body?.prebakedUv),
       },
       outputUrl: null,
       error: null,
@@ -153,6 +209,12 @@ export async function registerRenderRoutes(app) {
       progress: live?.progress ?? job.progress,
       outputUrl: job.outputUrl,
       error: job.error,
+      // Live while it runs, persisted once it is done. A bake reports no
+      // progress, so this is what the client has to show instead of a bar
+      // stuck at zero — and `markers.device` is the answer to "why is this
+      // taking six minutes", which is CPU Cycles nine times out of ten.
+      elapsedMs: live?.elapsedMs ?? null,
+      markers: live?.markers ?? job.markers ?? {},
     }
   })
 

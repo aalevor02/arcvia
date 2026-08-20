@@ -657,3 +657,21 @@ select:focus {
   border-color: var(--accent);
   background: rgba(47, 109, 246, 0.12);
 }
+
+/*
+ * The indeterminate progress bar.
+ *
+ * Used when a job genuinely cannot report progress — a Blender bake is one
+ * atomic call that returns nothing until it is finished. Sweeping says
+ * "running"; a bar parked at 0% says "stuck", and they are very different
+ * messages to send someone waiting six minutes.
+ */
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still distinguishable from a real 0%, without the movement. */
+  [style*='sweep'] { animation: none !important; opacity: 0.55; }
+}

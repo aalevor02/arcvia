@@ -16,6 +16,24 @@ export interface RenderUpdate {
   progress: number
   outputUrl?: string | null
   error?: string | null
+  /**
+   * Milliseconds since the job started, or null if it is not running.
+   *
+   * The only honest thing to show during a bake. `bpy.ops.object.bake()` is a
+   * single call that reports nothing until it returns, so `progress` stays at 0
+   * for the whole run — and a bar frozen at 0% for six minutes reads as a
+   * hang, not as work in progress.
+   */
+  elapsedMs?: number | null
+  /**
+   * Diagnostics the worker printed about itself: `device` (CUDA / HIP / CPU),
+   * `bake_uv` (prebaked or smart-project), `bake_cells` (the atlas grid).
+   *
+   * `device` is worth showing while a bake runs: on a machine without a CUDA
+   * or HIP device Cycles falls back to the CPU, and that single fact explains
+   * essentially every "why is this so slow" question.
+   */
+  markers?: Record<string, string>
 }
 
 function authHeaders(): HeadersInit {
@@ -30,6 +48,13 @@ export async function submitRender(input: {
   sceneId: string
   preset: RenderPreset
   camera: { position: unknown; rotation: unknown }
+  /**
+   * The scene already carries lightmap UVs, so bake into those rather than
+   * unwrapping fresh ones. Only meaningful for the bake preset, and only true
+   * when the studio generated the geometry — a model imported from elsewhere
+   * has no such channel and genuinely does need unwrapping.
+   */
+  prebakedUv?: boolean
 }): Promise<{ jobId: string; creditsRemaining: number }> {
   const response = await fetch(`${API}/render/jobs`, {
     method: 'POST',
@@ -39,6 +64,7 @@ export async function submitRender(input: {
       preset: input.preset,
       cameraPosition: input.camera.position,
       cameraRotation: input.camera.rotation,
+      prebakedUv: input.prebakedUv ?? false,
     }),
   })
 

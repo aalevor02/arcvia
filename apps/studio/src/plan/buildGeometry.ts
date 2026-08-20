@@ -38,13 +38,24 @@ export interface BuildOptions {
   /** Floor finish. Per-room finishes are a materials-editor feature; this is
    *  the whole-floor default until that exists. */
   floorFinish?: 'floor-wood' | 'floor-tile'
+  /** Skirting boards around each room. On by default — see the build. */
+  skirting?: boolean
 }
+
+/** Metres. A standard domestic skirting: 100 mm tall, 18 mm proud of the wall. */
+const SKIRTING_HEIGHT = 0.1
+const SKIRTING_PROUD = 0.018
 
 export function buildFloorGeometry(
   floor: Floor,
   options: BuildOptions = {},
 ): THREE.Group {
-  const { slabThickness = 0.12, ceilings = false, floorFinish = 'floor-wood' } = options
+  const {
+    slabThickness = 0.12,
+    ceilings = false,
+    floorFinish = 'floor-wood',
+    skirting = true,
+  } = options
 
   const group = new THREE.Group()
   group.name = `floor:${floor.id}`
@@ -54,6 +65,9 @@ export function buildFloorGeometry(
   const wallMaterial = surface('wall')
   const slabMaterial = surface(floorFinish)
   const ceilingMaterial = surface('ceiling')
+  // Painted timber, not the floor finish: skirting that matches the floor
+  // exactly disappears into it, which defeats the point of having it.
+  const skirtingMaterial = surface('ceiling')
 
   // ---- Walls ---------------------------------------------------------------
   const objects = Object.values(floor.objects ?? {})
@@ -92,6 +106,26 @@ export function buildFloorGeometry(
     }
   }
 
+  // ---- Corner posts --------------------------------------------------------
+  // Walls are boxes centred on their graph edge, so where two meet they overlap
+  // in the middle and leave a wedge of nothing on the outside of the corner —
+  // a visible notch of daylight in every external corner of the building.
+  //
+  // A square post at each vertex, as thick as the fattest wall arriving there,
+  // fills it. Deliberately not solved by lengthening the walls: the opening
+  // positions are measured along the wall's true length, and stretching the
+  // geometry would silently shift every door and window along it.
+  for (const post of cornerPosts(floor)) {
+    const geometry = new THREE.BoxGeometry(post.size, post.height, post.size)
+    const mesh = new THREE.Mesh(geometry, wallMaterial)
+    mesh.position.set(post.at.x, floor.elevation + post.height / 2, -post.at.y)
+    mesh.rotation.y = post.bearing
+    mesh.name = `corner:${post.vertexId}`
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    group.add(mesh)
+  }
+
   // ---- Floor slabs ---------------------------------------------------------
   // One per detected room rather than a single big rectangle, so a plan with a
   // courtyard or an L-shaped footprint does not get floor where there is none.
@@ -114,6 +148,28 @@ export function buildFloorGeometry(
       ceiling.position.y = floor.elevation + height
       ceiling.name = `ceiling:${room.id}`
       group.add(ceiling)
+    }
+
+    // ---- Skirting ----------------------------------------------------------
+    // A hundred millimetres of timber where the wall meets the floor.
+    //
+    // Small, and the single most effective piece of detail in the whole model.
+    // Every real room has one, and a wall meeting a floor at a perfectly clean
+    // line is something the eye reads as *wrong* long before it can say why —
+    // it is the same tell as a corner with no shadow in it. It also gives the
+    // junction an edge for light to catch, so the room stops looking like it
+    // was folded out of paper.
+    if (skirting) {
+      for (const run of skirtingRuns(floor, room.polygon, room.loop)) {
+        const geometry = new THREE.BoxGeometry(run.length, SKIRTING_HEIGHT, SKIRTING_PROUD)
+        const mesh = new THREE.Mesh(geometry, skirtingMaterial)
+        mesh.position.set(run.centre.x, floor.elevation + SKIRTING_HEIGHT / 2, -run.centre.y)
+        mesh.rotation.y = run.bearing
+        mesh.name = `skirting:${room.id}`
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        group.add(mesh)
+      }
     }
   }
 
@@ -241,6 +297,127 @@ export function buildPlanGeometry(floors: Floor[], options?: BuildOptions): THRE
   group.name = 'plan'
   for (const floor of floors) group.add(buildFloorGeometry(floor, options))
   return group
+}
+
+/**
+ * A square post at every vertex where walls meet, filling the corner notch.
+ *
+ * Sized to the thickest wall arriving, and turned to that wall's bearing, so a
+ * 230 mm external corner gets a 230 mm post aligned with the wall rather than
+ * with the world — an axis-aligned post on a wall running at 30° would stick
+ * out of both faces.
+ *
+ * Vertices with a single wall are skipped: there is no corner there, and a post
+ * would just be a lump on the end of a wall.
+ */
+function cornerPosts(floor: Floor): {
+  vertexId: string
+  at: Vec2
+  size: number
+  height: number
+  bearing: number
+}[] {
+  const meeting = new Map<string, { thickness: number; height: number; bearing: number }[]>()
+
+  for (const wall of Object.values(floor.walls)) {
+    const a = floor.vertices[wall.a]
+    const b = floor.vertices[wall.b]
+    if (!a || !b || distance(a, b) < 1e-4) continue
+
+    const bearing = -Math.atan2(b.y - a.y, b.x - a.x)
+    for (const id of [wall.a, wall.b]) {
+      const list = meeting.get(id) ?? []
+      list.push({ thickness: wall.thickness, height: wall.height, bearing })
+      meeting.set(id, list)
+    }
+  }
+
+  const posts = []
+  for (const [vertexId, walls] of meeting) {
+    if (walls.length < 2) continue
+
+    const vertex = floor.vertices[vertexId]
+    if (!vertex) continue
+
+    // The fattest wall decides the post. Anything smaller leaves part of the
+    // notch open, which is the whole failure being fixed.
+    const fattest = walls.reduce((widest, w) => (w.thickness > widest.thickness ? w : widest))
+
+    posts.push({
+      vertexId,
+      at: { x: vertex.x, y: vertex.y },
+      size: fattest.thickness,
+      // The tallest, for the same reason: a short post under a tall wall
+      // leaves a gap at the top of the corner instead of the bottom.
+      height: Math.max(...walls.map((w) => w.height)),
+      bearing: fattest.bearing,
+    })
+  }
+
+  return posts
+}
+
+/**
+ * Where skirting runs along one room's walls, and how long each length is.
+ *
+ * The room polygon follows wall *centrelines*, so the visible face of the wall
+ * is half a thickness inboard of it — and the skirting sits against that face,
+ * proud by its own depth again. Getting this offset wrong is not subtle: the
+ * skirting either floats in the middle of the room or is buried in the wall.
+ *
+ * Rooms come out of `detectRooms` counter-clockwise, so the interior is always
+ * to the left of each directed edge and the inward normal is the same rotation
+ * every time. That is a property worth relying on — the alternative is a
+ * point-in-polygon test per edge.
+ */
+function skirtingRuns(
+  floor: Floor,
+  polygon: Vec2[],
+  loop: string[],
+): { centre: Vec2; length: number; bearing: number }[] {
+  const runs = []
+
+  for (let i = 0; i < polygon.length; i++) {
+    const from = polygon[i]
+    const to = polygon[(i + 1) % polygon.length]
+
+    const length = distance(from, to)
+    if (length < 1e-4) continue
+
+    const direction = normalise(sub(to, from))
+    // Left of the direction of travel, which for a counter-clockwise loop is
+    // into the room.
+    const inward = { x: -direction.y, y: direction.x }
+
+    const thickness = wallBetween(floor, loop[i], loop[(i + 1) % loop.length])
+    const offset = thickness / 2 + SKIRTING_PROUD / 2
+
+    runs.push({
+      centre: {
+        x: (from.x + to.x) / 2 + inward.x * offset,
+        y: (from.y + to.y) / 2 + inward.y * offset,
+      },
+      // Shortened by a thickness so two runs meeting at a corner stop against
+      // each other's faces instead of crossing through them. Overlapping
+      // skirting produces a bright z-fighting seam exactly at eye-catching
+      // corner height.
+      length: Math.max(length - thickness, 0.01),
+      bearing: -Math.atan2(to.y - from.y, to.x - from.x),
+    })
+  }
+
+  return runs
+}
+
+/** The thickness of the wall joining two vertices, or a sane default. */
+function wallBetween(floor: Floor, a: string, b: string): number {
+  const wall = Object.values(floor.walls).find(
+    (w) => (w.a === a && w.b === b) || (w.a === b && w.b === a),
+  )
+  // A room edge with no wall behind it should not happen — rooms are derived
+  // from walls — but a default beats a NaN offset that puts the skirting
+  // somewhere unrenderable.
+  return wall?.thickness ?? 0.115
 }
 
 /**

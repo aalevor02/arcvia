@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { extname, resolve } from 'node:path'
 import { db } from '../store.js'
+import { put } from './storage.js'
 
 /**
  * Render queue.
@@ -32,8 +34,21 @@ const SCRIPT = resolve(
  */
 const CONCURRENCY = Number(process.env.RENDER_CONCURRENCY ?? 1)
 
-/** Hard ceiling on a single job. A runaway scene cannot bill for hours. */
+/**
+ * Hard ceiling on a single job. A runaway scene cannot bill for hours.
+ *
+ * Two of them, because a bake and a still are not the same kind of work. A
+ * still renders one camera; a bake path-traces every surface in the building
+ * into an atlas, and on a machine without a CUDA or HIP device Cycles falls
+ * back to the CPU, where a furnished room is comfortably tens of minutes. One
+ * ceiling for both means either the bake is killed just before it finishes —
+ * having already spent all of that CPU — or stills get a limit far looser than
+ * they need.
+ */
 const JOB_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS ?? 10 * 60 * 1000)
+const BAKE_TIMEOUT_MS = Number(process.env.BAKE_TIMEOUT_MS ?? 45 * 60 * 1000)
+
+const timeoutFor = (job) => (job.preset === 'bake' ? BAKE_TIMEOUT_MS : JOB_TIMEOUT_MS)
 
 /**
  * Daily cap on completed jobs across the whole install. Once hit, submissions
@@ -61,10 +76,19 @@ export async function queueDepth() {
 
 export async function jobStatus(jobId) {
   if (running.has(jobId)) {
-    return { status: 'rendering', progress: running.get(jobId).progress ?? 0 }
+    const entry = running.get(jobId)
+    return {
+      status: 'rendering',
+      progress: entry.progress ?? 0,
+      // Both are here for the same reason: a bake reports no progress at all,
+      // so "how long has this been going" and "is it on the CPU" are the only
+      // honest things left to tell the user while they wait.
+      elapsedMs: Date.now() - entry.startedAt,
+      markers: entry.markers ?? {},
+    }
   }
   if (pending.some((j) => j.id === jobId)) {
-    return { status: 'queued', progress: 0 }
+    return { status: 'queued', progress: 0, elapsedMs: 0, markers: {} }
   }
   return null
 }
@@ -163,12 +187,15 @@ async function start(job) {
     return
   }
 
+  const limit = timeoutFor(job)
   const timer = setTimeout(() => {
     child.kill('SIGTERM')
-    void finish('failed', { error: `Render exceeded ${JOB_TIMEOUT_MS / 1000}s and was stopped.` })
-  }, JOB_TIMEOUT_MS)
+    void finish('failed', {
+      error: `${job.preset === 'bake' ? 'Bake' : 'Render'} exceeded ${Math.round(limit / 60000)} minutes and was stopped.`,
+    })
+  }, limit)
 
-  const entry = { child, startedAt: Date.now(), progress: 0, timer }
+  const entry = { child, startedAt: Date.now(), progress: 0, markers: {}, timer }
   running.set(job.id, entry)
 
   let stderr = ''
@@ -178,12 +205,26 @@ async function start(job) {
     const text = String(chunk)
     // Blender prints "Fra:1 Mem:… | Sample 12/32" — parse it for real progress
     // instead of showing an indeterminate spinner for minutes.
+    //
+    // A *bake* prints no such line. `bpy.ops.object.bake()` is a single atomic
+    // call that reports nothing until it returns, so progress legitimately sits
+    // at zero for the whole of the slowest operation there is. A client must
+    // say "running, N minutes in" rather than draw a bar that has not moved —
+    // see the elapsed-time fallback in the studio.
     const sample = text.match(/Sample (\d+)\/(\d+)/)
     if (sample) {
       entry.progress = Math.round((Number(sample[1]) / Number(sample[2])) * 100)
     }
-    const written = text.match(/ARCVIA_OUTPUT:(\S+)/)
-    if (written) outputPath = written[1]
+
+    // The worker's own markers: ARCVIA_DEVICE, ARCVIA_BAKE_UV, ARCVIA_BAKE_CELLS.
+    // Kept because they answer the questions actually asked about a slow or
+    // wrong-looking bake — which device it ran on, whether it used the UVs it
+    // was sent, how many atlas cells it packed — and none of them survives the
+    // process exiting.
+    for (const [, key, value] of text.matchAll(/ARCVIA_([A-Z_]+):(.*)/g)) {
+      if (key === 'OUTPUT') outputPath = value.trim()
+      else if (key !== 'ERROR') entry.markers[key.toLowerCase()] = value.trim()
+    }
   })
 
   child.stderr.on('data', (chunk) => {
@@ -198,11 +239,39 @@ async function start(job) {
   child.on('close', (code) => {
     if (!running.has(job.id)) return // already cancelled or timed out
     if (code === 0 && outputPath) {
-      void finish('done', { progress: 100, outputUrl: outputPath })
+      void publish(outputPath, job)
+        .then((url) =>
+          finish('done', { progress: 100, outputUrl: url, markers: entry.markers }),
+        )
+        .catch((err) =>
+          finish('failed', { error: `Render finished but could not be stored: ${err.message}` }),
+        )
     } else {
       void finish('failed', {
         error: stderr.trim().split('\n').slice(-3).join('\n') || `Blender exited ${code}`,
       })
     }
   })
+}
+
+/**
+ * Move a finished render into storage and return a URL the browser can fetch.
+ *
+ * Blender writes to a temporary directory and prints the path. That path was
+ * previously stored as `outputUrl` verbatim — which is a filesystem path on
+ * the server, not a URL, so a completed render was unreachable from the client
+ * that asked for it. The job reported "done" and there was nothing to show.
+ *
+ * Storing it content-addressed also means an identical re-render costs no extra
+ * disk, and the URL is immutable enough to cache forever.
+ */
+async function publish(outputPath, job) {
+  const bytes = await readFile(outputPath)
+  const contentType = extname(outputPath) === '.glb' ? 'model/gltf-binary' : 'image/png'
+
+  const stored = await put(bytes, contentType, {
+    prefix: `renders/${job.ownerId}`,
+  })
+
+  return stored.url
 }

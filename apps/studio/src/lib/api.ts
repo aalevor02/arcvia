@@ -282,3 +282,41 @@ export const detectFloorplan = (url: string) =>
     method: 'POST',
     body: { url },
   })
+
+/**
+ * Upload generated scene geometry, on its way to the render worker.
+ *
+ * Separate from `uploadFloorplan` because the two differ in every way that
+ * matters — size limit, storage prefix, lifetime — and a single function with a
+ * "kind" flag would just be those differences spelled out at the call site.
+ */
+export async function uploadScene(blob: Blob): Promise<StoredFile> {
+  const body = new FormData()
+  body.append('file', blob, 'scene.glb')
+
+  const token = getToken()
+  const response = await fetch(`${BASE}/uploads/scene`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  })
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  if (!response.ok) {
+    throw new ApiError(
+      typeof payload.message === 'string' ? payload.message : 'Scene upload failed.',
+      response.status,
+    )
+  }
+
+  // Returned as stored — a path, not absolutised. Unlike a floor-plan raster
+  // this URL's consumer is the API itself, which resolves it against its own
+  // storage root. Absolutising here would write whichever hostname this browser
+  // happens to be using into the scene record, so a scene saved from a phone on
+  // the LAN would be unreachable from the same machine on localhost.
+  return payload as unknown as StoredFile
+}
+
+/** Absolutise a stored path against the API origin, for loading in the page. */
+export const storedUrl = (path: string): string =>
+  path.startsWith('/') ? BASE + path : path
