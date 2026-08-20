@@ -1,0 +1,356 @@
+import * as THREE from 'three'
+
+/**
+ * Surface materials, generated rather than downloaded.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * Untextured geometry reads as a diagram no matter how good the lighting is.
+ * Every surface returning the same flat grey removes the single strongest cue
+ * the eye uses to tell a room from a model of a room: that different things are
+ * made of different stuff.
+ *
+ * ── Why procedural and not a texture library ────────────────────────────────
+ * The reference product serves a CDN of photographed maps. Those are better,
+ * and they are also an asset pipeline this codebase does not have. Canvas-drawn
+ * maps cost nothing to ship, need no network, and get most of the way there —
+ * because at walking distance what sells a floor is the *scale and direction of
+ * its grain*, not the fidelity of individual pixels.
+ *
+ * Each generator returns albedo plus a matching roughness map. Roughness is
+ * what makes a material read as a material under moving light: polished stone
+ * throws a highlight that travels, plaster does not. A single colour map with
+ * uniform roughness still looks like plastic.
+ */
+
+/** Canvas size for generated maps. 512 is ample at architectural viewing distance. */
+const SIZE = 512
+
+/**
+ * Whether textures can be generated at all.
+ *
+ * They need a DOM canvas, and the geometry builders that use these materials
+ * are also exercised in Node by the test suite — where `document` does not
+ * exist. Rather than let that hard-dependency make the geometry untestable
+ * headlessly, materials fall back to flat colours when there is no DOM.
+ *
+ * This is the right split: a texture is a *rendering* concern, and the tests
+ * assert shape — wall positions, opening cuts, room areas. Nothing they check
+ * depends on what a surface looks like.
+ */
+const CAN_DRAW = typeof document !== 'undefined' && typeof document.createElement === 'function'
+
+/** Flat stand-ins, used only when there is no DOM to draw maps on. */
+const FLAT: Record<string, number> = {
+  'floor-wood': 0xa8794f,
+  'floor-tile': 0xcac6c0,
+  wall: 0xd8d4cc,
+  ceiling: 0xeceef1,
+  fabric: 0x76809a,
+  wood: 0xa8794f,
+  stone: 0xcac6c0,
+  metal: 0xb9c0cb,
+  glass: 0xcfe3ee,
+  plant: 0x4e7c42,
+  white: 0xf1f3f6,
+}
+
+function canvas(): { ctx: CanvasRenderingContext2D; el: HTMLCanvasElement } {
+  const el = document.createElement('canvas')
+  el.width = SIZE
+  el.height = SIZE
+  const ctx = el.getContext('2d')
+  if (!ctx) throw new Error('This browser cannot provide a 2D canvas context.')
+  return { ctx, el }
+}
+
+function toTexture(el: HTMLCanvasElement, srgb: boolean): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(el)
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  // Albedo is colour and must be decoded; roughness is data and must not be,
+  // or the surface comes out uniformly too smooth.
+  texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
+  texture.anisotropy = 8
+  return texture
+}
+
+/** Deterministic noise, so a rebuild does not reshuffle every surface. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0xffffffff
+  }
+}
+
+// ---- Generators ------------------------------------------------------------
+
+/** Plank flooring: long boards with grain, a seam every plank, subtle tone drift. */
+function woodFloor(): { map: THREE.Texture; roughness: THREE.Texture } {
+  const { ctx, el } = canvas()
+  const random = seeded(7)
+
+  const PLANKS = 6
+  const plankHeight = SIZE / PLANKS
+
+  for (let i = 0; i < PLANKS; i++) {
+    // Each board a slightly different tone — a floor of identical boards
+    // reads as wallpaper.
+    const shade = 34 + random() * 16
+    ctx.fillStyle = `hsl(28, 38%, ${shade}%)`
+    ctx.fillRect(0, i * plankHeight, SIZE, plankHeight)
+
+    // Grain: long, low-contrast strokes along the board.
+    ctx.strokeStyle = `hsla(26, 40%, ${shade - 9}%, .5)`
+    ctx.lineWidth = 1
+    for (let g = 0; g < 26; g++) {
+      const y = i * plankHeight + random() * plankHeight
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.bezierCurveTo(SIZE * 0.3, y + (random() - 0.5) * 5, SIZE * 0.7, y + (random() - 0.5) * 5, SIZE, y)
+      ctx.stroke()
+    }
+
+    // The seam between boards.
+    ctx.fillStyle = 'rgba(0,0,0,.30)'
+    ctx.fillRect(0, i * plankHeight, SIZE, 1.5)
+
+    // Staggered butt joint, so the boards do not all end in a line.
+    const joint = random() * SIZE
+    ctx.fillRect(joint, i * plankHeight, 1.5, plankHeight)
+  }
+
+  // Roughness: seams and grain are rougher than the board face, which is what
+  // makes a highlight break across a plank instead of sliding over it.
+  const rough = canvas()
+  rough.ctx.fillStyle = '#9a9a9a'
+  rough.ctx.fillRect(0, 0, SIZE, SIZE)
+  rough.ctx.drawImage(el, 0, 0)
+  rough.ctx.globalCompositeOperation = 'saturation'
+  rough.ctx.fillStyle = '#808080'
+  rough.ctx.fillRect(0, 0, SIZE, SIZE)
+
+  return { map: toTexture(el, true), roughness: toTexture(rough.el, false) }
+}
+
+/** Painted plaster: near-flat, with just enough tonal drift to catch light. */
+function plaster(hue: number, lightness: number): { map: THREE.Texture; roughness: THREE.Texture } {
+  const { ctx, el } = canvas()
+  const random = seeded(19)
+
+  ctx.fillStyle = `hsl(${hue}, 12%, ${lightness}%)`
+  ctx.fillRect(0, 0, SIZE, SIZE)
+
+  // Broad, very soft mottling. Anything crisp here reads as dirt.
+  for (let i = 0; i < 90; i++) {
+    const r = 40 + random() * 90
+    const x = random() * SIZE
+    const y = random() * SIZE
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, r)
+    const delta = (random() - 0.5) * 5
+    gradient.addColorStop(0, `hsla(${hue}, 12%, ${lightness + delta}%, .5)`)
+    gradient.addColorStop(1, `hsla(${hue}, 12%, ${lightness + delta}%, 0)`)
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  const rough = canvas()
+  rough.ctx.fillStyle = '#d4d4d4' // matt emulsion
+  rough.ctx.fillRect(0, 0, SIZE, SIZE)
+
+  return { map: toTexture(el, true), roughness: toTexture(rough.el, false) }
+}
+
+/** Large-format tile with grout lines — kitchens, bathrooms, balconies. */
+function tile(): { map: THREE.Texture; roughness: THREE.Texture } {
+  const { ctx, el } = canvas()
+  const random = seeded(43)
+
+  const TILES = 4
+  const size = SIZE / TILES
+  const grout = 3
+
+  ctx.fillStyle = '#b9b4ad'
+  ctx.fillRect(0, 0, SIZE, SIZE)
+
+  for (let x = 0; x < TILES; x++) {
+    for (let y = 0; y < TILES; y++) {
+      const shade = 79 + random() * 7
+      ctx.fillStyle = `hsl(35, 8%, ${shade}%)`
+      ctx.fillRect(x * size + grout, y * size + grout, size - grout * 2, size - grout * 2)
+
+      // Faint veining, so a wall of tiles is not a grid of identical squares.
+      ctx.strokeStyle = `hsla(35, 10%, ${shade - 11}%, .5)`
+      ctx.lineWidth = 1
+      for (let v = 0; v < 3; v++) {
+        ctx.beginPath()
+        ctx.moveTo(x * size + random() * size, y * size)
+        ctx.lineTo(x * size + random() * size, y * size + size)
+        ctx.stroke()
+      }
+    }
+  }
+
+  // Grout is matt; the tile face is polished. That contrast is most of what
+  // makes tile look like tile under a moving camera.
+  const rough = canvas()
+  rough.ctx.fillStyle = '#c8c8c8'
+  rough.ctx.fillRect(0, 0, SIZE, SIZE)
+  rough.ctx.fillStyle = '#2e2e2e'
+  for (let x = 0; x < TILES; x++) {
+    for (let y = 0; y < TILES; y++) {
+      rough.ctx.fillRect(x * size + grout, y * size + grout, size - grout * 2, size - grout * 2)
+    }
+  }
+
+  return { map: toTexture(el, true), roughness: toTexture(rough.el, false) }
+}
+
+/** Woven fabric, for upholstery. */
+function fabric(hue: number, lightness: number): { map: THREE.Texture; roughness: THREE.Texture } {
+  const { ctx, el } = canvas()
+
+  ctx.fillStyle = `hsl(${hue}, 14%, ${lightness}%)`
+  ctx.fillRect(0, 0, SIZE, SIZE)
+
+  // A visible weave at close range; at walking distance it just softens the
+  // surface, which is the point.
+  const step = 4
+  ctx.strokeStyle = `hsla(${hue}, 14%, ${lightness - 8}%, .55)`
+  ctx.lineWidth = 1
+  for (let i = 0; i < SIZE; i += step) {
+    ctx.beginPath()
+    ctx.moveTo(i, 0)
+    ctx.lineTo(i, SIZE)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(0, i + step / 2)
+    ctx.lineTo(SIZE, i + step / 2)
+    ctx.stroke()
+  }
+
+  const rough = canvas()
+  rough.ctx.fillStyle = '#e8e8e8' // fabric scatters; almost no specular
+  rough.ctx.fillRect(0, 0, SIZE, SIZE)
+
+  return { map: toTexture(el, true), roughness: toTexture(rough.el, false) }
+}
+
+// ---- Material registry -----------------------------------------------------
+
+export type SurfaceKind =
+  | 'floor-wood'
+  | 'floor-tile'
+  | 'wall'
+  | 'ceiling'
+  | 'fabric'
+  | 'wood'
+  | 'stone'
+  | 'metal'
+  | 'glass'
+  | 'plant'
+  | 'white'
+
+const cache = new Map<SurfaceKind, THREE.MeshStandardMaterial>()
+
+/**
+ * One material instance per surface kind, shared by every mesh that uses it.
+ *
+ * Three does not deduplicate materials. A room with two hundred objects each
+ * holding its own would compile two hundred shader programs for what is really
+ * a dozen, and the first frame would visibly stall.
+ */
+export function surface(kind: SurfaceKind): THREE.MeshStandardMaterial {
+  const existing = cache.get(kind)
+  if (existing) return existing
+
+  const material = build(kind)
+  cache.set(kind, material)
+  return material
+}
+
+function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
+  if (!CAN_DRAW) {
+    return new THREE.MeshStandardMaterial({
+      color: FLAT[kind] ?? 0xb0b6be,
+      roughness: kind === 'metal' ? 0.32 : kind === 'glass' ? 0.05 : 0.85,
+      metalness: kind === 'metal' ? 0.85 : 0,
+      transparent: kind === 'glass',
+      opacity: kind === 'glass' ? 0.22 : 1,
+    })
+  }
+
+  switch (kind) {
+    case 'floor-wood': {
+      const { map, roughness } = woodFloor()
+      // One texture tile per 1.2 m of floor. Set here rather than per mesh so
+      // the grain runs at the same scale in every room — a floor whose planks
+      // change size between rooms is instantly wrong.
+      map.repeat.set(1 / 1.2, 1 / 1.2)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+    }
+    case 'floor-tile': {
+      const { map, roughness } = tile()
+      map.repeat.set(1 / 2.4, 1 / 2.4)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+    }
+    case 'wall': {
+      const { map, roughness } = plaster(38, 82)
+      map.repeat.set(1 / 3, 1 / 3)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+    }
+    case 'ceiling': {
+      const { map, roughness } = plaster(0, 92)
+      map.repeat.set(1 / 3, 1 / 3)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+    }
+    case 'fabric': {
+      const { map, roughness } = fabric(220, 46)
+      map.repeat.set(2, 2)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+    }
+    case 'wood': {
+      const { map, roughness } = woodFloor()
+      map.repeat.set(1, 1)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 0.85, metalness: 0 })
+    }
+    case 'stone': {
+      const { map, roughness } = tile()
+      map.repeat.set(0.5, 0.5)
+      roughness.repeat.copy(map.repeat)
+      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 0.6, metalness: 0 })
+    }
+    case 'metal':
+      return new THREE.MeshStandardMaterial({ color: 0xb9c0cb, roughness: 0.32, metalness: 0.85 })
+    case 'glass':
+      return new THREE.MeshStandardMaterial({
+        color: 0xcfe3ee,
+        roughness: 0.05,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.22,
+      })
+    case 'plant':
+      return new THREE.MeshStandardMaterial({ color: 0x4e7c42, roughness: 0.85, metalness: 0 })
+    case 'white':
+      return new THREE.MeshStandardMaterial({ color: 0xf1f3f6, roughness: 0.5, metalness: 0 })
+  }
+}
+
+/** Release every generated texture and material. Called on viewer teardown. */
+export function disposeSurfaces(): void {
+  for (const material of cache.values()) {
+    material.map?.dispose()
+    material.roughnessMap?.dispose()
+    material.dispose()
+  }
+  cache.clear()
+}

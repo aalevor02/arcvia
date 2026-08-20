@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { CatalogueItem, PlacedObject } from './types'
 import { itemById } from './items'
 import { elevationOf, sizeOf } from './placement'
+import { surface, type SurfaceKind } from '../plan/materials'
 
 /**
  * Parametric furniture.
@@ -17,46 +18,34 @@ import { elevationOf, sizeOf } from './placement'
  * a proper GLB takes over.
  */
 
-const TONES: Record<string, number> = {
-  wood: 0xa8794f,
-  fabric: 0x8f96a8,
-  metal: 0xb9c0cb,
-  stone: 0xd8d6d0,
-  glass: 0x9fc7d8,
-  plant: 0x5d8a4a,
-  white: 0xf2f4f7,
+/**
+ * Catalogue tones map onto the shared surface materials.
+ *
+ * Kept as a mapping rather than merging the two vocabularies: an item says what
+ * it is *made of* ("wood"), and the material layer decides what that looks like.
+ * Swapping in a photographed oak later changes one function, not 46 catalogue
+ * entries.
+ */
+const TONE_SURFACE: Record<string, SurfaceKind> = {
+  wood: 'wood',
+  fabric: 'fabric',
+  metal: 'metal',
+  stone: 'stone',
+  glass: 'glass',
+  plant: 'plant',
+  white: 'white',
+}
+
+function material(tone = 'fabric'): THREE.MeshStandardMaterial {
+  return surface(TONE_SURFACE[tone] ?? 'fabric')
 }
 
 /**
- * One material per tone, shared across every object that uses it.
- *
- * Three does not deduplicate materials, and a scene with 200 objects each
- * holding its own MeshStandardMaterial compiles 200 shader programs for what is
- * really seven. Sharing means seven.
+ * Materials are owned by `plan/materials.ts` and shared across every build, so
+ * there is nothing per-catalogue to release. Kept as an explicit re-export so
+ * callers have one teardown to call.
  */
-const materials = new Map<string, THREE.MeshStandardMaterial>()
-
-function material(tone = 'fabric'): THREE.MeshStandardMaterial {
-  const existing = materials.get(tone)
-  if (existing) return existing
-
-  const made = new THREE.MeshStandardMaterial({
-    color: TONES[tone] ?? TONES.fabric,
-    roughness: tone === 'glass' ? 0.15 : tone === 'metal' ? 0.45 : 0.85,
-    metalness: tone === 'metal' ? 0.6 : 0,
-    transparent: tone === 'glass',
-    opacity: tone === 'glass' ? 0.35 : 1,
-  })
-
-  materials.set(tone, made)
-  return made
-}
-
-/** Dispose the shared materials. Called when a viewer is torn down. */
-export function disposeMaterials(): void {
-  for (const m of materials.values()) m.dispose()
-  materials.clear()
-}
+export { disposeSurfaces as disposeMaterials } from '../plan/materials'
 
 interface Box {
   width: number

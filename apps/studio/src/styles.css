@@ -481,7 +481,14 @@ select:focus {
 
 .stage {
   position: relative;
+  /* Both matter. A grid item defaults to min-height:auto, so a canvas that
+     briefly measures too large would stretch its own track and never shrink
+     back; overflow:hidden stops an oversized child being visible while it
+     settles. Together they make a runaway resize impossible rather than
+     merely unlikely. */
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface);
 }
 

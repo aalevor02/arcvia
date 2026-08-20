@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { SceneViewer } from '@arcvia/viewer'
+import { SceneViewer, WalkController } from '@arcvia/viewer'
 import { buildPlanGeometry } from '../plan/buildGeometry'
+import { suggestedCamera } from '../plan/buildGeometry'
+import { activeFloor } from '../plan/planStore'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import type { Plan } from '../plan/types'
 
@@ -27,11 +29,23 @@ const PRESETS: { id: RenderPreset; label: string; credits: number; note: string 
 export default function SceneView({ plan, sceneId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewerRef = useRef<SceneViewer | null>(null)
+  const walkRef = useRef<WalkController | null>(null)
+  /**
+   * Whether we are in first-person, readable from inside the rebuild effect.
+   *
+   * A ref rather than the state value, because putting `walking` in that
+   * effect's dependency list makes entering the walkthrough rebuild the whole
+   * model — which is wasted work, and fires onReady, which overwrites the
+   * movement instructions with "Ready" the instant they appear.
+   */
+  const walkingRef = useRef(false)
 
   const [stats, setStats] = useState<{ triangles: number; objects: number } | null>(null)
   const [status, setStatus] = useState('Building from the plan…')
   const [exposure, setExposure] = useState(1)
   const [ceilings, setCeilings] = useState(false)
+  const [walking, setWalking] = useState(false)
+  const [finish, setFinish] = useState<'floor-wood' | 'floor-tile'>('floor-wood')
   const [job, setJob] = useState<{ status: string; progress: number } | null>(null)
 
   useEffect(() => {
@@ -46,8 +60,18 @@ export default function SceneView({ plan, sceneId }: Props) {
       onError: (error) => setStatus(error.message),
     })
     viewerRef.current = viewer
+    walkRef.current = new WalkController(viewer, canvasRef.current, {
+      // 1.6 m is standing eye height. This one number is most of the difference
+      // between "a 3D image of a room" and "being in the room" — an orbit
+      // camera looking down into a roofless box reads as a model no matter how
+      // well it is lit or textured.
+      eyeHeight: 1.6,
+      speed: 2.68,
+    })
 
     return () => {
+      walkRef.current?.dispose()
+      walkRef.current = null
       viewer.dispose()
       viewerRef.current = null
     }
@@ -59,10 +83,50 @@ export default function SceneView({ plan, sceneId }: Props) {
     const viewer = viewerRef.current
     if (!viewer) return
 
-    const group = buildPlanGeometry(plan.floors, { ceilings })
+    const group = buildPlanGeometry(plan.floors, { ceilings, floorFinish: finish })
     viewer.setModel(group)
-    viewer.frameModel()
-  }, [plan, ceilings])
+
+    // Framing the model fights the walk camera: it would yank the view back
+    // outside the building on every edit.
+    if (!walkingRef.current) viewer.frameModel()
+  }, [plan, ceilings, finish])
+
+  /**
+   * Enter or leave first-person.
+   *
+   * Entering drops the camera into the largest room rather than wherever the
+   * orbit camera happened to be — which is usually outside the building,
+   * looking at it. Standing in a wall on the first frame is the fastest way to
+   * make a walkthrough feel broken.
+   */
+  function toggleWalk() {
+    const viewer = viewerRef.current
+    const walk = walkRef.current
+    if (!viewer || !walk) return
+
+    if (walking) {
+      walk.disable()
+      walkingRef.current = false
+      viewer.frameModel()
+      setWalking(false)
+      setStatus('Ready')
+      return
+    }
+
+    const floor = activeFloor(plan)
+    const start = suggestedCamera(floor)
+    if (!start) {
+      setStatus('Draw a room first — there is nowhere to stand.')
+      return
+    }
+
+    viewer.cameraObject.position.set(start.position.x, start.height, -start.position.y)
+    walk.setFloorLevel(floor.elevation)
+    walk.enable()
+    walkingRef.current = true
+    setWalking(true)
+    setStatus('Drag to look · W A S D to move · Shift to hurry')
+  }
 
   async function handleRender(preset: RenderPreset) {
     const viewer = viewerRef.current
@@ -98,7 +162,19 @@ export default function SceneView({ plan, sceneId }: Props) {
         <canvas ref={canvasRef} />
         <p className="hint">{status}</p>
         <div className="stage-actions">
-          <button className="btn" onClick={() => viewerRef.current?.frameModel()}>
+          <button
+            className={walking ? 'btn btn-primary' : 'btn'}
+            onClick={toggleWalk}
+            disabled={empty}
+            title={empty ? 'Draw a room first' : 'First-person view at eye height'}
+          >
+            {walking ? 'Leave walkthrough' : 'Walk through it'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => viewerRef.current?.frameModel()}
+            disabled={walking}
+          >
             Fit
           </button>
         </div>
@@ -125,6 +201,22 @@ export default function SceneView({ plan, sceneId }: Props) {
               </div>
             </>
           )}
+        </section>
+
+        <section>
+          <span className="eyebrow">Floor finish</span>
+          <div className="segmented">
+            <button aria-pressed={finish === 'floor-wood'} onClick={() => setFinish('floor-wood')}>
+              Timber
+            </button>
+            <button aria-pressed={finish === 'floor-tile'} onClick={() => setFinish('floor-tile')}>
+              Tile
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 11.5 }}>
+            Whole-floor for now. Per-room finishes arrive with the material
+            editor.
+          </p>
         </section>
 
         <section>

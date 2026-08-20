@@ -6,6 +6,7 @@ import { buildObjects } from '../catalogue/build'
 import { itemById } from '../catalogue/items'
 import { elevationOf, sizeOf } from '../catalogue/placement'
 import type { PlacedObject } from '../catalogue/types'
+import { surface } from './materials'
 
 /**
  * Extrude a floor plan into Three.js meshes.
@@ -34,27 +35,25 @@ export interface BuildOptions {
   slabThickness?: number
   /** Draw a ceiling slab as well. Off by default — you cannot see in. */
   ceilings?: boolean
+  /** Floor finish. Per-room finishes are a materials-editor feature; this is
+   *  the whole-floor default until that exists. */
+  floorFinish?: 'floor-wood' | 'floor-tile'
 }
 
 export function buildFloorGeometry(
   floor: Floor,
   options: BuildOptions = {},
 ): THREE.Group {
-  const { slabThickness = 0.12, ceilings = false } = options
+  const { slabThickness = 0.12, ceilings = false, floorFinish = 'floor-wood' } = options
 
   const group = new THREE.Group()
   group.name = `floor:${floor.id}`
 
-  const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xd8dde5,
-    roughness: 0.92,
-    metalness: 0,
-  })
-  const slabMaterial = new THREE.MeshStandardMaterial({
-    color: 0x9aa4b2,
-    roughness: 0.95,
-    metalness: 0,
-  })
+  // Shared, textured materials rather than a flat colour per build. See
+  // materials.ts: untextured geometry reads as a diagram however well it is lit.
+  const wallMaterial = surface('wall')
+  const slabMaterial = surface(floorFinish)
+  const ceilingMaterial = surface('ceiling')
 
   // ---- Walls ---------------------------------------------------------------
   const objects = Object.values(floor.objects ?? {})
@@ -111,7 +110,7 @@ export function buildFloorGeometry(
 
     if (ceilings) {
       const height = averageWallHeight(floor)
-      const ceiling = extrudedSlab(shape, slabThickness, slabMaterial)
+      const ceiling = extrudedSlab(shape, slabThickness, ceilingMaterial)
       ceiling.position.y = floor.elevation + height
       ceiling.name = `ceiling:${room.id}`
       group.add(ceiling)
@@ -262,6 +261,11 @@ function extrudedSlab(
     bevelEnabled: false,
   })
   geometry.rotateX(-Math.PI / 2)
+
+  // ExtrudeGeometry's default UVs are the shape's own coordinates, which are in
+  // metres here. That is exactly what a tiled floor wants: the material sets
+  // texture.repeat in tiles-per-metre and the grain comes out the same size in
+  // every room, whatever the room's dimensions.
 
   const mesh = new THREE.Mesh(geometry, material)
   mesh.receiveShadow = true

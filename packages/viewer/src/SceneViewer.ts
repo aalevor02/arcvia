@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 export interface LightSpec {
   id: string
@@ -93,7 +94,10 @@ export class SceneViewer {
     // something a monitor can show. Without it, bright windows clip to flat
     // white and the whole render looks like a video game from 2008.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.0
+    // Slightly under 1: an interior lit by both a sun and an environment tends
+    // to clip on the wall facing the window, and clipped white is the single
+    // most "computer graphics" thing an image can do.
+    this.renderer.toneMappingExposure = 0.95
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
 
     this.scene.background = new THREE.Color(0x11151c)
@@ -115,24 +119,76 @@ export class SceneViewer {
   }
 
   /**
-   * Three neutral lights so an imported model is never invisible.
+   * A default rig that reads as daylight in a room.
    *
-   * These are replaced the moment a real rig is applied. Their only job is to
-   * make sure "I uploaded a model and got a black screen" never happens.
+   * ── Why the environment matters more than the lights ────────────────────
+   * Three point lights on untextured geometry is what makes a render look like
+   * a diagram: every surface is lit from a handful of directions and reflects
+   * nothing, so nothing has any sense of being *in* a place.
+   *
+   * An image-based environment fixes that in one step. It lights every surface
+   * from every direction at once and gives materials something to reflect,
+   * which is where the impression of real material comes from. `RoomEnvironment`
+   * generates one procedurally — no HDRI file to download, no CDN dependency,
+   * and it is already tuned to look like a lit interior.
+   *
+   * The sun on top of it does the job the environment cannot: a single strong
+   * direction, so there are real cast shadows and a bright side and a dark side.
+   * Without it everything is evenly lit and the room reads flat again.
+   *
+   * What this still is *not* is baked global illumination. There is no colour
+   * bleed between surfaces and no contact darkening in the corners, and that is
+   * the remaining gap to a photoreal walkthrough — see docs/roadmap-parity.md.
    */
   private addDefaultRig(): void {
-    const key = new THREE.DirectionalLight(0xffffff, 2.2)
-    key.position.set(5, 8, 5)
-    key.castShadow = true
-    key.shadow.mapSize.set(2048, 2048)
-    key.shadow.camera.far = 60
+    // Warm, low-ish sun. Pure white from directly above is the giveaway look
+    // of a default rig; real daylight arrives at an angle and has a colour.
+    const sun = new THREE.DirectionalLight(0xfff2e0, 2.6)
+    sun.position.set(6, 9, 4)
+    sun.castShadow = true
+    sun.shadow.mapSize.set(2048, 2048)
+    sun.shadow.camera.far = 60
+    sun.shadow.camera.left = -20
+    sun.shadow.camera.right = 20
+    sun.shadow.camera.top = 20
+    sun.shadow.camera.bottom = -20
+    // Without a bias, a surface shadows itself in bands — "shadow acne".
+    sun.shadow.bias = -0.0005
+    sun.shadow.normalBias = 0.02
 
-    const fill = new THREE.DirectionalLight(0xbfd4ff, 0.5)
-    fill.position.set(-6, 3, -4)
+    // Cool sky bounce from the opposite side, so shadowed faces are blue-ish
+    // rather than black. This is the cheap stand-in for sky illumination.
+    const bounce = new THREE.DirectionalLight(0xbdd4ff, 0.55)
+    bounce.position.set(-7, 4, -5)
 
-    const ambient = new THREE.HemisphereLight(0xdfe9ff, 0x35302b, 0.6)
+    this.lightGroup.add(sun, bounce)
+    this.applyRoomEnvironment()
+  }
 
-    this.lightGroup.add(key, fill, ambient)
+  /**
+   * Light the scene from a generated interior environment.
+   *
+   * Also used as a fallback when no HDRI has been loaded, which is the normal
+   * case in the editor — the alternative is an unlit-looking preview until
+   * someone thinks to add one.
+   */
+  applyRoomEnvironment(intensity = 0.85): void {
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    pmrem.compileEquirectangularShader()
+
+    const room = new RoomEnvironment()
+    const target = pmrem.fromScene(room, 0.04)
+
+    this.scene.environment = target.texture
+    this.scene.environmentIntensity = intensity
+
+    // The generated scene and the generator are both throwaway; only the
+    // resulting cube texture is kept. Not disposing them leaks a render target
+    // and a scene graph on every call.
+    room.dispose?.()
+    pmrem.dispose()
+
+    this.needsRender = true
   }
 
   async loadModel(url: string): Promise<void> {
@@ -424,7 +480,18 @@ export class SceneViewer {
     const height = parent.clientHeight
     if (width === 0 || height === 0) return
 
-    this.renderer.setSize(width, height, false)
+    // `true` — let Three set the CSS size as well as the backing store.
+    //
+    // This was `false`, which means "the caller owns the element's CSS size",
+    // and no caller did. With no CSS size a canvas displays at its *attribute*
+    // size in CSS pixels, and the attribute size is width x pixelRatio. At
+    // devicePixelRatio 1 that happens to equal the parent and everything looks
+    // fine; at 2 the canvas renders twice its box, stretches the parent it is
+    // measured against, and each resize makes it bigger — a feedback loop that
+    // ends with a canvas thousands of pixels tall and a black viewport.
+    //
+    // Only reproducible on a HiDPI display, which is why it survived this long.
+    this.renderer.setSize(width, height, true)
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
     this.needsRender = true
