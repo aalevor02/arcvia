@@ -16,6 +16,22 @@ export interface LightSpec {
   size?: number
 }
 
+/**
+ * A named camera bookmark.
+ *
+ * Mirrors the `views` array in a published scene manifest: a position, a
+ * yaw/pitch pair rather than a quaternion (authors think in "facing which way",
+ * not in four-component rotations), and the mode the view should be entered in.
+ */
+export interface SceneView {
+  id: string
+  name: string
+  position: [number, number, number]
+  /** [yaw, pitch] in degrees. Yaw 0 looks down -Z; pitch 0 is level. */
+  rotation: [number, number]
+  mode?: 'fps' | 'orbit'
+}
+
 export interface ViewerOptions {
   canvas: HTMLCanvasElement
   onProgress?: (fraction: number) => void
@@ -30,6 +46,12 @@ export interface ViewerOptions {
  * that runs at 60fps has no business going through React's reconciler — React
  * owns the panels around the canvas, this owns everything inside it. The two
  * talk through explicit method calls.
+ *
+ * Lives in a shared package because the studio editor and the published
+ * walkthrough must render through the same code path. When published output
+ * had its own renderer (a third-party one, in the system this was rebuilt
+ * from), the editor preview and the thing the client saw drifted apart and
+ * nobody noticed until a client did.
  */
 export class SceneViewer {
   private readonly renderer: THREE.WebGLRenderer
@@ -43,6 +65,16 @@ export class SceneViewer {
   private frameHandle = 0
   private disposed = false
   private needsRender = true
+
+  /** Non-null while a goToView transition is in flight. */
+  private transition: {
+    fromPos: THREE.Vector3
+    toPos: THREE.Vector3
+    fromQuat: THREE.Quaternion
+    toQuat: THREE.Quaternion
+    elapsed: number
+    duration: number
+  } | null = null
 
   constructor(private readonly options: ViewerOptions) {
     this.renderer = new THREE.WebGLRenderer({
@@ -150,6 +182,41 @@ export class SceneViewer {
     }
   }
 
+  /**
+   * Show geometry that was built in memory rather than loaded from a file.
+   *
+   * This is how the floor-plan editor previews itself in 3D: the plan is
+   * extruded to meshes locally and handed straight over, with no round-trip
+   * through a GLB. Going via a file would mean exporting, uploading and
+   * re-parsing on every wall edit, which is both slow and a chance for the
+   * preview to disagree with the plan.
+   *
+   * Takes ownership: the previous model is disposed exactly as `loadModel`
+   * would, so repeated calls while editing do not leak GPU buffers.
+   */
+  setModel(object: THREE.Object3D): void {
+    this.clearModel()
+    this.model = object
+
+    let triangles = 0
+    let objects = 0
+    object.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      objects += 1
+      child.castShadow = true
+      child.receiveShadow = true
+
+      const geometry = child.geometry as THREE.BufferGeometry
+      triangles += geometry.index
+        ? geometry.index.count / 3
+        : geometry.attributes.position.count / 3
+    })
+
+    this.scene.add(object)
+    this.needsRender = true
+    this.options.onReady?.({ triangles: Math.round(triangles), objects })
+  }
+
   async loadEnvironment(url: string): Promise<void> {
     const texture = await new RGBELoader().loadAsync(url)
     texture.mapping = THREE.EquirectangularReflectionMapping
@@ -228,6 +295,55 @@ export class SceneViewer {
     this.needsRender = true
   }
 
+  /**
+   * Move to a named view, easing rather than cutting.
+   *
+   * A hard cut between two interior cameras is genuinely disorienting — the
+   * viewer loses all sense of how the rooms connect. The published system this
+   * was modelled on animates every view switch for the same reason.
+   */
+  goToView(view: SceneView, animate = true): void {
+    const toPos = new THREE.Vector3(...view.position)
+    const euler = new THREE.Euler(
+      THREE.MathUtils.degToRad(view.rotation[1]),
+      THREE.MathUtils.degToRad(view.rotation[0]),
+      0,
+      'YXZ',
+    )
+    const toQuat = new THREE.Quaternion().setFromEuler(euler)
+
+    if (!animate) {
+      this.camera.position.copy(toPos)
+      this.camera.quaternion.copy(toQuat)
+      this.syncOrbitTarget()
+      this.needsRender = true
+      return
+    }
+
+    this.transition = {
+      fromPos: this.camera.position.clone(),
+      toPos,
+      fromQuat: this.camera.quaternion.clone(),
+      toQuat,
+      elapsed: 0,
+      duration: 1.1,
+    }
+    this.needsRender = true
+  }
+
+  /**
+   * Keep the orbit target a metre in front of the camera.
+   *
+   * Without this, re-enabling orbit after a walk sequence snaps the view back
+   * to wherever the target was last left — usually the centre of the model,
+   * which reads as the camera lurching across the room.
+   */
+  private syncOrbitTarget(): void {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    this.controls.target.copy(this.camera.position).add(forward)
+    this.controls.update()
+  }
+
   /** Current camera state, in the shape the render API expects. */
   cameraSpec() {
     const quaternion = this.camera.quaternion
@@ -249,6 +365,33 @@ export class SceneViewer {
 
   setExposure(value: number): void {
     this.renderer.toneMappingExposure = value
+    this.needsRender = true
+  }
+
+  /** Whether a model is currently loaded. */
+  hasModel(): boolean {
+    return this.model !== null
+  }
+
+  /** The camera, for controllers that drive it directly (e.g. walk mode). */
+  get cameraObject(): THREE.PerspectiveCamera {
+    return this.camera
+  }
+
+  /**
+   * Hand camera control to something else.
+   *
+   * Orbit and walk cannot both own the camera; whichever is enabled last would
+   * fight the other every frame.
+   */
+  setOrbitEnabled(enabled: boolean): void {
+    this.controls.enabled = enabled
+    if (enabled) this.syncOrbitTarget()
+    this.needsRender = true
+  }
+
+  /** Ask for one more frame — for external controllers that moved the camera. */
+  requestRender(): void {
     this.needsRender = true
   }
 
@@ -299,8 +442,29 @@ export class SceneViewer {
     if (this.disposed) return
     this.frameHandle = requestAnimationFrame(this.loop)
 
-    const damping = this.controls.update(this.clock.getDelta())
-    if (this.needsRender || damping) {
+    const delta = this.clock.getDelta()
+    let moving = false
+
+    if (this.transition) {
+      const t = this.transition
+      t.elapsed += delta
+      const raw = Math.min(t.elapsed / t.duration, 1)
+      // easeInOutCubic — starts and ends still, which is what makes the move
+      // read as a camera rather than a teleport.
+      const k = raw < 0.5 ? 4 * raw ** 3 : 1 - (-2 * raw + 2) ** 3 / 2
+
+      this.camera.position.lerpVectors(t.fromPos, t.toPos, k)
+      this.camera.quaternion.slerpQuaternions(t.fromQuat, t.toQuat, k)
+      moving = true
+
+      if (raw >= 1) {
+        this.transition = null
+        this.syncOrbitTarget()
+      }
+    }
+
+    const damping = this.controls.enabled && this.controls.update(delta)
+    if (this.needsRender || damping || moving) {
       this.renderer.render(this.scene, this.camera)
       this.needsRender = false
     }

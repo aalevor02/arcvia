@@ -9,6 +9,7 @@
     "apps/web",
     "apps/studio",
     "apps/planviewer",
+    "apps/visualisation",
     "services/api"
   ],
   "scripts": {
@@ -16,6 +17,7 @@
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:studio": "npm run dev --workspace=apps/studio",
     "dev:plan": "npm run dev --workspace=apps/planviewer",
+    "dev:vis": "npm run dev --workspace=apps/visualisation",
     "dev:api": "npm run dev --workspace=services/api",
     "build": "npm run build --workspaces --if-present"
   },

@@ -1,0 +1,22 @@
+{
+  "name": "@arcvia/visualisation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Published project visualisation — master plan, unit drawings and walkthrough for one development.",
+  "scripts": {
+    "dev": "vite --port 5175 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 5175 --host"
+  },
+  "dependencies": {
+    "@arcvia/brand": "*",
+    "@arcvia/viewer": "*",
+    "three": "^0.171.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.171.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

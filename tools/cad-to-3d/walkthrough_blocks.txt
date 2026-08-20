@@ -1,0 +1,59 @@
+### e1
+      walkthrough: {
+        model: 'scenes/villa-e1.glb',
+        eyeHeight: 1.6,
+        views: [
+          { id: 'bed1', name: 'Bedroom 1 (lower ground)', position: [15.4, 1.6, -5.08], rotation: [85, -2] },
+          { id: 'bed2', name: 'Bedroom 2 (lower ground)', position: [1.98, 1.6, -9.87], rotation: [185, -2] },
+          { id: 'lounge', name: 'Family lounge (lower ground)', position: [8.0, 1.6, -5.41], rotation: [352, -2] },
+          { id: 'foyer', name: 'Foyer (lower ground)', position: [10.76, 1.6, -11.17], rotation: [158, -2] },
+          { id: 'passage', name: 'Passage (lower ground)', position: [9.54, 1.6, -11.13], rotation: [172, -2] },
+          { id: 'entrance', name: 'Entrance (stilt)', position: [2.01, 4.6, -10.51], rotation: [304, -2] },
+          { id: 'parking', name: 'Car parking (stilt)', position: [1.93, 4.6, -9.29], rotation: [316, -2] },
+          { id: 'master', name: 'Master bedroom (first)', position: [14.77, 7.6, -5.08], rotation: [91, -2] },
+          { id: 'bed3', name: 'Bedroom 3 (first)', position: [1.98, 7.6, -9.87], rotation: [225, -2] },
+          { id: 'bed4', name: 'Bedroom 4 (first)', position: [7.99, 7.6, -5.5], rotation: [352, -2] },
+          { id: 'living', name: 'Living area (second)', position: [4.52, 10.6, -8.42], rotation: [38, -2] },
+          { id: 'kitchen', name: 'Kitchen (second)', position: [15.64, 10.6, -10.69], rotation: [124, -2] },
+          { id: 'dining', name: 'Dining area (second)', position: [9.89, 10.6, -7.39], rotation: [76, -2] },
+          { id: 'deck', name: 'Open deck (second)', position: [14.85, 10.6, -5.42], rotation: [74, -2] },
+        ],
+      },
+
+
+### b1
+      walkthrough: {
+        model: 'scenes/villa-e1.glb',
+        eyeHeight: 1.6,
+        views: [
+          { id: 'foyer', name: 'Foyer (stilt)', position: [2.54, 1.6, -8.07], rotation: [268, -2] },
+          { id: 'parking', name: 'Car parking (stilt)', position: [2.67, 1.6, -3.72], rotation: [349, -2] },
+          { id: 'living', name: 'Living area (second)', position: [3.43, 10.6, -3.08], rotation: [57, -2] },
+          { id: 'kitchen', name: 'Kitchen (second)', position: [4.93, 10.6, -12.61], rotation: [171, -2] },
+        ],
+      },
+
+
+### bd
+      walkthrough: {
+        model: 'scenes/villa-e1.glb',
+        eyeHeight: 1.6,
+        views: [
+          { id: 'entrance', name: 'Entrance (stilt)', position: [3.84, 1.6, -3.16], rotation: [16, -2] },
+          { id: 'living', name: 'Living area (upper ground)', position: [1.44, 4.6, -9.87], rotation: [9, -2] },
+          { id: 'kitchen', name: 'Kitchen (second)', position: [6.45, 10.6, -7.36], rotation: [120, -2] },
+          { id: 'dining', name: 'Dining area (second)', position: [6.66, 10.6, -4.98], rotation: [359, -2] },
+        ],
+      },
+
+
+### ce
+      walkthrough: {
+        model: 'scenes/villa-e1.glb',
+        eyeHeight: 1.6,
+        views: [
+          { id: 'foyer', name: 'Foyer (lower ground)', position: [4.0, 1.6, -7.61], rotation: [189, -2] },
+          { id: 'verandah', name: 'Verandah (lower ground)', position: [3.41, 1.6, -0.98], rotation: [274, -2] },
+          { id: 'parking', name: 'Car parking (stilt)', position: [6.28, 4.6, -11.49], rotation: [171, -2] },
+        ],
+      },

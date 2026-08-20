@@ -1,0 +1,14 @@
+{
+  "name": "@arcvia/viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Three.js scene viewer — used by the studio editor and by published output so the two cannot drift apart.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "three": "^0.171.0"
+  }
+}
