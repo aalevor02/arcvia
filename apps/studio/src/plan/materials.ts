@@ -74,6 +74,78 @@ function toTexture(el: HTMLCanvasElement, srgb: boolean): THREE.CanvasTexture {
   return texture
 }
 
+/**
+ * Derive a tangent-space normal map from an albedo canvas.
+ *
+ * ── Why bother, when there is already a roughness map ────────────────────────
+ * Roughness controls how *sharp* a reflection is. It cannot make a surface
+ * catch light, because as far as the shader is concerned the surface is still
+ * perfectly flat: every pixel of a wall has the same normal, so every pixel
+ * responds to a light identically and the wall reads as a painted plane. It is
+ * the difference between a photograph of plaster and a photograph of a
+ * photograph of plaster.
+ *
+ * A normal map perturbs the normal per pixel, so grain, grout lines and stipple
+ * each get their own tiny highlight and shadow that move as the camera moves.
+ * That motion is a large part of what the eye uses to decide a surface is real.
+ *
+ * Derived from the albedo's own luminance rather than authored separately: the
+ * patterns here are already drawn as light-and-dark — a grout line is darker, a
+ * plank seam is darker — so luminance is a serviceable height field, and the
+ * relief lines up with the colour by construction. A real PBR set would ship a
+ * measured height map; this costs one Sobel pass and no download.
+ */
+function normalFrom(source: HTMLCanvasElement, strength: number): THREE.Texture {
+  const { ctx, el } = canvas()
+  const from = source.getContext('2d')
+  if (!from) return toTexture(el, false)
+
+  const src = from.getImageData(0, 0, SIZE, SIZE).data
+  const out = ctx.createImageData(SIZE, SIZE)
+
+  // Luminance up front: the Sobel below reads nine neighbours per pixel, so
+  // computing it inline would do the same work nine times over.
+  const height = new Float32Array(SIZE * SIZE)
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    height[i] = (src[i * 4] * 0.299 + src[i * 4 + 1] * 0.587 + src[i * 4 + 2] * 0.114) / 255
+  }
+
+  // Wrapped sampling. These textures tile, so reading past an edge has to come
+  // back around — clamping instead leaves a visible seam of flat normal down
+  // every repeat boundary.
+  const at = (x: number, y: number) =>
+    height[((y + SIZE) % SIZE) * SIZE + ((x + SIZE) % SIZE)]
+
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const dx =
+        at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1) -
+        (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1))
+      const dy =
+        at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1) -
+        (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1))
+
+      // Z is fixed at 1 and the gradients are scaled against it, so `strength`
+      // is literally how steep the relief is.
+      const nx = dx * strength
+      const ny = dy * strength
+      const length = Math.hypot(nx, ny, 1)
+
+      const at4 = (y * SIZE + x) * 4
+      // Encoded from [-1,1] to [0,1]: a flat surface is the familiar (128,128,255).
+      out.data[at4] = ((nx / length) * 0.5 + 0.5) * 255
+      out.data[at4 + 1] = ((ny / length) * 0.5 + 0.5) * 255
+      out.data[at4 + 2] = ((1 / length) * 0.5 + 0.5) * 255
+      out.data[at4 + 3] = 255
+    }
+  }
+
+  ctx.putImageData(out, 0, 0)
+  // Never sRGB. A normal map is three encoded vector components; decoding it as
+  // colour bends every normal toward the surface and the relief goes slack.
+  return toTexture(el, false)
+}
+
 /** Deterministic noise, so a rebuild does not reshuffle every surface. */
 function seeded(seed: number): () => number {
   let state = seed >>> 0
@@ -282,33 +354,64 @@ function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
     })
   }
 
+  /**
+   * Assemble a textured PBR material.
+   *
+   * All three maps share one repeat, always. They are generated from the same
+   * canvas and describe the same surface, so any mismatch means the grain,
+   * the shine and the relief drift apart across a wall — which looks like
+   * nothing in particular and is very hard to trace back.
+   *
+   * `tilesPerMetre` is expressed as metres-per-tile at the call sites because
+   * that is how the decision is actually made ("planks repeat every 1.2 m"),
+   * and it keeps the scale identical in every room. A floor whose planks change
+   * size between rooms is instantly wrong.
+   */
+  const textured = (
+    map: THREE.Texture,
+    roughness: THREE.Texture,
+    repeat: number,
+    normalStrength: number,
+    extra: Partial<THREE.MeshStandardMaterialParameters> = {},
+  ): THREE.MeshStandardMaterial => {
+    const normal = normalFrom(map.image as HTMLCanvasElement, normalStrength)
+    for (const texture of [map, roughness, normal]) texture.repeat.set(repeat, repeat)
+
+    return new THREE.MeshStandardMaterial({
+      map,
+      roughnessMap: roughness,
+      normalMap: normal,
+      roughness: 1,
+      metalness: 0,
+      ...extra,
+    })
+  }
+
   switch (kind) {
     case 'floor-wood': {
       const { map, roughness } = woodFloor()
-      // One texture tile per 1.2 m of floor. Set here rather than per mesh so
-      // the grain runs at the same scale in every room — a floor whose planks
-      // change size between rooms is instantly wrong.
-      map.repeat.set(1 / 1.2, 1 / 1.2)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+      // Mild relief: planed timber is nearly flat, and the seams between
+      // boards do most of the work.
+      return textured(map, roughness, 1 / 1.2, 1.6)
     }
     case 'floor-tile': {
       const { map, roughness } = tile()
-      map.repeat.set(1 / 2.4, 1 / 2.4)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+      // Strongest of the set: grout sits several millimetres below the tile
+      // face, and that recess is what stops a tiled floor reading as a printed
+      // grid.
+      return textured(map, roughness, 1 / 2.4, 2.8)
     }
     case 'wall': {
       const { map, roughness } = plaster(38, 82)
-      map.repeat.set(1 / 3, 1 / 3)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+      // Plaster stipple. Enough to break up a large flat wall under a raking
+      // light, not enough to look like sandpaper.
+      return textured(map, roughness, 1 / 3, 2.2)
     }
     case 'ceiling': {
       const { map, roughness } = plaster(0, 92)
-      map.repeat.set(1 / 3, 1 / 3)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+      // Gentler than the walls: a painted ceiling is the flattest surface in
+      // most rooms, and it is lit almost entirely by bounce.
+      return textured(map, roughness, 1 / 3, 1.3)
     }
     case 'fabric': {
       // Warm oatmeal, not navy.
@@ -319,21 +422,16 @@ function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
       // reads the room as a set of coloured blocks. Undyed linen is both the
       // commonest real finish and the one that lets everything else be seen.
       const { map, roughness } = fabric(34, 70)
-      map.repeat.set(2, 2)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 1, metalness: 0 })
+      // The weave is the whole point of the material, so let it read.
+      return textured(map, roughness, 2, 2.4)
     }
     case 'wood': {
       const { map, roughness } = woodFloor()
-      map.repeat.set(1, 1)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 0.85, metalness: 0 })
+      return textured(map, roughness, 1, 1.6, { roughness: 0.85 })
     }
     case 'stone': {
       const { map, roughness } = tile()
-      map.repeat.set(0.5, 0.5)
-      roughness.repeat.copy(map.repeat)
-      return new THREE.MeshStandardMaterial({ map, roughnessMap: roughness, roughness: 0.6, metalness: 0 })
+      return textured(map, roughness, 0.5, 2.2, { roughness: 0.6 })
     }
     case 'metal':
       return new THREE.MeshStandardMaterial({ color: 0xb9c0cb, roughness: 0.32, metalness: 0.85 })

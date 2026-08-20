@@ -89,6 +89,10 @@ export default function SceneView({ plan, sceneId }: Props) {
         setStatus(info.objects === 0 ? 'Nothing drawn yet' : 'Ready')
       },
       onError: (error) => setStatus(error.message),
+      // Said out loud rather than swallowed. The picture visibly changes when
+      // the viewer downgrades itself, and an unexplained change in how the
+      // scene looks reads as a bug in whatever the user did last.
+      onQualityDrop: (reason) => setStatus(reason),
     })
     viewerRef.current = viewer
     // A handle on the renderer from the console, in development only.
