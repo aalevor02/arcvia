@@ -161,6 +161,19 @@ export function applyLightmap(
 ): number {
   texture.flipY = false
   texture.colorSpace = THREE.SRGBColorSpace
+
+  // Sample the *second* UV set, not the first.
+  //
+  // This one line is the whole feature. Since r152 a texture chooses its UV
+  // attribute with `channel`, and it defaults to 0 — the albedo UVs, which run
+  // 0-1 across every individual face. A lightmap sampled with those reads the
+  // entire atlas onto every surface: each wall gets a smeared patchwork of
+  // every *other* object's bake, which is unmistakably wrong on screen and
+  // gives no clue where it comes from.
+  //
+  // The packed coordinates live in `uv1` (channel 1), which is what
+  // `assignLightmapUVs` writes and what glTF carries as TEXCOORD_1.
+  texture.channel = 1
   texture.needsUpdate = true
 
   let applied = 0

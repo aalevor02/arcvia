@@ -158,6 +158,13 @@ function uvBounds(mesh: THREE.Mesh) {
   check('attached as lightMap, not map', first.lightMap === texture && first.map === null)
   check('intensity is honoured', first.lightMapIntensity === 0.9)
 
+  // The atlas must be sampled with the packed coordinates in uv1, not the
+  // albedo UVs in uv0. `channel` defaults to 0, and getting this wrong is
+  // invisible to every other assertion here: the UVs are packed correctly, the
+  // texture is attached correctly, the right number of meshes are lit — and
+  // every surface renders the whole atlas smeared across it.
+  check('the atlas samples uv1, not the albedo UVs', texture.channel === 1, String(texture.channel))
+
   // Materials are shared across a scene; a shared one carrying a lightmap
   // would light every other mesh with it.
   const second = meshesOf(g)[1].material as THREE.MeshStandardMaterial

@@ -186,23 +186,58 @@ console.log(`grid     : ${grid}x${grid} (${grid * grid} cells) for ${objects} ob
 console.log(`lit cells: ${lit}`)
 console.log('\n' + map.join('\n') + '\n')
 
-if (lit === objects) {
-  console.log(`OK  exactly ${objects} cells lit — the atlas packed correctly.`)
-  process.exit(0)
+// ── What "lit" can and cannot prove ─────────────────────────────────────────
+// The tempting check is `lit === objects`, and it is wrong on any real scene.
+// Plenty of surfaces legitimately receive almost no light — the underside of a
+// floor slab, the outward face of an external wall, the top of a ceiling, the
+// back of a wardrobe against a wall. Their cells are correctly packed and
+// correctly black, and demanding they be lit reports a healthy bake as broken.
+//
+// What the grid *can* prove is where light landed. Cells are filled in object
+// order, so:
+//
+//   - anything lit at index >= objects is real evidence of a problem: nothing
+//     was ever packed there, so light in it means an island has escaped its
+//     cell or the layouts disagree.
+//   - a lit count far below the object count is evidence of stacking, which is
+//     what all three classic UV bugs produce.
+//
+// Anything between those is a scene with some surfaces in shadow, which is
+// what a lit room looks like.
+const surplus = []
+for (let index = objects; index < grid * grid; index++) {
+  const row = Math.floor(index / grid)
+  const column = index % grid
+  if (map[row][column] === '#') surplus.push(index)
 }
 
-if (lit < objects) {
+if (surplus.length > 0) {
+  console.log(
+    `FAIL  ${surplus.length} cell(s) beyond the ${objects} packed are lit ` +
+      `(indices ${surplus.slice(0, 8).join(', ')}${surplus.length > 8 ? '…' : ''}).\n` +
+      '      Nothing was packed there, so an island has escaped its cell.\n' +
+      '      Check the island margin and that the packing inset is applied.',
+  )
+  process.exit(1)
+}
+
+// Below half is not "a dim room", it is objects sharing cells.
+if (lit * 2 < objects) {
   console.log(
     `FAIL  only ${lit} of ${objects} cells are lit.\n` +
-      '      Objects are baking on top of each other. Usual cause: selections\n' +
-      '      accumulating across the per-object loop, so smart_project\n' +
-      '      re-unwraps everything already packed and only the last survives.',
+      '      Too few to be shadow — objects are baking on top of each other.\n' +
+      '      Usual cause: selections accumulating across the per-object loop,\n' +
+      '      so smart_project re-unwraps everything already packed.',
   )
-} else {
-  console.log(
-    `FAIL  ${lit} cells lit but only ${objects} objects were sent.\n` +
-      '      Something is bleeding outside its cell — check the island margin\n' +
-      '      and that the packing inset is being applied.',
-  )
+  process.exit(1)
 }
-process.exit(1)
+
+const dark = objects - lit
+console.log(
+  `OK  ${lit} of ${objects} cells lit, and nothing outside the packed range.` +
+    (dark > 0
+      ? `\n    ${dark} packed cell(s) are dark — normal for surfaces that receive\n` +
+        '    almost no light (slab undersides, outward wall faces, ceiling tops).'
+      : ''),
+)
+process.exit(0)

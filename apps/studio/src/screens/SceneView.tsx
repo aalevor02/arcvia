@@ -127,6 +127,9 @@ export default function SceneView({ plan, sceneId }: Props) {
 
     const group = buildPlanGeometry(plan.floors, { ceilings, floorFinish: finish })
     viewer.setModel(group)
+    // New geometry, so the old atlas no longer describes it. Hand lighting
+    // back to the real-time rig, or the fresh model renders unlit.
+    viewer.setBakedLighting(false)
     setBaked(false)
 
     // Framing the model fights the walk camera: it would yank the view back
@@ -221,6 +224,10 @@ export default function SceneView({ plan, sceneId }: Props) {
       }
 
       const applied = await loadAndApply(model, storedUrl(result.outputUrl))
+      // The atlas already contains the sun, the sky, the bounce and the
+      // occlusion. Leaving the real-time rig on top of it does not add to the
+      // bake, it cancels it — see setBakedLighting.
+      viewer.setBakedLighting(true)
       viewer.requestRender()
       setBaked(true)
       setStatus(`Baked lighting applied to ${applied} meshes`)

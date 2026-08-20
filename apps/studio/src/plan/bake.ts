@@ -25,6 +25,21 @@ import { assignLightmapUVs, applyLightmap } from './lightmapUV'
  * megabytes of buffers alongside its lightmaps.
  */
 
+/**
+ * How hard the returned atlas is driven when applied.
+ *
+ * An exposure control, not a correction. Blender bakes irradiance in watts per
+ * square metre; Three.js multiplies a lightMap into a shading term that wants
+ * to land near 1 for a well-lit surface. The two scales have no fixed
+ * relationship, so *some* factor is unavoidable and this is where it lives.
+ *
+ * Tuned against a room lit only through two windows, which is the dim end of
+ * the range — an interior really is far darker than outdoors, and taking the
+ * physically-correct number straight to screen produces a room that looks like
+ * dusk. Raise it for scenes with artificial lighting baked in.
+ */
+const BAKED_EXPOSURE = 2.2
+
 export interface BakeProgress {
   status: string
   progress: number
@@ -75,7 +90,7 @@ export async function exportForBake(
 export function loadAndApply(
   scene: THREE.Object3D,
   url: string,
-  intensity = 1,
+  intensity = BAKED_EXPOSURE,
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     new THREE.TextureLoader().setCrossOrigin('anonymous').load(

@@ -285,6 +285,81 @@ def setup_camera(camera_spec: dict | None) -> None:
         ).to_track_quat("-Z", "Y").to_euler()
 
 
+def denoise_to(image, out_path: str) -> bool:
+    """
+    Run a baked atlas through OpenImageDenoise and write it out.
+
+    ── Why this is not just a checkbox ─────────────────────────────────────────
+    Cycles has never denoised bakes. `cycles.use_denoising` applies to renders;
+    there is no `bake.use_denoising`, and `bpy.ops.object.bake()` returns raw
+    path-traced samples. For a camera render that gap does not exist, so it is
+    easy to assume a bake is denoised too — and then wonder why an atlas at 256
+    samples is covered in speckle that no sample count seems to fix.
+
+    The compositor *does* have a Denoise node, and it will happily operate on an
+    Image node instead of a Render Layers node. So the atlas goes in as an
+    image, comes out denoised, and the composite is written straight to disk.
+
+    Samples are dropped to 1 first: the render this piggybacks on is pure
+    overhead — nothing in the node tree reads the 3D scene — and at 2048 square
+    a full-sample render would cost more than the bake it is cleaning up.
+
+    Returns False if anything is missing, so the caller can fall back to saving
+    the noisy original rather than losing the bake entirely.
+    """
+    scene = bpy.context.scene
+
+    try:
+        scene.use_nodes = True
+
+        # Blender 5 rebuilt the compositor: `scene.node_tree` is gone, the tree
+        # is a node *group* on `scene.compositing_node_group`, and
+        # `CompositorNodeComposite` no longer exists — output leaves through a
+        # NodeGroupOutput instead. Both shapes are handled because the worker
+        # runs against whatever Blender the host has, and a version bump that
+        # silently stops denoising would look like a quality regression with no
+        # cause.
+        if hasattr(scene, "compositing_node_group"):
+            tree = bpy.data.node_groups.new("ArcviaDenoise", "CompositorNodeTree")
+            tree.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
+            scene.compositing_node_group = tree
+            sink = tree.nodes.new("NodeGroupOutput").inputs[0]
+        else:
+            tree = scene.node_tree
+            tree.nodes.clear()
+            sink = tree.nodes.new("CompositorNodeComposite").inputs["Image"]
+
+        source = tree.nodes.new("CompositorNodeImage")
+        source.image = image
+        denoise = tree.nodes.new("CompositorNodeDenoise")
+
+        tree.links.new(source.outputs["Image"], denoise.inputs["Image"])
+        tree.links.new(denoise.outputs["Image"], sink)
+
+        # No normal or albedo guide passes are available here — those come from
+        # a render, and this is an atlas. OIDN copes; the result is slightly
+        # softer than a guided denoise but incomparably better than the noise.
+        scene.render.resolution_x = image.size[0]
+        scene.render.resolution_y = image.size[1]
+        scene.render.resolution_percentage = 100
+        scene.render.filepath = out_path
+        scene.render.use_compositing = True
+        scene.render.use_sequencer = False
+
+        previous_samples = scene.cycles.samples
+        scene.cycles.samples = 1
+        try:
+            bpy.ops.render.render(write_still=True)
+        finally:
+            scene.cycles.samples = previous_samples
+
+        print("ARCVIA_BAKE_DENOISE:compositor", flush=True)
+        return True
+    except (AttributeError, KeyError, RuntimeError, TypeError) as exc:
+        print(f"ARCVIA_WARN:could not denoise the atlas ({exc}); saving as baked", flush=True)
+        return False
+
+
 def configure_cycles(spec: dict) -> None:
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -303,8 +378,16 @@ def configure_cycles(spec: dict) -> None:
 
     # Adaptive sampling stops refining tiles that have already converged, so
     # flat walls do not get sampled as hard as a glass table.
-    cycles.use_adaptive_sampling = True
-    cycles.adaptive_threshold = float(spec.get("adaptiveThreshold", 0.01))
+    #
+    # Off for bakes. It is tuned against what a *camera* will show, and an atlas
+    # has no camera: every texel is equally likely to end up on a wall the
+    # viewer is standing next to. Worse, the texels it declares converged early
+    # are the low-variance ones, so the noise it leaves behind is concentrated
+    # exactly in the indirect light that is the reason for baking at all.
+    is_bake = spec.get("type") == "bake"
+    cycles.use_adaptive_sampling = not is_bake
+    if not is_bake:
+        cycles.adaptive_threshold = float(spec.get("adaptiveThreshold", 0.01))
 
     scene.render.resolution_x = int(spec.get("width", 1920))
     scene.render.resolution_y = int(spec.get("height", 1080))
@@ -573,7 +656,11 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     # saturates. That is an accepted trade for quartering the download: interior
     # irradiance is below 1.0 nearly everywhere, and a blown-out sun patch is
     # what a photograph of that floor would show anyway.
-    image.save_render(filepath=out_path, scene=bpy.context.scene)
+    # Denoised if possible, saved raw if not. A noisy lightmap is still a
+    # lightmap; a missing one is a failed bake.
+    if not denoise_to(image, out_path):
+        image.save_render(filepath=out_path, scene=bpy.context.scene)
+
     view.view_transform = previous
 
     print(f"ARCVIA_BAKE_CELLS:{cells}x{cells} objects:{len(meshes)}", flush=True)

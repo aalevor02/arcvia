@@ -9,6 +9,16 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
+/**
+ * How much environment survives once a lightmap is in charge.
+ *
+ * Low enough not to double-light the diffuse the bake already accounts for,
+ * high enough to keep specular reflection alive — glass, polished stone and
+ * metal have nothing else to reflect, and a lightmap supplies no specular at
+ * all.
+ */
+const BAKED_ENVIRONMENT = 0.12
+
 export interface LightSpec {
   id: string
   type: 'point' | 'spot' | 'sun' | 'area'
@@ -412,6 +422,42 @@ export class SceneViewer {
   /** Whether the post chain is currently running. */
   hasAmbientOcclusion(): boolean {
     return this.composer !== null
+  }
+
+  /**
+   * Hand lighting over to a baked atlas, or take it back.
+   *
+   * ── Why a bake is invisible without this ────────────────────────────────
+   * Three.js *adds* lightmap irradiance to environment irradiance rather than
+   * replacing it. So a scene lit by a sun, a bounce light and an environment at
+   * 0.85 does not start looking baked when an atlas is attached — the
+   * real-time lighting still supplies most of the diffuse, and the bake reads
+   * as a slight overall brightening. Every corner the bake darkened is filled
+   * straight back in by an environment that has no idea the walls exist.
+   *
+   * Which is the whole problem baking solves. The atlas already contains the
+   * sun, the sky, the bounce and the occlusion, computed properly against the
+   * real enclosure — so the real-time versions of all of those are not just
+   * redundant, they are actively cancelling it out.
+   *
+   * The environment is dimmed rather than removed: it is the only source of
+   * *specular* reflection, and a lightmap contributes none. Take it to zero and
+   * every glazed, polished or metal surface goes dead flat — the room reads
+   * correctly lit and made entirely of chalk.
+   */
+  setBakedLighting(enabled: boolean): void {
+    this.lightGroup.visible = !enabled
+    // Shadow maps have nothing left to do once the lights are off, and they
+    // are the most expensive thing in the frame.
+    this.renderer.shadowMap.enabled = !enabled
+    this.scene.environmentIntensity = enabled ? BAKED_ENVIRONMENT : 0.85
+
+    // Screen-space AO on top of a baked scene darkens corners that are already
+    // darkened, and the result reads as grime rather than shade. The bake
+    // computes better occlusion than GTAO can, including colour bleed.
+    if (enabled && this.composer) this.setAmbientOcclusion(false)
+
+    this.needsRender = true
   }
 
   /**

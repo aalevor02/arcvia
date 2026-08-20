@@ -167,7 +167,9 @@ for (const filter of [0, 1, 2, 3, 4]) {
   const result = check(png(SIZE, SIZE, litCells(5), filter), 5)
   ok(
     `filter ${filter}: 5 lit cells read as correct`,
-    result.code === 0 && result.out.includes('exactly 5 cells lit'),
+    result.code === 0 &&
+      result.out.includes('5 of 5 cells lit') &&
+      result.out.includes('nothing outside the packed range'),
     result.out.match(/lit cells: \d+/)?.[0] ?? result.out.slice(0, 80),
   )
 }
@@ -188,8 +190,28 @@ for (const filter of [0, 1, 2, 3, 4]) {
 {
   const result = check(png(SIZE, SIZE, litCells(9), 0), 5)
   ok(
-    'more lit cells than objects is caught',
-    result.code === 1 && result.out.includes('9 cells lit but only 5'),
+    'light outside the packed range is caught',
+    result.code === 1 && result.out.includes('cell(s) beyond the 5 packed are lit'),
+    result.out.split('\n').find((l) => l.startsWith('FAIL')) ?? '',
+  )
+}
+
+// ---- A real scene has surfaces in shadow -----------------------------------
+// This is the case that made the first version of the checker cry wolf. A
+// furnished room baked 69 of 79 cells lit and was reported broken; the ten dark
+// cells were slab undersides and outward-facing walls, correctly packed and
+// correctly receiving no light. What proves the packing is that nothing beyond
+// the 79th cell is lit, not that all 79 are.
+{
+  const result = check(png(SIZE, SIZE, litCells(6), 0), 8)
+  ok(
+    'packed cells left dark by shadow are not a failure',
+    result.code === 0 && result.out.includes('nothing outside the packed range'),
+    result.out.split('\n').find((l) => l.startsWith('OK')) ?? result.out.slice(0, 80),
+  )
+  ok(
+    'and the dark ones are called out',
+    result.out.includes('2 packed cell(s) are dark'),
   )
 }
 
@@ -204,7 +226,7 @@ for (const filter of [0, 1, 2, 3, 4]) {
   const result = check(png(SIZE, SIZE, noisy, 0), 5)
   ok(
     'faint noise in empty cells is not counted as lit',
-    result.code === 0 && result.out.includes('exactly 5 cells lit'),
+    result.code === 0 && result.out.includes('5 of 5 cells lit'),
   )
 }
 
