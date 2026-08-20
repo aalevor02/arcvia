@@ -15,7 +15,7 @@ export async function registerSceneRoutes(app) {
   app.get('/', { preHandler: requireAuth }, async (request) => {
     const scenes = await db.find('scenes', (s) => s.ownerId === request.auth.userId)
     return {
-      scenes: scenes.map(summarise).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      scenes: scenes.map(listItem).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     }
   })
 
@@ -42,6 +42,7 @@ export async function registerSceneRoutes(app) {
       lightsUrl: null,
       hdriUrl: null,
       floorPlanUrl: null,
+      plan: null,
       published: false,
       publishedSlug: null,
       updatedAt: new Date().toISOString(),
@@ -62,7 +63,14 @@ export async function registerSceneRoutes(app) {
 
     // Allow-list the writable fields. Spreading req.body straight into the
     // record would let a caller rewrite ownerId and steal someone's scene.
-    const allowed = ['name', 'modelUrl', 'lightsUrl', 'hdriUrl', 'floorPlanUrl']
+    //
+    // `plan` is the 2D floor-plan graph (see apps/studio/src/plan/types.ts).
+    // It rides in the JSON body rather than going to object storage the way the
+    // model and textures do, because it is small — a few hundred vertices, tens
+    // of kilobytes — and it changes on every edit, so a presigned round-trip per
+    // save would cost two requests to move less data than the request headers.
+    // Revisit if plans ever carry raster underlays inline; they must not.
+    const allowed = ['name', 'modelUrl', 'lightsUrl', 'hdriUrl', 'floorPlanUrl', 'plan']
     const patch = Object.fromEntries(
       Object.entries(request.body ?? {}).filter(([k]) => allowed.includes(k)),
     )
@@ -144,6 +152,27 @@ async function owned(request, reply) {
 function summarise(scene) {
   const { ownerId, ...rest } = scene
   return rest
+}
+
+/**
+ * Row shape for the dashboard list.
+ *
+ * Drops `plan` specifically. The dashboard renders a name, a date and a
+ * published badge — it has no use for the wall graph, and returning it means a
+ * user with fifty projects downloads fifty floor plans to draw a table. The
+ * editor fetches the full record by id when a project is actually opened.
+ *
+ * Kept as a separate function from `summarise` so the single-scene responses,
+ * which *do* need the plan, cannot be trimmed by accident later.
+ */
+function listItem(scene) {
+  const { plan, ...rest } = summarise(scene)
+  return {
+    ...rest,
+    // Enough for the dashboard to show "3 floors" without shipping the graph.
+    floorCount: Array.isArray(plan?.floors) ? plan.floors.length : 0,
+    hasPlan: Boolean(plan),
+  }
 }
 
 function slugify(value) {

@@ -1,8 +1,9 @@
 ---
 import brand from '@arcvia/brand'
 import Base from '../layouts/Base.astro'
-import { billingEnabled, plans, creditCost } from '@arcvia/brand/plans'
+import { billingEnabled, plans, creditCost, formatCredits } from '@arcvia/brand/plans'
 import FaqAccordion from '../components/FaqAccordion.tsx'
+import PlanTable from '../components/PlanTable.astro'
 import { faqs } from '../data/faqs'
 
 const free = plans.free
@@ -45,8 +46,10 @@ const meter = [
   </section>
 
   {
-    /* When billing flips on, this page grows a tier grid. Until then it stays a
-       single honest card rather than a fake comparison table. */
+    /* The headline card is the plan everyone is actually on. The comparison
+       table further down shows the tiers that exist in configuration but are
+       dormant — deliberately below this, so the page leads with what is true
+       today rather than with a grid of prices nobody is being asked to pay. */
   }
   <section class="py-section">
     <div class="shell max-w-3xl">
@@ -65,7 +68,7 @@ const meter = [
           {
             [
               `Up to ${free.seats} team members`,
-              `${free.creditsPerSeat.toLocaleString('en-IN')} render credits per member, monthly`,
+              `${formatCredits(free)} render credits per member, monthly`,
               'Unused credits roll over',
               'Unlimited projects and storage',
               'Interactive, configurable walkthroughs',
@@ -138,7 +141,25 @@ const meter = [
     </div>
   </section>
 
-  <section class="pb-section">
+  <!-- ── Compare plans ───────────────────────────────────────────────────── -->
+  <section class="bg-surface-alt py-section">
+    <div class="shell">
+      <p class="eyebrow">Compare</p>
+      <h2 class="h2 mt-3 max-w-2xl text-balance">
+        {billingEnabled ? 'Compare plans' : 'What plans will look like'}
+      </h2>
+      <p class="mt-3 max-w-2xl leading-relaxed text-ink-soft">
+        Generated straight from the plan configuration the API enforces, so this
+        table cannot promise something the product then refuses to do.
+      </p>
+
+      <div class="mt-8">
+        <PlanTable />
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-section pt-section">
     <div class="shell max-w-3xl">
       <h2 class="h2">Questions</h2>
       <FaqAccordion client:visible items={faqs} initialOpen={null} />

@@ -25,6 +25,9 @@ const EMPTY = {
   renderJobs: [],
   leads: [],
   creditLedger: [],
+  referrals: [],
+  passwordResets: [],
+  handoffTickets: [],
 }
 
 let cache = null

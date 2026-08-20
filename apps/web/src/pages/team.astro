@@ -1,0 +1,23 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+import TeamManager from '../components/TeamManager.tsx'
+---
+
+<Base
+  title="Team members"
+  description={`Invite and manage the people in your ${brand.name} organisation.`}
+  noindex
+>
+  <section class="shell max-w-3xl py-16">
+    <h1 class="h2 text-balance">Team members</h1>
+    <p class="lede mt-3 text-pretty">
+      Everyone gets their own seat and their own credit allocation. Shared
+      logins are the usual reason a project goes missing.
+    </p>
+
+    <div class="mt-10">
+      <TeamManager client:only="react" />
+    </div>
+  </section>
+</Base>

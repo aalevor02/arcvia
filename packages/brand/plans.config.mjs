@@ -132,9 +132,31 @@ export const plans = {
 /** The plan every new account lands on while billing is disabled. */
 export const defaultPlanId = 'free'
 
+/**
+ * Above this, an allowance is not a number anyone is tracking — it is "no
+ * practical limit", and printing the digits actively misleads.
+ */
+const UNMETERED_THRESHOLD = 100000
+
+/**
+ * How a plan's credit allowance is written on the site.
+ *
+ * Exists because the pricing page printed "1,00,000 render credits" in the plan
+ * card while the comparison table three sections below said "Unmetered" for the
+ * same plan. Both were reading the same field and formatting it differently,
+ * and the page contradicted itself in public.
+ *
+ * One formatter, used by every surface that shows an allowance.
+ */
+export function formatCredits(plan) {
+  return plan.creditsPerSeat >= UNMETERED_THRESHOLD
+    ? 'Unmetered'
+    : plan.creditsPerSeat.toLocaleString('en-IN')
+}
+
 export function planFor(id) {
   if (!billingEnabled) return plans[defaultPlanId]
   return plans[id] ?? plans[defaultPlanId]
 }
 
-export default { billingEnabled, plans, creditCost, defaultPlanId, planFor }
+export default { billingEnabled, plans, creditCost, defaultPlanId, planFor, formatCredits }

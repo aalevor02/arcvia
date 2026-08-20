@@ -1,0 +1,190 @@
+---
+import { billingEnabled, plans, formatCredits } from '@arcvia/brand/plans'
+
+/**
+ * The plan × feature matrix.
+ *
+ * Rendered from `plans.config.mjs` rather than hand-written, so the marketing
+ * page cannot drift from what the API actually enforces — the classic failure
+ * where the site promises BOQ on a tier the server denies it on.
+ *
+ * It renders in both billing modes:
+ *   billing OFF → a "what plans will look like" reference, with no buy button
+ *                 anywhere and a banner saying everything is free today.
+ *   billing ON  → the live comparison, with a CTA per column.
+ *
+ * That is the whole change on the day billing is switched on.
+ */
+
+/** Ordered deliberately: cheapest first, the way people read a price table. */
+const ORDER = ['free', 'studio', 'practice', 'enterprise'] as const
+
+const columns = ORDER.map((id) => plans[id]).filter(Boolean)
+
+const rows = [
+  { key: 'seats', label: 'Team members', kind: 'seats' },
+  { key: 'creditsPerSeat', label: 'Render credits per member', kind: 'credits' },
+  { key: 'walkthroughs', label: 'Interactive 3D walkthroughs', kind: 'bool' },
+  { key: 'configurator', label: 'Client-facing configurator', kind: 'bool' },
+  { key: 'unlimitedProjects', label: 'Unlimited projects & storage', kind: 'bool' },
+  { key: 'creditsCarryForward', label: 'Unused credits carry forward', kind: 'bool' },
+  { key: 'modellingTool', label: 'In-browser modelling tool', kind: 'bool' },
+  { key: 'floorplanDetect', label: 'Automatic floor-plan detection', kind: 'bool' },
+  { key: 'boq', label: 'BOQ & BOM generation', kind: 'bool' },
+  { key: 'downloadableModel', label: 'Downloadable 3D model', kind: 'bool' },
+  { key: 'support', label: 'Support', kind: 'support' },
+] as const
+
+const SUPPORT_LABEL: Record<string, string> = {
+  email: 'Email',
+  'chat+email': 'Chat & email',
+  'chat+email+call': 'Chat, email & phone',
+}
+
+function cell(plan: (typeof columns)[number], row: (typeof rows)[number]) {
+  if (row.kind === 'seats') {
+    return plan.seats === Infinity ? 'Unlimited' : String(plan.seats)
+  }
+  if (row.kind === 'credits') return formatCredits(plan)
+  if (row.kind === 'support') {
+    return SUPPORT_LABEL[plan.features.support] ?? plan.features.support
+  }
+  return plan.features[row.key as keyof typeof plan.features]
+}
+
+function price(plan: (typeof columns)[number]) {
+  if (plan.price === null) return 'Talk to us'
+  if (plan.price === 0) return '₹0'
+  return `₹${plan.price.toLocaleString('en-IN')}`
+}
+---
+
+<div>
+  {
+    !billingEnabled && (
+      <p class="alert-info">
+        <strong class="text-ink">Nothing here is charged today.</strong> Every
+        account runs on the free tier with the full feature set. This table is
+        published so you can see what paid plans will look like before they
+        exist — not to upsell you into one.
+      </p>
+    )
+  }
+
+  <div class="mt-6 overflow-x-auto rounded-card border border-line">
+    <table class="w-full min-w-[46rem] border-collapse text-sm">
+      <caption class="sr-only">
+        Feature comparison across {columns.length} plans
+      </caption>
+
+      <thead>
+        <tr>
+          <th scope="col" class="bg-surface-alt px-5 py-4 text-left font-semibold">
+            Features
+          </th>
+          {
+            columns.map((plan) => (
+              <th
+                scope="col"
+                class:list={[
+                  'px-5 py-4 text-left align-top',
+                  plan.id === 'free' && !billingEnabled
+                    ? 'bg-accent-soft'
+                    : 'bg-surface-alt',
+                ]}
+              >
+                <span class="block font-semibold">{plan.label}</span>
+                <span class="mt-1 block text-base font-semibold tracking-tight">
+                  {price(plan)}
+                  {plan.price ? (
+                    <span class="text-xs font-normal text-ink-soft">
+                      {' '}
+                      /user /month
+                    </span>
+                  ) : null}
+                </span>
+                {plan.id === 'free' && !billingEnabled && (
+                  <span class="pill mt-2 !border-accent/30 !bg-surface !text-accent">
+                    Everyone is here
+                  </span>
+                )}
+              </th>
+            ))
+          }
+        </tr>
+      </thead>
+
+      <tbody>
+        {
+          rows.map((row) => (
+            <tr class="border-t border-line">
+              <th scope="row" class="px-5 py-3 text-left font-medium">
+                {row.label}
+              </th>
+              {columns.map((plan) => {
+                const value = cell(plan, row)
+                return (
+                  <td
+                    class:list={[
+                      'px-5 py-3',
+                      plan.id === 'free' && !billingEnabled
+                        ? 'bg-accent-soft/40'
+                        : '',
+                    ]}
+                  >
+                    {typeof value === 'boolean' ? (
+                      value ? (
+                        <>
+                          <svg
+                            width="16" height="16" viewBox="0 0 16 16" fill="none"
+                            aria-hidden="true" class="text-signal"
+                          >
+                            <path
+                              d="M13 4.5 6.5 11 3 7.5"
+                              stroke="currentColor" stroke-width="1.8"
+                              stroke-linecap="round" stroke-linejoin="round"
+                            />
+                          </svg>
+                          {/* Icons alone are invisible to a screen reader and
+                              ambiguous in high-contrast mode. */}
+                          <span class="sr-only">Included</span>
+                        </>
+                      ) : (
+                        <>
+                          <span class="text-ink-soft" aria-hidden="true">
+                            —
+                          </span>
+                          <span class="sr-only">Not included</span>
+                        </>
+                      )
+                    ) : (
+                      <span class="text-ink-soft">{value}</span>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))
+        }
+
+        {
+          billingEnabled && (
+            <tr class="border-t border-line">
+              <td />
+              {columns.map((plan) => (
+                <td class="px-5 py-5">
+                  <a
+                    href={plan.price === null ? '/contact/' : '/register/'}
+                    class="btn-primary w-full !px-3 !py-2 text-xs"
+                  >
+                    {plan.price === null ? 'Talk to us' : `Choose ${plan.label}`}
+                  </a>
+                </td>
+              ))}
+            </tr>
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

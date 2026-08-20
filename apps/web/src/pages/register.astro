@@ -1,7 +1,7 @@
 ---
 import brand from '@arcvia/brand'
 import Base from '../layouts/Base.astro'
-import { plans } from '@arcvia/brand/plans'
+import { plans, formatCredits } from '@arcvia/brand/plans'
 
 const free = plans.free
 ---
@@ -25,7 +25,7 @@ const free = plans.free
           [
             'Unlimited projects and storage',
             `Invite up to ${free.seats} team members`,
-            `${free.creditsPerSeat.toLocaleString('en-IN')} render credits per member each month`,
+            `${formatCredits(free)} render credits per member each month`,
             'Export your models and stills at any time',
           ].map((f) => (
             <li class="flex items-start gap-2.5">
@@ -113,6 +113,26 @@ const free = plans.free
           />
         </div>
 
+        <div>
+          <label for="referralCode" class="mb-1.5 block text-sm font-medium">
+            Referral code <span class="font-normal text-ink-soft">(optional)</span>
+          </label>
+          <input
+            id="referralCode"
+            name="referralCode"
+            type="text"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            maxlength="12"
+            class="field font-mono uppercase tracking-wider"
+          />
+          <!-- Confirmed live as the field is filled, so a mistyped code is
+               caught while it can still be corrected. Once the account exists
+               the referral cannot be attached retroactively. -->
+          <p id="referral-status" class="hint" aria-live="polite"></p>
+        </div>
+
         <p
           id="form-error"
           role="alert"
@@ -136,15 +156,64 @@ const free = plans.free
 
 <script>
   import { register } from '../lib/auth'
+  import { validateReferralCode } from '../lib/account'
 
   const form = document.getElementById('register-form') as HTMLFormElement | null
   const errorBox = document.getElementById('form-error') as HTMLElement | null
   const submit = document.getElementById('submit') as HTMLButtonElement | null
+  const refInput = document.getElementById('referralCode') as HTMLInputElement | null
+  const refStatus = document.getElementById('referral-status') as HTMLElement | null
 
   function showError(message: string) {
     if (!errorBox) return
     errorBox.textContent = message
     errorBox.classList.remove('hidden')
+  }
+
+  // ---- Referral code -------------------------------------------------------
+
+  // A shared link arrives as /register/?ref=CODE. Prefilling it means the
+  // person who was referred never has to notice the code exists.
+  const fromUrl = new URLSearchParams(location.search).get('ref')
+  if (fromUrl && refInput) {
+    refInput.value = fromUrl.toUpperCase()
+    void checkReferral()
+  }
+
+  let refTimer: ReturnType<typeof setTimeout> | undefined
+
+  refInput?.addEventListener('input', () => {
+    if (refStatus) refStatus.textContent = ''
+    clearTimeout(refTimer)
+    // Debounced: this fires per keystroke otherwise, and an 8-character code
+    // would produce eight requests, seven of which are known-invalid prefixes.
+    refTimer = setTimeout(checkReferral, 400)
+  })
+
+  async function checkReferral() {
+    const code = refInput?.value.trim().toUpperCase() ?? ''
+    if (!refStatus) return
+    if (!code) {
+      refStatus.textContent = ''
+      refStatus.className = 'hint'
+      return
+    }
+
+    try {
+      const result = await validateReferralCode(code)
+      if (result.valid) {
+        refStatus.textContent = `Referred by ${result.organisation}.`
+        refStatus.className = 'hint !text-signal'
+      } else {
+        refStatus.textContent = "We don't recognise that code — you can still continue."
+        refStatus.className = 'hint !text-warn'
+      }
+    } catch {
+      // A lookup failure is not the user's problem and must not read like a
+      // rejection: the code is still sent, and the server decides.
+      refStatus.textContent = ''
+      refStatus.className = 'hint'
+    }
   }
 
   form?.addEventListener('submit', async (event) => {
@@ -158,6 +227,8 @@ const free = plans.free
       organisation: String(data.get('organisation') ?? '').trim(),
       phone: String(data.get('phone') ?? '').trim(),
       password: String(data.get('password') ?? ''),
+      referralCode:
+        String(data.get('referralCode') ?? '').trim().toUpperCase() || undefined,
     }
 
     if (payload.password.length < 8) {

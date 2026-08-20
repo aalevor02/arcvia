@@ -1,0 +1,85 @@
+---
+import brand from '@arcvia/brand'
+import plans from '@arcvia/brand/plans'
+import Base from '../layouts/Base.astro'
+import TrialStatus from '../components/TrialStatus.tsx'
+
+const free = plans.plans[plans.defaultPlanId]
+---
+
+<Base
+  title={plans.billingEnabled ? 'Start your free trial' : 'Start building'}
+  description={`Get started with ${brand.name}.`}
+>
+  <section class="shell max-w-3xl py-16">
+    {
+      plans.billingEnabled ? (
+        <>
+          <p class="eyebrow">Free trial</p>
+          <h1 class="h2 mt-3 text-balance">Start your free trial</h1>
+          <p class="lede mt-4 text-pretty">
+            Full access while the trial runs. No card until you decide to keep
+            it.
+          </p>
+        </>
+      ) : (
+        <>
+          <p class="eyebrow">Getting started</p>
+          <h1 class="h2 mt-3 text-balance">There is no trial to start</h1>
+          <p class="lede mt-4 text-pretty">
+            {brand.name} is free, so there is nothing to expire and no clock to
+            beat. Create an account and the whole product is open —
+            walkthroughs, the configurator, the modelling tool and GPU renders.
+          </p>
+        </>
+      )
+    }
+
+    <div class="mt-10">
+      <!-- Shows where the account actually stands rather than assuming the
+           visitor is signed out. See the component for why. -->
+      <TrialStatus client:only="react" />
+    </div>
+
+    {
+      !plans.billingEnabled && (
+        <div class="mt-12">
+          <h2 class="h3">What "free" means here, exactly</h2>
+          <ul class="mt-4 space-y-3">
+            {[
+              ['No card, ever, at this stage', 'There is no payment path in the product to put one into.'],
+              ['No feature held back', 'Nothing is labelled Pro. The free plan is the whole product.'],
+              [`Up to ${free.seats} team members`, 'Each with their own seat and their own render allocation.'],
+              ['Credits are a GPU guard, not a paywall', 'They exist so one project cannot consume the whole render pool. Running out is not a prompt to pay.'],
+              ['Your work is exportable', 'Models and stills download at any time, so leaving costs you nothing.'],
+            ].map(([title, body]) => (
+              <li class="flex items-start gap-3">
+                <svg
+                  width="18" height="18" viewBox="0 0 18 18" fill="none"
+                  aria-hidden="true" class="mt-0.5 shrink-0 text-signal"
+                >
+                  <path
+                    d="M3.5 9.5l3.5 3.5 7.5-8"
+                    stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"
+                  />
+                </svg>
+                <span class="text-sm leading-relaxed">
+                  <strong class="font-medium">{title}.</strong>{' '}
+                  <span class="text-ink-soft">{body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <p class="alert-info mt-8">
+            When paid plans do arrive, existing accounts get notice well before
+            anything changes, and you will never be billed for time you have
+            already used for free. The <a href="/pricing/" class="text-accent underline">pricing page</a>{' '}
+            already shows what those plans will look like.
+          </p>
+        </div>
+      )
+    }
+  </section>
+</Base>

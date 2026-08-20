@@ -1,0 +1,84 @@
+SERVICES:
+  7xniro3c0e
+  eda8nfsff3
+  0osjdgeg9c
+  kojwavrjdd
+  x2anddp6n0
+
+ENDPOINTS (44):
+0osjdgeg9c  /furniture/v2
+0osjdgeg9c  /save-hdr
+0osjdgeg9c  /scenes/get-by-name-v2?sceneName=${a}&orgName=${e}
+0osjdgeg9c  /upload-local-object-image-url?sceneId=${e}&objectName=${n}&type=${s}
+0osjdgeg9c  /upload-local-object-url?sceneId=${e}&objectName=${n}&type=${s}
+0osjdgeg9c  /uploads-pdf-url
+7xniro3c0e  /delete-user-scene
+7xniro3c0e  /save-hdr-for-preview
+7xniro3c0e  /scenes/bake
+7xniro3c0e  /scenes/bake-switch/save-user-scene-switch-object-json-url?sceneName=${e}
+7xniro3c0e  /scenes/bake/cancel
+7xniro3c0e  /scenes/bake/status
+7xniro3c0e  /scenes/custom-object/get-put-material-url?userId=${encodeURIComponent
+7xniro3c0e  /scenes/floor-plan/get-put-image-url?uSserId=${encodeURIComponent
+7xniro3c0e  /scenes/get-available-scene-name
+7xniro3c0e  /scenes/lights/save-user-scene-light-json-url?sceneName=${e}
+7xniro3c0e  /scenes/mark-as-published?sceneId=${l}
+7xniro3c0e  /scenes/publish/put-preview-url?sceneId=${a}
+7xniro3c0e  /scenes/publish/save-user-scene-image-url?sceneName=${e}
+7xniro3c0e  /scenes/published
+7xniro3c0e  /scenes/published?sceneId=${a}
+7xniro3c0e  /scenes/request-scene-publish-v2?sceneName=${e}&overwrite=${s}
+7xniro3c0e  /scenes/saved/duplicate
+7xniro3c0e  /scenes/upload-preview?sceneId=${e}
+7xniro3c0e  /users/canCreateSceneV2
+eda8nfsff3  /auth/generate-one-time-login-token
+eda8nfsff3  /list-scenes
+eda8nfsff3  /list-scenes-metadata
+eda8nfsff3  /save-user-scene-metadata
+eda8nfsff3  /save-user-scene-url?sceneName=${e}
+eda8nfsff3  /users/${a}
+eda8nfsff3  /users/active-session?userId=${a}
+eda8nfsff3  /users/check-email-verification?login=false
+eda8nfsff3  /users/login
+eda8nfsff3  /users/sendPasswordResetLink
+eda8nfsff3  /users/type
+eda8nfsff3  /users/type?userId=${a}
+kojwavrjdd  /mongo/create-object
+kojwavrjdd  /mongo/get-objects
+x2anddp6n0  /organisation/credits
+x2anddp6n0  /organisation/details?userId=${a}
+x2anddp6n0  /organisation/org-info
+x2anddp6n0  /organisation/preview-render-count
+x2anddp6n0  /organisation/scenes/add
+https://0osjdgeg9c.execute-api.ap-south-1.amazonaws.com/prod/scenes/get-by-name-v2
+https://0osjdgeg9c.execute-api.ap-south-1.amazonaws.com/prod/upload-local-texture-url
+https://0osjdgeg9c.execute-api.ap-south-1.amazonaws.com/prod/users/checkDevice
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/checkpoints
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/isSceneLoginRequired
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/organisation/scene-exists
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/recent-scenes
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/recent-scenes/${n}
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/bake
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/bake-switch/save-user-scene-switch-resources-json-url
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/bake/cancel
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/bake/status
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/get-bake-time-remaining
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/get-baked-url
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/get-put-logo-url/${e}
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/logos/${e}
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/mark-as-published
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/published
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/request-scene-publish
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/textures/delete-texture-image
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/textures/save-texture-image
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/textures/save-texture-json
+https://7xniro3c0e.execute-api.ap-south-1.amazonaws.com/prod/scenes/update-baked-url
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/auth/generate-one-time-login-token
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/auth/one-time-login
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/login/anonymous
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/users/check-email-verification
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/users/material-and-switch-objects
+https://eda8nfsff3.execute-api.ap-south-1.amazonaws.com/prod/users/trial-device-type
+https://v8p7438yw0.execute-api.ap-south-1.amazonaws.com/prod/organisation/credits/refund
+https://x2anddp6n0.execute-api.ap-south-1.amazonaws.com/prod/organisation/credits

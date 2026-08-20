@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Marketing site — Astro static build, served from any static host.",
   "scripts": {
-    "dev": "astro dev --port 4321",
+    "dev": "astro dev --port 4321 --host",
     "build": "astro build",
-    "preview": "astro preview --port 4321",
-    "check": "astro check"
+    "preview": "astro preview --port 4321 --host",
+    "check": "astro check",
+    "linkcheck": "node test/linkcheck.mjs"
   },
   "dependencies": {
     "@arcvia/brand": "*",

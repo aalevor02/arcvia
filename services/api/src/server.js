@@ -8,49 +8,13 @@ import { registerSceneRoutes } from './routes/scenes.js'
 import { registerRenderRoutes } from './routes/render.js'
 import { registerLeadRoutes } from './routes/leads.js'
 import { registerBillingRoutes } from './routes/billing.js'
+import { registerReferralRoutes } from './routes/referral.js'
+import { registerUploadRoutes } from './routes/uploads.js'
+import { registerDetectRoutes } from './routes/detect.js'
+import { isOriginAllowed } from './lib/origins.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
 const HOST = process.env.HOST ?? '0.0.0.0'
-
-// Origins allowed to call this API. One list, one place — as opposed to the
-// eight separate CORS configurations the reference architecture needed.
-const ORIGINS = (
-  process.env.ALLOWED_ORIGINS ??
-  'http://localhost:4321,http://localhost:5173,http://localhost:5174'
-)
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean)
-
-const IS_PRODUCTION = process.env.NODE_ENV === 'production'
-
-/** Loopback, or an RFC1918 private LAN address. */
-const PRIVATE_HOST =
-  /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/
-
-/**
- * Decide whether an Origin may call this API.
- *
- * Outside production we accept any origin on the local machine or the local
- * network. The reason is practical: testing "works on any device" means opening
- * the site from a phone, which arrives as `http://192.168.x.x:4321` — an origin
- * nobody thought to allowlist, and whose IP changes whenever DHCP feels like it.
- * Pinning the list to `localhost` makes every cross-device test fail with what
- * looks like a server outage.
- *
- * In production this is strictly the configured list. No pattern matching.
- */
-function isOriginAllowed(origin) {
-  if (ORIGINS.includes(origin)) return true
-  if (IS_PRODUCTION) return false
-
-  try {
-    const { hostname, protocol } = new URL(origin)
-    return protocol === 'http:' && PRIVATE_HOST.test(hostname)
-  } catch {
-    return false
-  }
-}
 
 const app = Fastify({
   logger: {
@@ -97,6 +61,9 @@ await app.register(registerOrgRoutes, { prefix: '/organisations' })
 await app.register(registerSceneRoutes, { prefix: '/scenes' })
 await app.register(registerRenderRoutes, { prefix: '/render' })
 await app.register(registerBillingRoutes, { prefix: '/billing' })
+await app.register(registerReferralRoutes, { prefix: '/referral' })
+await app.register(registerUploadRoutes, { prefix: '/uploads' })
+await app.register(registerDetectRoutes, { prefix: '/detect' })
 await app.register(registerLeadRoutes)
 
 app.setErrorHandler((error, request, reply) => {

@@ -1,0 +1,73 @@
+---
+import Base from './Base.astro'
+
+interface Props {
+  title: string
+  description: string
+  /** ISO date. Shown so a reader can tell whether they've seen this version. */
+  updated: string
+}
+
+const { title, description, updated } = Astro.props
+
+const formatted = new Date(updated).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
+---
+
+<Base title={title} description={description}>
+  <article class="shell max-w-[46rem] py-16">
+    <h1 class="h2 text-balance">{title}</h1>
+    <p class="mt-3 text-sm text-ink-soft">
+      Last updated <time datetime={updated}>{formatted}</time>
+    </p>
+
+    <!-- Long-form legal text is the one place on this site where a prose style
+         is worth defining, because the content is a wall of headings and
+         paragraphs with no components in it. Scoped here rather than global so
+         it cannot leak into marketing pages. -->
+    <div class="legal mt-10">
+      <slot />
+    </div>
+
+    <p class="alert-info mt-12">
+      This document describes how the product actually works today. It has not
+      been reviewed by a lawyer — have counsel check it against your
+      jurisdiction before you take payments or process client data under it.
+    </p>
+  </article>
+</Base>
+
+<style is:global>
+  .legal h2 {
+    @apply mt-10 text-lg font-semibold tracking-tight;
+  }
+  .legal h3 {
+    @apply mt-6 text-base font-semibold;
+  }
+  .legal p,
+  .legal li {
+    @apply mt-3 text-sm leading-relaxed text-ink-soft;
+  }
+  .legal ul {
+    @apply mt-2 list-disc space-y-1 pl-5;
+  }
+  .legal a {
+    @apply text-accent underline;
+  }
+  .legal strong {
+    @apply font-semibold text-ink;
+  }
+  .legal table {
+    @apply mt-4 w-full border-collapse text-sm;
+  }
+  .legal th,
+  .legal td {
+    @apply border border-line px-3 py-2 text-left align-top;
+  }
+  .legal th {
+    @apply bg-surface-alt font-semibold text-ink;
+  }
+</style>

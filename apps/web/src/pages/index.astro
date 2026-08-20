@@ -1,26 +1,11 @@
 ---
 import brand from '@arcvia/brand'
+import plans from '@arcvia/brand/plans'
 import Base from '../layouts/Base.astro'
 import FaqAccordion from '../components/FaqAccordion.tsx'
+import HowItWorks from '../components/HowItWorks.tsx'
+import HeroVisual from '../components/HeroVisual.astro'
 import { faqs } from '../data/faqs'
-
-const steps = [
-  {
-    n: '01',
-    title: 'Upload your drawings',
-    body: 'CAD, SketchUp, Revit exports, PDF, JPG or PNG. Our detector reads the plan and finds walls, doors, windows and fixtures automatically.',
-  },
-  {
-    n: '02',
-    title: 'Customise the space',
-    body: 'Place furniture, set materials and paint, and light the scene. Everything happens live in the browser — no software to install.',
-  },
-  {
-    n: '03',
-    title: 'Share a link',
-    body: 'Publish once and send a single URL. Clients explore on desktop, phone or a VR headset, and can reconfigure the space themselves.',
-  },
-]
 
 const features = [
   {
@@ -38,6 +23,28 @@ const features = [
   {
     title: 'A design tool and a sales tool',
     body: 'One asset serves the design review, the client presentation and the marketing campaign. Build it once, use it everywhere.',
+  },
+]
+
+const collaboration = [
+  'Several architects in one model, without overwriting each other',
+  'Share progress without a call and a re-explanation',
+  'One standardised walkthrough for every presentation',
+  'Fewer revision cycles caused by people reading a drawing differently',
+]
+
+const integrations = [
+  {
+    title: 'Ingests what you already export',
+    body: 'DWG, DXF, PDF, PNG, JPG and GLB. Nothing changes about how your team draws.',
+  },
+  {
+    title: 'Outputs what marketing already needs',
+    body: 'Stills up to 8K, a bill of quantities as a spreadsheet, and a walkthrough as a link.',
+  },
+  {
+    title: 'Runs where you deploy it',
+    body: 'Static site, one API, and a render worker you can point at your own GPU. No lock-in to ours.',
   },
 ]
 ---
@@ -62,22 +69,14 @@ const features = [
 
       <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
         <a href="/register/" class="btn-primary">Start building — free</a>
-        <a href="#how-it-works" class="btn-secondary">See how it works</a>
+        <a href="/services/" class="btn-secondary">See a live walkthrough</a>
       </div>
 
       <p class="mt-4 text-xs text-ink-soft">
         No card required. No trial clock.
       </p>
 
-      <!-- Aspect box reserved up front so the hero never shifts when the media
-           finishes loading — a real Core Web Vitals win, not decoration. -->
-      <div
-        class="mx-auto mt-14 aspect-video w-full max-w-4xl overflow-hidden rounded-card border border-line bg-surface-alt shadow-sm"
-      >
-        <div class="grid h-full place-items-center text-sm text-ink-soft">
-          Product walkthrough
-        </div>
-      </div>
+      <HeroVisual />
     </div>
   </section>
 
@@ -89,17 +88,9 @@ const features = [
         From a flat drawing to a walkthrough in three steps
       </h2>
 
-      <ol class="mt-12 grid gap-6 md:grid-cols-3">
-        {
-          steps.map((s) => (
-            <li class="card">
-              <span class="font-mono text-sm text-accent">{s.n}</span>
-              <h3 class="h3 mt-3">{s.title}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-ink-soft">{s.body}</p>
-            </li>
-          ))
-        }
-      </ol>
+      <!-- client:visible — the tabs are below the fold on every viewport, so
+           the JS is not fetched until someone scrolls to them. -->
+      <HowItWorks client:visible />
     </div>
   </section>
 
@@ -124,6 +115,65 @@ const features = [
     </div>
   </section>
 
+  <!-- ── Collaboration ───────────────────────────────────────────────────── -->
+  <section class="py-section">
+    <div class="shell grid gap-12 lg:grid-cols-2 lg:items-center">
+      <div>
+        <p class="eyebrow">Collaboration</p>
+        <h2 class="h2 mt-3 text-balance">
+          Projects don’t stall because the design is bad
+        </h2>
+        <p class="mt-4 leading-relaxed text-ink-soft">
+          They stall because people read the drawings differently. A model
+          everyone can walk through removes the ambiguity that the drawing set
+          leaves behind — before it becomes a revision.
+        </p>
+        <a href="/enterprise/" class="btn-secondary mt-7">How teams use it</a>
+      </div>
+
+      <ul class="space-y-3">
+        {
+          collaboration.map((c) => (
+            <li class="flex items-start gap-3 rounded-card border border-line bg-surface p-4">
+              <svg
+                width="18" height="18" viewBox="0 0 18 18" fill="none"
+                aria-hidden="true" class="mt-0.5 shrink-0 text-accent"
+              >
+                <path
+                  d="M3.5 9.5l3.5 3.5 7.5-8"
+                  stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"
+                />
+              </svg>
+              <span class="text-sm leading-relaxed text-ink-soft">{c}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── Integrations ────────────────────────────────────────────────────── -->
+  <section class="bg-surface-alt py-section">
+    <div class="shell">
+      <p class="eyebrow">Fits your workflow</p>
+      <h2 class="h2 mt-3 max-w-2xl text-balance">
+        Nothing about how your team works has to change
+      </h2>
+
+      <div class="mt-10 grid gap-6 md:grid-cols-3">
+        {
+          integrations.map((i) => (
+            <article class="card bg-surface">
+              <h3 class="h3">{i.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-ink-soft">{i.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
   <!-- ── Enterprise teaser ───────────────────────────────────────────────── -->
   <section id="enterprise" class="scroll-mt-24 py-section">
     <div class="shell">
@@ -132,15 +182,31 @@ const features = [
           For enterprise
         </p>
         <h2 class="h2 mt-3 max-w-2xl text-balance">
-          Projects don’t stall because the design is bad. They stall because
-          people read the drawings differently.
+          Build, present and sell projects faster — at scale
         </h2>
         <p class="mt-4 max-w-2xl leading-relaxed text-white/70">
           Multiple architects, one live model. Standardised output across teams,
           cities and projects — with automated BOQ and BOM so the numbers match
           the drawing.
         </p>
-        <div class="mt-8 flex flex-wrap gap-3">
+
+        <ul class="mt-8 grid gap-3 sm:grid-cols-2">
+          {
+            [
+              'Automated BOQ and BOM generation',
+              'Faster client approvals',
+              'Fewer revisions, less confusion',
+              'Standardised output across teams',
+            ].map((item) => (
+              <li class="flex items-start gap-2.5 text-sm text-white/80">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                {item}
+              </li>
+            ))
+          }
+        </ul>
+
+        <div class="mt-9 flex flex-wrap gap-3">
           <a href="/enterprise/" class="btn-primary">Explore enterprise</a>
           <a
             href="/contact/"
@@ -152,14 +218,39 @@ const features = [
     </div>
   </section>
 
+  <!-- ── Referral teaser ─────────────────────────────────────────────────── -->
+  <section class="pb-section">
+    <div class="shell">
+      <div
+        class="flex flex-col items-start justify-between gap-6 rounded-card border border-line bg-accent-soft p-8 sm:flex-row sm:items-center"
+      >
+        <div>
+          <p class="eyebrow">Referrals</p>
+          <h2 class="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+            Know a practice that would rather send a walkthrough than a PDF?
+          </h2>
+          <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-soft">
+            {
+              plans.billingEnabled
+                ? 'Earn 10% of every referred subscription, every month, with no cap.'
+                : 'Referrals are recorded from today and pay 10% recurring once billing starts. Your code is already waiting in your account.'
+            }
+          </p>
+        </div>
+        <a href="/referral/" class="btn-primary shrink-0">Get your code</a>
+      </div>
+    </div>
+  </section>
+
   <!-- ── FAQ ─────────────────────────────────────────────────────────────── -->
   <section id="faq" class="scroll-mt-24 pb-section">
     <div class="shell max-w-3xl">
       <p class="eyebrow">FAQs</p>
       <h2 class="h2 mt-3">Frequently asked questions</h2>
 
-      <!-- The only island on this page. `client:visible` means the JS is not
-           fetched at all until the reader scrolls this far down. -->
+      <!-- Both islands on this page are `client:visible`: neither is above the
+           fold, so a visitor who never scrolls downloads no component JS at
+           all. Everything else here is static HTML. -->
       <FaqAccordion client:visible items={faqs} />
     </div>
   </section>

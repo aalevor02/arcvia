@@ -1,6 +1,7 @@
 import { db, nanoid } from '../store.js'
 import { hashPassword, verifyPassword, issueToken, requireAuth } from '../lib/auth.js'
 import { grantMonthly } from '../lib/credits.js'
+import { recordReferral, generateReferralCode } from './referral.js'
 import plansConfig from '@arcvia/brand/plans'
 
 const { defaultPlanId } = plansConfig
@@ -13,7 +14,28 @@ const OTP_RESEND_COOLDOWN_MS = 30 * 1000
 
 /** True once a real SMS provider is configured. */
 const SMS_CONFIGURED = Boolean(process.env.SMS_PROVIDER)
+/** True once a real mail provider is configured. */
+const MAIL_CONFIGURED = Boolean(process.env.MAIL_PROVIDER)
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
+/**
+ * How long a password-reset link stays usable.
+ *
+ * Short, because this token *is* the account for as long as it lives, and it
+ * lives in an inbox — a place with a long memory and, frequently, other
+ * people's access. One hour is enough for someone to find the mail and act on
+ * it, and short enough that a forwarded thread from last week is inert.
+ */
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000
+
+/**
+ * How long a cross-origin hand-off ticket lives.
+ *
+ * Thirty seconds. The ticket exists only to survive one redirect, so anything
+ * longer is pure exposure — it rides in a URL, which lands in browser history
+ * and can leak through a referrer header.
+ */
+const HANDOFF_TTL_MS = 30 * 1000
 
 /**
  * Reduce anything the client sends to canonical E.164, or null.
@@ -87,6 +109,33 @@ function maskPhone(phone) {
   return `+91 •••••${String(phone).slice(-5)}`
 }
 
+/**
+ * Send the reset link, or log it in development.
+ *
+ * Mirrors deliverOtp deliberately: same two-condition guard, same shape. When
+ * the mail provider is wired up, this is the only function that changes.
+ */
+async function deliverPasswordReset(app, user, token) {
+  const url = `${process.env.PUBLIC_SITE_URL ?? 'http://localhost:4321'}/reset-password/?token=${token}`
+
+  if (MAIL_CONFIGURED) {
+    // TODO: call your mail provider here.
+    app.log.info({ email: user.email }, 'password reset dispatched')
+    return
+  }
+
+  app.log.warn(`\n  DEV PASSWORD RESET for ${user.email}\n  →  ${url}\n`)
+}
+
+/** The live token for a user, for the development-only echo. */
+async function currentResetToken(userId) {
+  const record = await db.findOne(
+    'passwordResets',
+    (r) => r.userId === userId && !r.usedAt,
+  )
+  return record?.token
+}
+
 /** Shape sent to the browser. Never includes the password hash. */
 function publicUser(user) {
   return {
@@ -104,7 +153,8 @@ function publicUser(user) {
 export async function registerAuthRoutes(app) {
   // ---- Register ----------------------------------------------------------
   app.post('/register', async (request, reply) => {
-    const { name, email, organisation, phone, password } = request.body ?? {}
+    const { name, email, organisation, phone, password, referralCode } =
+      request.body ?? {}
 
     if (!name || String(name).trim().length < 2) {
       return reply.status(400).send({ message: 'Enter your full name.' })
@@ -136,7 +186,7 @@ export async function registerAuthRoutes(app) {
       name: String(organisation ?? name).trim(),
       ownerId: null,
       seats: [],
-      referralCode: nanoid(8).toUpperCase(),
+      referralCode: generateReferralCode(),
     })
 
     const normalisedPhone = normalisePhone(phone)
@@ -173,6 +223,15 @@ export async function registerAuthRoutes(app) {
     // Grant the first month's credits immediately so a new account can render
     // straight away instead of waiting for a billing cycle that does not exist.
     await grantMonthly(user.id)
+
+    // Credit the referral *now*, at the only moment the code is in hand. A
+    // referral that is not recorded at signup cannot be reconstructed later —
+    // there is no trace linking the two accounts once the form is gone. An
+    // unknown or self-referring code is ignored rather than rejected: a typo
+    // must never cost someone their account.
+    if (referralCode) {
+      await recordReferral(user.id, org.id, referralCode)
+    }
 
     let devCode
     if (otp) {
@@ -300,6 +359,147 @@ export async function registerAuthRoutes(app) {
 
     await db.update('users', user.id, { phoneVerified: true, otp: null })
     return { verified: true }
+  })
+
+  // ---- Password reset ----------------------------------------------------
+  //
+  // Two routes, and the interesting decisions are both in the first one.
+
+  app.post('/password/forgot', async (request) => {
+    const email = String(request.body?.email ?? '').trim().toLowerCase()
+    const user = EMAIL_RE.test(email)
+      ? await db.findOne('users', (u) => u.email === email)
+      : null
+
+    if (user) {
+      // Invalidate any outstanding token before issuing a new one. Otherwise
+      // every "I didn't get the email, send it again" click leaves another
+      // working key to the account lying in an inbox.
+      const outstanding = await db.find(
+        'passwordResets',
+        (r) => r.userId === user.id && !r.usedAt,
+      )
+      for (const r of outstanding) await db.remove('passwordResets', r.id)
+
+      const record = await db.insert('passwordResets', {
+        userId: user.id,
+        token: `${nanoid(16)}${nanoid(16)}`,
+        expiresAt: Date.now() + PASSWORD_RESET_TTL_MS,
+        usedAt: null,
+      })
+
+      await deliverPasswordReset(app, user, record.token)
+    }
+
+    // Always the same response, whether or not the address exists. The
+    // alternative — "no account with that email" — turns this endpoint into a
+    // free membership oracle: anyone can test a list of addresses against it
+    // and learn who has an account here.
+    return {
+      sent: true,
+      message:
+        'If that address has an account, a reset link is on its way to it.',
+      // Development only, and only with no mail provider configured: without
+      // this the flow cannot be tested without wiring up SMTP first.
+      ...(!MAIL_CONFIGURED && !IS_PRODUCTION && user
+        ? { devToken: await currentResetToken(user.id) }
+        : {}),
+    }
+  })
+
+  app.post('/password/reset', async (request, reply) => {
+    const token = String(request.body?.token ?? '')
+    const password = String(request.body?.password ?? '')
+
+    if (password.length < 8) {
+      return reply
+        .status(400)
+        .send({ message: 'Password must be at least 8 characters.' })
+    }
+
+    const record = await db.findOne('passwordResets', (r) => r.token === token)
+
+    // One message for missing, expired and already-used. Distinguishing them
+    // tells an attacker holding a guessed token whether it ever existed.
+    if (!record || record.usedAt || Date.now() > record.expiresAt) {
+      return reply
+        .status(400)
+        .send({ message: 'That reset link is invalid or has expired.' })
+    }
+
+    const user = await db.findOne('users', (u) => u.id === record.userId)
+    if (!user) {
+      return reply
+        .status(400)
+        .send({ message: 'That reset link is invalid or has expired.' })
+    }
+
+    await db.update('users', user.id, {
+      passwordHash: await hashPassword(password),
+    })
+    await db.update('passwordResets', record.id, {
+      usedAt: new Date().toISOString(),
+    })
+
+    // Sign them straight in. Making someone who has just proved control of the
+    // account type the password they set four seconds ago is friction with no
+    // security value.
+    const fresh = await db.findOne('users', (u) => u.id === user.id)
+    return { token: await issueToken(fresh), user: publicUser(fresh) }
+  })
+
+  // ---- Cross-origin hand-off ---------------------------------------------
+  //
+  // The site and the studio are separate origins, so they do not share
+  // localStorage — signing in on one leaves the other signed out, and there is
+  // no way around that short of cookies on a shared parent domain, which does
+  // not exist during local development (`localhost:4321` vs `localhost:5173`).
+  //
+  // So: a signed-in page asks for a single-use ticket, puts it in the URL it
+  // navigates to, and the receiving app trades it for a real session.
+  //
+  // The ticket is deliberately weak on purpose — short-lived, one-use, and it
+  // grants exactly what the bearer already had. It travels in a URL, which
+  // means it will end up in browser history and possibly a referrer header, so
+  // it must be worthless within seconds of being used.
+
+  app.post('/handoff', { preHandler: requireAuth }, async (request, reply) => {
+    const user = await db.findOne('users', (u) => u.id === request.auth.userId)
+    if (!user) return reply.status(404).send({ message: 'User not found.' })
+
+    const ticket = await db.insert('handoffTickets', {
+      userId: user.id,
+      ticket: `${nanoid(16)}${nanoid(16)}`,
+      expiresAt: Date.now() + HANDOFF_TTL_MS,
+      usedAt: null,
+    })
+
+    return { ticket: ticket.ticket, expiresInSeconds: HANDOFF_TTL_MS / 1000 }
+  })
+
+  app.post('/handoff/redeem', async (request, reply) => {
+    const supplied = String(request.body?.ticket ?? '')
+    const record = await db.findOne('handoffTickets', (t) => t.ticket === supplied)
+
+    // One message for missing, expired and already-used, as with password
+    // reset: distinguishing them tells a holder of a guessed ticket whether it
+    // ever existed.
+    if (!record || record.usedAt || Date.now() > record.expiresAt) {
+      return reply.status(400).send({ message: 'That sign-in link has expired.' })
+    }
+
+    const user = await db.findOne('users', (u) => u.id === record.userId)
+    if (!user) {
+      return reply.status(400).send({ message: 'That sign-in link has expired.' })
+    }
+
+    // Burn it before issuing the session, not after. If the write fails, the
+    // caller gets an error and no session — which is the safe way round.
+    await db.update('handoffTickets', record.id, {
+      usedAt: new Date().toISOString(),
+    })
+
+    return { token: await issueToken(user), user: publicUser(user) }
   })
 
   // ---- Session -----------------------------------------------------------

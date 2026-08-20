@@ -1,0 +1,126 @@
+---
+/**
+ * The hero image, drawn rather than photographed.
+ *
+ * A placeholder box that says "Product walkthrough" is worse than nothing: it
+ * is the largest element on the page and it reads as a broken image. Until
+ * there is a real capture to put here, this shows what the product actually
+ * produces — a shared walkthrough with a live configurator — in about 2 kB of
+ * inline SVG that is sharp on any display and needs no network request.
+ *
+ * Everything paints in `currentColor` against Tailwind's brand tokens, so it
+ * follows a rebrand automatically.
+ */
+---
+
+<div
+  class="mx-auto mt-14 aspect-video w-full max-w-4xl overflow-hidden rounded-card border border-line bg-surface shadow-sm"
+>
+  <svg
+    viewBox="0 0 800 450"
+    class="h-full w-full"
+    role="img"
+    aria-label="A published walkthrough open in a browser, with material options a client can switch between"
+  >
+    <defs>
+      <linearGradient id="hero-sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="currentColor" class="text-accent" stop-opacity="0.30" />
+        <stop offset="100%" stop-color="currentColor" class="text-accent" stop-opacity="0.05" />
+      </linearGradient>
+      <linearGradient id="hero-floor" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="currentColor" class="text-ink" stop-opacity="0.16" />
+        <stop offset="100%" stop-color="currentColor" class="text-ink" stop-opacity="0.05" />
+      </linearGradient>
+      <linearGradient id="hero-light" x1="0.5" y1="0" x2="0.5" y2="1">
+        <stop offset="0%" stop-color="currentColor" class="text-warn" stop-opacity="0.34" />
+        <stop offset="100%" stop-color="currentColor" class="text-warn" stop-opacity="0" />
+      </linearGradient>
+      <clipPath id="hero-screen">
+        <rect x="24" y="60" width="752" height="366" rx="8" />
+      </clipPath>
+    </defs>
+
+    <!-- ── Browser chrome ─────────────────────────────────────────────── -->
+    <rect width="800" height="450" class="text-surface-alt" fill="currentColor" />
+    <g>
+      <circle cx="48" cy="32" r="5" class="text-line" fill="currentColor" />
+      <circle cx="68" cy="32" r="5" class="text-line" fill="currentColor" />
+      <circle cx="88" cy="32" r="5" class="text-line" fill="currentColor" />
+      <rect x="116" y="21" width="360" height="22" rx="11" class="text-surface" fill="currentColor" />
+      <rect x="130" y="29" width="128" height="6" rx="3" class="text-line" fill="currentColor" />
+    </g>
+
+    <!-- ── The scene ──────────────────────────────────────────────────── -->
+    <g clip-path="url(#hero-screen)">
+      <rect x="24" y="60" width="752" height="366" fill="url(#hero-sky)" />
+
+      <!-- back wall + window opening -->
+      <rect x="150" y="118" width="500" height="196" class="text-surface" fill="currentColor" />
+      <rect x="150" y="118" width="500" height="196" fill="none" stroke="currentColor" stroke-width="2" class="text-line" />
+      <rect x="452" y="150" width="150" height="112" class="text-accent" fill="currentColor" opacity="0.22" />
+      <rect x="452" y="150" width="150" height="112" fill="none" stroke="currentColor" stroke-width="3" class="text-ink" opacity="0.55" />
+      <line x1="527" y1="150" x2="527" y2="262" stroke="currentColor" stroke-width="3" class="text-ink" opacity="0.55" />
+
+      <!-- side walls in perspective -->
+      <path d="M150 118 L24 60 L24 400 L150 314 Z" class="text-ink" fill="currentColor" opacity="0.07" />
+      <path d="M650 118 L776 60 L776 400 L650 314 Z" class="text-ink" fill="currentColor" opacity="0.10" />
+
+      <!-- floor -->
+      <path d="M150 314 L650 314 L776 400 L776 426 L24 426 L24 400 Z" fill="url(#hero-floor)" />
+
+      <!-- pendant light + cone -->
+      <line x1="330" y1="118" x2="330" y2="156" stroke="currentColor" stroke-width="2" class="text-ink" opacity="0.6" />
+      <path d="M314 172 L330 156 L346 172 Z" class="text-ink" fill="currentColor" opacity="0.75" />
+      <path d="M314 172 L262 314 L398 314 Z" fill="url(#hero-light)" />
+
+      <!-- rug -->
+      <ellipse cx="380" cy="352" rx="150" ry="34" class="text-ink" fill="currentColor" opacity="0.10" />
+
+      <!-- sofa -->
+      <g>
+        <rect x="228" y="272" width="176" height="30" rx="7" class="text-accent" fill="currentColor" />
+        <rect x="228" y="298" width="176" height="44" rx="8" class="text-accent" fill="currentColor" opacity="0.82" />
+        <rect x="222" y="284" width="16" height="56" rx="7" class="text-accent" fill="currentColor" opacity="0.9" />
+        <rect x="394" y="284" width="16" height="56" rx="7" class="text-accent" fill="currentColor" opacity="0.9" />
+      </g>
+
+      <!-- coffee table -->
+      <rect x="436" y="306" width="104" height="16" rx="4" class="text-ink" fill="currentColor" opacity="0.55" />
+      <rect x="446" y="322" width="6" height="26" class="text-ink" fill="currentColor" opacity="0.4" />
+      <rect x="524" y="322" width="6" height="26" class="text-ink" fill="currentColor" opacity="0.4" />
+
+      <!-- plant -->
+      <path d="M596 316 q-22 -34 -4 -58 q16 24 4 58 Z" class="text-signal" fill="currentColor" opacity="0.75" />
+      <path d="M596 316 q22 -30 44 -30 q-14 26 -44 30 Z" class="text-signal" fill="currentColor" opacity="0.55" />
+      <path d="M584 316 h28 l-5 30 h-18 Z" class="text-ink" fill="currentColor" opacity="0.45" />
+
+      <!-- ── Configurator strip ──────────────────────────────────────── -->
+      <g>
+        <rect x="52" y="352" width="238" height="52" rx="10" class="text-surface" fill="currentColor" />
+        <rect x="52" y="352" width="238" height="52" rx="10" fill="none" stroke="currentColor" stroke-width="1" class="text-line" />
+        <rect x="66" y="364" width="58" height="6" rx="3" class="text-line" fill="currentColor" />
+
+        <!-- swatches; the first is "selected" -->
+        <circle cx="76" cy="386" r="9" class="text-accent" fill="currentColor" />
+        <circle cx="76" cy="386" r="12.5" fill="none" stroke="currentColor" stroke-width="1.5" class="text-accent" />
+        <circle cx="104" cy="386" r="9" class="text-ink" fill="currentColor" opacity="0.5" />
+        <circle cx="132" cy="386" r="9" class="text-warn" fill="currentColor" opacity="0.85" />
+        <circle cx="160" cy="386" r="9" class="text-signal" fill="currentColor" opacity="0.8" />
+        <circle cx="188" cy="386" r="9" class="text-ink" fill="currentColor" opacity="0.22" />
+      </g>
+
+      <!-- ── Share pill ──────────────────────────────────────────────── -->
+      <g>
+        <rect x="556" y="88" width="184" height="34" rx="17" class="text-ink" fill="currentColor" />
+        <path
+          d="M602 105 h-8 a7 7 0 0 1 0 -14 h8 M614 105 h8 a7 7 0 0 0 0 -14 h-8 M600 98 h16"
+          fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"
+        />
+        <rect x="632" y="102" width="92" height="6" rx="3" fill="#fff" opacity="0.75" />
+        <rect x="632" y="92" width="58" height="6" rx="3" fill="#fff" opacity="0.4" />
+      </g>
+    </g>
+
+    <rect x="24" y="60" width="752" height="366" rx="8" fill="none" stroke="currentColor" stroke-width="1" class="text-line" />
+  </svg>
+</div>

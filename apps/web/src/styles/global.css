@@ -84,4 +84,45 @@
   .card {
     @apply rounded-card border border-line bg-surface p-6;
   }
+
+  /* ---- Forms ------------------------------------------------------------
+     Extracted once the third auth page needed them. Every input on the site
+     is this exact control, so the definition lives here rather than being
+     re-typed as a 12-class string per field — which is how two of them end up
+     one pixel different. */
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-sm
+           outline-none transition-colors placeholder:text-ink-soft/60
+           focus:border-accent disabled:bg-surface-alt disabled:text-ink-soft;
+  }
+
+  .hint {
+    @apply mt-1.5 text-xs text-ink-soft;
+  }
+
+  /* role="alert" regions. Tinted rather than solid so a long message stays
+     readable, and bordered so it still reads as an alert in forced-colours
+     mode where background tints are dropped. */
+  .alert-error {
+    @apply rounded-lg border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-sm text-danger;
+  }
+
+  .alert-ok {
+    @apply rounded-lg border border-signal/30 bg-signal/10 px-3.5 py-2.5 text-sm text-ink;
+  }
+
+  .alert-info {
+    @apply rounded-lg border border-line bg-surface-alt px-3.5 py-2.5 text-sm text-ink-soft;
+  }
+
+  /* Small status pill used in tables and plan headers. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line
+           bg-surface-alt px-2.5 py-1 text-xs font-medium text-ink-soft;
+  }
 }

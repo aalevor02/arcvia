@@ -1,0 +1,85 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+---
+
+<Base title="Opening the studio" description="Signing you in to the studio." noindex>
+  <section class="shell flex min-h-[70vh] max-w-md flex-col justify-center py-16 text-center">
+    <h1 class="h2" id="handoff-title">Opening the studio…</h1>
+    <p class="lede mt-3" id="handoff-message">One moment.</p>
+
+    <div id="handoff-actions" class="mt-8 hidden flex-wrap justify-center gap-3">
+      <a href="/login/" class="btn-primary">Sign in</a>
+      <a href="/" class="btn-secondary">Back to the site</a>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { api } from '../lib/api'
+  import { isAuthenticated } from '../lib/auth'
+  import { studioUrl } from '../lib/links'
+
+  /**
+   * Carries a signed-in session across to the studio.
+   *
+   * The two apps are separate origins, so they cannot share localStorage. This
+   * page trades the site's session for a single-use ticket and forwards it in
+   * the URL; the studio redeems it for a session of its own.
+   */
+
+  const title = document.getElementById('handoff-title')
+  const message = document.getElementById('handoff-message')
+  const actions = document.getElementById('handoff-actions')
+
+  function fail(text: string) {
+    if (title) title.textContent = 'Could not open the studio'
+    if (message) message.textContent = text
+    actions?.classList.remove('hidden')
+    actions?.classList.add('flex')
+  }
+
+  /**
+   * Only ever forward to the studio.
+   *
+   * `?to=` is attacker-controllable, so it is checked against the origin this
+   * build actually targets rather than merely being "a URL". Without that this
+   * page is an open redirect that inherits the site's credibility — and it is
+   * one that hands over a session ticket, which is considerably worse than the
+   * usual kind.
+   */
+  function destination(): string | null {
+    const requested = new URLSearchParams(location.search).get('to')
+    const allowed = studioUrl()
+
+    if (!requested) return allowed
+
+    try {
+      return new URL(requested).origin === new URL(allowed).origin
+        ? requested
+        : null
+    } catch {
+      return null
+    }
+  }
+
+  const target = destination()
+
+  if (!target) {
+    fail('That link points somewhere we do not recognise.')
+  } else if (!isAuthenticated()) {
+    fail('Sign in first, and we will take you straight there.')
+  } else {
+    api<{ ticket: string }>('/auth/handoff', { method: 'POST' })
+      .then(({ ticket }) => {
+        const url = new URL(target)
+        url.searchParams.set('ticket', ticket)
+        // `replace`, not `assign`: pressing Back should not re-run a hand-off
+        // whose ticket has already been spent.
+        location.replace(url.toString())
+      })
+      .catch((error) =>
+        fail(error instanceof Error ? error.message : 'Something went wrong.'),
+      )
+  }
+</script>

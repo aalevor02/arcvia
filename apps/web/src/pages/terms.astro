@@ -1,0 +1,118 @@
+---
+import brand from '@arcvia/brand'
+import Legal from '../layouts/Legal.astro'
+import plans from '@arcvia/brand/plans'
+---
+
+<Legal
+  title="Terms and conditions"
+  description={`The terms you agree to when using ${brand.name}.`}
+  updated="2026-08-18"
+>
+  <p>
+    These terms govern your use of {brand.name}. By creating an account you
+    accept them.
+  </p>
+
+  <h2>1. The service</h2>
+  <p>
+    {brand.name} converts architectural drawings and 3D models into interactive
+    walkthroughs, still renders and bills of quantities, and hosts the published
+    result at a public URL.
+  </p>
+  {
+    !plans.billingEnabled && (
+      <p>
+        <strong>The service is currently free.</strong> No payment is taken, no
+        card is stored, and no feature is withheld pending payment. If that
+        changes we will give notice before any charge is made, and you will
+        never be charged for a period you have already used for free.
+      </p>
+    )
+  }
+
+  <h2>2. Your account</h2>
+  <ul>
+    <li>You are responsible for what happens under your credentials.</li>
+    <li>
+      One person per account. Team members get their own seats rather than
+      sharing a login — shared logins are the usual cause of a lost project.
+    </li>
+    <li>Tell us promptly if you believe an account has been compromised.</li>
+  </ul>
+
+  <h2>3. Your content, and who owns it</h2>
+  <p>
+    <strong>You own everything you upload and everything you produce here.</strong>
+    Drawings, models, textures, scenes, renders and published walkthroughs remain
+    yours.
+  </p>
+  <p>
+    You grant us only the licence required to actually run the service: to
+    store your files, process them on render workers, and serve the walkthroughs
+    you have chosen to publish. That licence ends when you delete the content.
+  </p>
+  <p>You confirm that you have the right to upload what you upload.</p>
+
+  <h2>4. Acceptable use</h2>
+  <p>You may not:</p>
+  <ul>
+    <li>Upload material you do not have the rights to.</li>
+    <li>
+      Use the render pipeline for workloads unrelated to visualising your own
+      projects — it is a shared GPU resource with real cost.
+    </li>
+    <li>
+      Attempt to circumvent credit metering, rate limits or access controls.
+    </li>
+    <li>Resell access to the platform itself without a written agreement.</li>
+  </ul>
+  <p>
+    Publishing a walkthrough for a client, embedding it on your own site, and
+    charging your client for the work is expressly fine — that is what the
+    product is for.
+  </p>
+
+  <h2>5. Credits and rendering</h2>
+  <p>
+    Renders and lightmap bakes consume credits, which exist to bound GPU
+    spending rather than to sell you anything. Credits are charged when a job is
+    <em>queued</em>, not when it completes. Cancelling a job that has not started
+    refunds the credits; cancelling one that is already rendering does not,
+    because the compute has already been spent.
+  </p>
+  <p>A job that fails through our fault is refunded in full.</p>
+
+  <h2>6. Availability</h2>
+  <p>
+    We aim for the service to be available continuously but do not guarantee it.
+    Render throughput in particular is capped, and jobs may queue at busy times.
+    We will give notice of planned maintenance where we reasonably can.
+  </p>
+
+  <h2>7. Ending the agreement</h2>
+  <p>
+    You may close your account at any time. We may suspend an account that
+    breaches section 4, and will tell you why. On closure you can export your
+    models and renders; after 30 days the stored files are deleted permanently.
+  </p>
+
+  <h2>8. Liability</h2>
+  <p>
+    The service is provided as-is. We are not liable for indirect or
+    consequential loss, including lost profit or lost business arising from a
+    project decision made on the basis of a visualisation.
+  </p>
+  <p>
+    <strong>A visualisation is not a construction document.</strong> Dimensions,
+    quantities and bills of materials produced here are derived from what you
+    supplied and are for design and presentation purposes. Verify them against
+    the issued drawings before building anything or pricing a contract.
+  </p>
+
+  <h2>9. Changes to these terms</h2>
+  <p>
+    We may update these terms. Material changes will be notified in the product
+    before they take effect.
+  </p>
+</Legal>

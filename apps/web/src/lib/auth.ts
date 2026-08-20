@@ -22,6 +22,11 @@ export interface RegisterInput {
   organisation: string
   phone: string
   password: string
+  /**
+   * Optional. An unknown code is ignored by the server rather than rejected —
+   * a typo here must never be the reason a signup fails.
+   */
+  referralCode?: string
 }
 
 /** Where the development-only OTP is parked for the verify page to display. */
@@ -95,6 +100,47 @@ export async function verifyOtp(code: string): Promise<{ verified: boolean }> {
 export function logout(): void {
   clearSession()
   window.location.href = '/'
+}
+
+// ---- Password reset --------------------------------------------------------
+
+export interface ForgotResult {
+  sent: boolean
+  message: string
+  /** Present only in development when no mail provider is configured. */
+  devToken?: string
+}
+
+/**
+ * Ask for a reset link.
+ *
+ * Note the return type: this never reports "no such account". The server
+ * deliberately answers identically either way so the endpoint cannot be used
+ * to enumerate who has an account here, and the client must not invent a
+ * distinction the server refused to make.
+ */
+export async function requestPasswordReset(
+  email: string,
+): Promise<ForgotResult> {
+  return api<ForgotResult>('/auth/password/forgot', {
+    method: 'POST',
+    body: { email },
+    auth: false,
+  })
+}
+
+/** Redeem a reset token. Signs the session in on success. */
+export async function resetPassword(
+  token: string,
+  password: string,
+): Promise<AuthResponse> {
+  const result = await api<AuthResponse>('/auth/password/reset', {
+    method: 'POST',
+    body: { token, password },
+    auth: false,
+  })
+  saveSession(result.token, result.user)
+  return result
 }
 
 /**

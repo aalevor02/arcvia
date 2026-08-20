@@ -1,12 +1,13 @@
 ---
 import brand from '@arcvia/brand'
+import AccountMenu from './AccountMenu.tsx'
 
 const nav = [
   { label: 'How it works', href: '/#how-it-works' },
-  { label: 'Features', href: '/#features' },
-  { label: 'Enterprise', href: '/enterprise/' },
+  { label: 'Services', href: '/services/' },
   { label: 'Pricing', href: '/pricing/' },
-  { label: 'FAQs', href: '/#faq' },
+  { label: 'Enterprise', href: '/enterprise/' },
+  { label: 'Referral', href: '/referral/' },
 ]
 ---
 
@@ -36,12 +37,31 @@ const nav = [
     </nav>
 
     <div class="flex items-center gap-3">
-      <!-- Rendered server-side as the signed-out state. The island below swaps
-           it for the account menu once it reads a session from storage. -->
-      <a href="/register/" class="hidden text-sm font-medium sm:inline-flex"
-        >Sign in</a
+      <a
+        href="/contact/"
+        class="hidden text-sm text-ink-soft transition-colors hover:text-ink xl:inline-flex"
+        >Book a demo</a
       >
-      <a href="/register/" class="btn-primary !py-2 !px-4">Get started free</a>
+
+      <!-- Space reserved so the header does not reflow when the island mounts.
+           min-w matches the widest signed-out state; see AccountMenu.tsx for
+           why this is client:only rather than server-rendered. -->
+      <div class="flex min-h-9 min-w-[9.5rem] items-center justify-end">
+        <AccountMenu client:only="react" />
+
+        <!-- The island is the only thing that can know whether someone is
+             signed in, and it needs JavaScript to find out. Without this
+             fallback, a visitor with JS disabled gets no route to sign in at
+             all — the header simply renders an empty gap. -->
+        <noscript>
+          <span class="flex items-center gap-3">
+            <a href="/login/" class="text-sm font-medium">Sign in</a>
+            <a href="/register/" class="btn-primary !px-4 !py-2"
+              >Get started free</a
+            >
+          </span>
+        </noscript>
+      </div>
 
       <button
         type="button"
@@ -67,7 +87,9 @@ const nav = [
           </a>
         ))
       }
-      <a href="/register/" class="py-2.5 text-sm font-medium">Sign in</a>
+      <a href="/contact/" class="py-2.5 text-sm text-ink-soft hover:text-ink"
+        >Book a demo</a
+      >
     </nav>
   </div>
 </header>

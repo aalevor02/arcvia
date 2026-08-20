@@ -8,6 +8,7 @@ const columns = [
     heading: 'Product',
     links: [
       { label: 'How it works', href: '/#how-it-works' },
+      { label: 'Services', href: '/services/' },
       { label: 'Pricing', href: '/pricing/' },
       { label: 'Enterprise', href: '/enterprise/' },
     ],
@@ -17,6 +18,20 @@ const columns = [
     links: [
       { label: 'About us', href: '/about/' },
       { label: 'Contact us', href: '/contact/' },
+      { label: 'Referral programme', href: '/referral/' },
+    ],
+  },
+  // Account routes live in the footer as well as the header menu. The menu is
+  // a client-only island, so these are the only links to them that exist in
+  // the static HTML — which is what a crawler, a text browser, and anyone
+  // whose JavaScript failed to load actually sees.
+  {
+    heading: 'Account',
+    links: [
+      { label: 'Sign in', href: '/login/' },
+      { label: 'Create an account', href: '/register/' },
+      { label: 'Getting started', href: '/trial/' },
+      { label: 'Reset password', href: '/reset-password/' },
     ],
   },
   {
@@ -24,13 +39,14 @@ const columns = [
     links: [
       { label: 'Privacy policy', href: '/privacy/' },
       { label: 'Terms & conditions', href: '/terms/' },
+      { label: 'Refund policy', href: '/refund/' },
     ],
   },
 ]
 ---
 
 <footer class="mt-section border-t border-line bg-surface-alt">
-  <div class="shell grid gap-10 py-14 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+  <div class="shell grid gap-10 py-14 md:grid-cols-2 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
     <div>
       <div class="flex items-center gap-2 font-semibold tracking-tight">
         <span

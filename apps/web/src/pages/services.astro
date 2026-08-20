@@ -1,0 +1,387 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+
+/**
+ * The "done for you" page.
+ *
+ * The product pages sell the tool. This one sells the outcome, for developers
+ * who do not want to operate software at all — they want a link to send to
+ * buyers. Same pipeline underneath; different buyer.
+ */
+
+const stats = [
+  { value: '8K', label: 'Maximum render resolution' },
+  { value: '<3s', label: 'Typical walkthrough load' },
+  { value: 'VR', label: 'Headset ready, no install' },
+  { value: '0', label: 'Files for your buyer to download' },
+]
+
+const walkthroughPoints = [
+  {
+    icon: '🔗',
+    title: 'One link, nothing to install',
+    body: 'Send a URL. It opens like a web page — no app, no plugin, no 500 MB file on WhatsApp, no version confusion.',
+  },
+  {
+    icon: '🏠',
+    title: 'The exact unit, not a generic one',
+    body: 'Buyers walk the specific flat they are considering: its layout, its finishes, and the real view from each window and balcony.',
+  },
+  {
+    icon: '📱',
+    title: 'Every device, including headsets',
+    body: 'One build serves phone, tablet, desktop and VR. Nothing to maintain per platform.',
+  },
+  {
+    icon: '🎯',
+    title: 'Fewer objections at the site visit',
+    body: 'Someone who has already walked the flat arrives with specific questions instead of general doubt.',
+  },
+]
+
+const renderKinds = [
+  {
+    title: 'Interior renders',
+    body: 'Living spaces, kitchens and bedrooms with physically-based lighting and real material finishes.',
+    best: 'Brochures, websites, launch campaigns',
+  },
+  {
+    title: 'Exterior renders',
+    body: 'Towers, villas and complexes with landscaping, sky and surrounding context.',
+    best: 'Hoardings, ads, project launches',
+  },
+  {
+    title: 'Floorplan renders',
+    body: 'Illustrated, dimensioned floorplans that match the 3D exactly, because both come from the same model.',
+    best: 'Sales decks, brochures, submissions',
+  },
+]
+
+const immersiveSteps = [
+  {
+    n: 1,
+    icon: '🏙️',
+    title: 'Start outside the tower',
+    body: 'A 3D view of the whole building with interactive floor indicators and live availability.',
+  },
+  {
+    n: 2,
+    icon: '📊',
+    title: 'Hover any floor',
+    body: 'Unit counts, flat types and price bands surface in place — no separate page, no PDF.',
+  },
+  {
+    n: 3,
+    icon: '🗺️',
+    title: 'Open the master plan',
+    body: 'Read the full floorplate, understand orientation, and pick a specific flat.',
+  },
+  {
+    n: 4,
+    icon: '🚶',
+    title: 'Step inside that flat',
+    body: 'Straight into the photoreal walkthrough of the unit they chose — from the same link they started on.',
+  },
+]
+
+const benefits = [
+  {
+    icon: '🚀',
+    title: 'Shorten the pre-sales cycle',
+    body: 'Buyers form an emotional connection with a property that does not exist yet, which is the slowest part of the sale.',
+  },
+  {
+    icon: '🌐',
+    title: 'Sell to remote and NRI buyers',
+    body: 'One link crosses time zones. Someone in London can stand inside a flat in Hyderabad at 2am.',
+  },
+  {
+    icon: '💬',
+    title: 'Less work per lead',
+    body: 'The tour answers the first thirty questions, so your sales team only handles the ones that matter.',
+  },
+  {
+    icon: '🏆',
+    title: 'Look different in a flat market',
+    body: 'While competitors send static renders and a 2D brochure, you send an experience.',
+  },
+]
+
+const table = [
+  {
+    service: 'Interactive 3D walkthrough',
+    best: 'Buyer engagement, site sales, remote buyers',
+    format: 'Browser link, VR-compatible',
+  },
+  {
+    service: 'Interior renders',
+    best: 'Brochures, websites, launch campaigns',
+    format: 'FHD / 2K / 4K / 8K image files',
+  },
+  {
+    service: 'Exterior renders',
+    best: 'Hoardings, ads, project launches',
+    format: 'FHD / 2K / 4K / 8K image files',
+  },
+  {
+    service: 'Floorplan renders',
+    best: 'Sales decks, brochures, submissions',
+    format: 'FHD / 2K / 4K / 8K image files',
+  },
+  {
+    service: 'Full immersive experience',
+    best: 'Flagship towers, high-value launches',
+    format: 'Browser link, all devices + VR',
+    flagship: true,
+  },
+]
+---
+
+<Base
+  title="Services"
+  description="Interactive 3D walkthroughs, photorealistic renders and full immersive sales experiences for real estate."
+>
+  <!-- ── Hero ────────────────────────────────────────────────────────────── -->
+  <section class="relative overflow-hidden border-b border-line">
+    <div
+      class="pointer-events-none absolute inset-x-0 top-0 h-[380px] bg-gradient-to-b from-accent-soft to-transparent"
+      aria-hidden="true"
+    >
+    </div>
+    <div class="shell relative py-20 text-center sm:py-24">
+      <p class="eyebrow">Services</p>
+      <h1 class="h1 mx-auto mt-4 max-w-3xl text-balance">
+        Immersive 3D experiences for real estate
+      </h1>
+      <p class="lede mx-auto mt-5 max-w-2xl text-pretty">
+        Interactive walkthroughs · photorealistic renders · full immersive sales
+        experiences. Built with the same pipeline that powers the {brand.name} studio
+        — we just run it for you.
+      </p>
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        <a href="/contact/" class="btn-primary">Talk to us</a>
+        <a href="/register/" class="btn-secondary">Or do it yourself, free</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Who we are ──────────────────────────────────────────────────────── -->
+  <section class="py-section">
+    <div class="shell grid gap-12 lg:grid-cols-2 lg:items-center">
+      <div>
+        <p class="eyebrow">Who we are</p>
+        <h2 class="h2 mt-3 text-balance">
+          We bring properties to life before a brick is laid
+        </h2>
+        <p class="mt-4 leading-relaxed text-ink-soft">
+          {brand.name} is a visualisation platform for construction and real
+          estate. We help developers, builders and architects turn projects into
+          interactive digital experiences — so buyers can commit with confidence
+          long before there is anything to walk into.
+        </p>
+      </div>
+
+      <dl class="grid grid-cols-2 gap-4">
+        {
+          stats.map((s) => (
+            <div class="card">
+              <dt class="text-2xl font-semibold tracking-tight">{s.value}</dt>
+              <dd class="mt-1 text-sm leading-snug text-ink-soft">{s.label}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  <!-- ── 01 Walkthroughs ─────────────────────────────────────────────────── -->
+  <section class="scroll-mt-24 bg-surface-alt py-section" id="walkthroughs">
+    <div class="shell">
+      <p class="font-mono text-sm text-accent">01</p>
+      <h2 class="h2 mt-2 max-w-2xl text-balance">
+        Interactive 3D interior walkthroughs
+      </h2>
+      <p class="mt-4 max-w-2xl leading-relaxed text-ink-soft">
+        Buyers explore their future home in photorealistic detail — every room,
+        every angle — in full control of where they go. Unlike a render or a
+        video, nobody chose the route for them.
+      </p>
+
+      <div class="mt-10 grid gap-5 sm:grid-cols-2">
+        {
+          walkthroughPoints.map((p) => (
+            <article class="card bg-surface">
+              <span class="text-xl" aria-hidden="true">
+                {p.icon}
+              </span>
+              <h3 class="h3 mt-3">{p.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-ink-soft">{p.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 02 Renders ──────────────────────────────────────────────────────── -->
+  <section class="scroll-mt-24 py-section" id="renders">
+    <div class="shell">
+      <p class="font-mono text-sm text-accent">02</p>
+      <h2 class="h2 mt-2 max-w-2xl text-balance">
+        Photorealistic renders, up to 8K
+      </h2>
+      <p class="mt-4 max-w-2xl leading-relaxed text-ink-soft">
+        Crisp enough for a large-format hoarding, polished enough for a premium
+        brochure. Every render comes out of the same model as the walkthrough,
+        so the marketing and the tour can never disagree with each other.
+      </p>
+
+      <div class="mt-10 grid gap-5 md:grid-cols-3">
+        {
+          renderKinds.map((r) => (
+            <article class="card flex flex-col">
+              <h3 class="h3">{r.title}</h3>
+              <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-soft">
+                {r.body}
+              </p>
+              <p class="mt-4 border-t border-line pt-3 text-xs text-ink-soft">
+                <span class="font-semibold uppercase tracking-[0.1em]">
+                  Best for
+                </span>
+                <br />
+                {r.best}
+              </p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 03 Full immersive ───────────────────────────────────────────────── -->
+  <section class="scroll-mt-24 py-section" id="immersive">
+    <div class="shell">
+      <div class="rounded-card bg-ink px-8 py-14 text-white sm:px-14">
+        <p class="pill !border-white/20 !bg-white/10 !text-white">
+          ★ Flagship offering
+        </p>
+        <p class="mt-6 font-mono text-sm text-accent">03</p>
+        <h2 class="h2 mt-2 max-w-3xl text-balance">
+          The complete digital sales journey for a project
+        </h2>
+        <p class="mt-4 max-w-2xl leading-relaxed text-white/70">
+          From tower view to interior walkthrough in one seamless, browser-based
+          experience. Not just a walkthrough — the entire sales narrative,
+          delivered as a link.
+        </p>
+
+        <ol class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {
+            immersiveSteps.map((s) => (
+              <li class="rounded-card border border-white/15 bg-white/[0.06] p-5">
+                <div class="flex items-center gap-2">
+                  <span class="grid h-6 w-6 place-items-center rounded-md bg-accent text-xs font-bold text-white">
+                    {s.n}
+                  </span>
+                  <span class="text-lg" aria-hidden="true">
+                    {s.icon}
+                  </span>
+                </div>
+                <h3 class="mt-3 text-base font-semibold leading-snug">
+                  {s.title}
+                </h3>
+                <p class="mt-2 text-sm leading-relaxed text-white/65">
+                  {s.body}
+                </p>
+              </li>
+            ))
+          }
+        </ol>
+
+        <div class="mt-10">
+          <a href="/contact/" class="btn-primary">Book a walkthrough of it</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Benefits ────────────────────────────────────────────────────────── -->
+  <section class="bg-surface-alt py-section">
+    <div class="shell">
+      <p class="eyebrow">Benefits</p>
+      <h2 class="h2 mt-3 max-w-2xl text-balance">
+        Why this matters to a developer
+      </h2>
+
+      <div class="mt-10 grid gap-5 sm:grid-cols-2">
+        {
+          benefits.map((b) => (
+            <article class="card bg-surface">
+              <span class="text-xl" aria-hidden="true">
+                {b.icon}
+              </span>
+              <h3 class="h3 mt-3">{b.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-ink-soft">{b.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── At a glance ─────────────────────────────────────────────────────── -->
+  <section class="py-section">
+    <div class="shell">
+      <p class="eyebrow">Overview</p>
+      <h2 class="h2 mt-3">Services at a glance</h2>
+
+      <!-- Wide tables must scroll inside their own box, never make the page
+           scroll sideways on a phone. -->
+      <div class="mt-8 overflow-x-auto rounded-card border border-line">
+        <table class="w-full min-w-[42rem] border-collapse text-sm">
+          <thead>
+            <tr class="bg-surface-alt text-left">
+              <th class="px-5 py-3 font-semibold">Service</th>
+              <th class="px-5 py-3 font-semibold">Best for</th>
+              <th class="px-5 py-3 font-semibold">Format</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              table.map((row) => (
+                <tr class="border-t border-line">
+                  <td class="px-5 py-4 font-medium">
+                    {row.flagship && (
+                      <span class="mr-1.5 text-accent" aria-label="Flagship">
+                        ★
+                      </span>
+                    )}
+                    {row.service}
+                  </td>
+                  <td class="px-5 py-4 text-ink-soft">{row.best}</td>
+                  <td class="px-5 py-4 text-ink-soft">{row.format}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ─────────────────────────────────────────────────────────────── -->
+  <section class="pb-section">
+    <div class="shell max-w-3xl text-center">
+      <h2 class="h2 text-balance">Let's build something worth walking into</h2>
+      <p class="lede mx-auto mt-4 max-w-xl text-pretty">
+        Tell us about the project and we'll propose the right experience for
+        your buyers — or sign up and build it yourself, free.
+      </p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/contact/" class="btn-primary">Talk to our team</a>
+        <a href="/register/" class="btn-secondary">Start free</a>
+      </div>
+    </div>
+  </section>
+</Base>

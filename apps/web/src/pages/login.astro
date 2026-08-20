@@ -1,0 +1,120 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+---
+
+<Base
+  title="Sign in"
+  description={`Sign in to your ${brand.name} account.`}
+  noindex
+>
+  <section class="shell flex min-h-[70vh] max-w-md flex-col justify-center py-16">
+    <h1 class="h2 text-balance">Welcome back</h1>
+    <p class="lede mt-3">Sign in to pick up where you left off.</p>
+
+    <form id="login-form" novalidate class="card mt-8 space-y-4">
+      <div>
+        <label for="email" class="label">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          autocomplete="email"
+          required
+          placeholder="you@practice.com"
+          class="field"
+        />
+      </div>
+
+      <div>
+        <div class="mb-1.5 flex items-baseline justify-between gap-3">
+          <label for="password" class="label !mb-0">Password</label>
+          <a href="/reset-password/" class="text-xs text-accent hover:underline"
+            >Forgot password?</a
+          >
+        </div>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+          class="field"
+        />
+      </div>
+
+      <p id="form-error" role="alert" class="alert-error hidden"></p>
+
+      <button type="submit" id="submit" class="btn-primary w-full">
+        Sign in
+      </button>
+    </form>
+
+    <p class="mt-6 text-center text-sm text-ink-soft">
+      No account yet?
+      <a href="/register/" class="font-medium text-accent hover:underline"
+        >Create one free</a
+      >
+    </p>
+  </section>
+</Base>
+
+<script>
+  import { login } from '../lib/auth'
+  import { openStudioUrl } from '../lib/links'
+
+  const form = document.getElementById('login-form') as HTMLFormElement | null
+  const errorBox = document.getElementById('form-error') as HTMLElement | null
+  const submit = document.getElementById('submit') as HTMLButtonElement | null
+
+  /**
+   * Where to go after signing in.
+   *
+   * `?next=` exists so a link into a gated page (the team page, the referral
+   * dashboard) can bounce through sign-in and land where the person was
+   * actually headed. It is validated to a same-origin *path* before use —
+   * accepting a full URL here would turn the login page into an open redirect,
+   * which is the classic way a phishing link gets to wear your domain.
+   */
+  function destination(): string {
+    const next = new URLSearchParams(location.search).get('next')
+    if (next && next.startsWith('/') && !next.startsWith('//')) return next
+    return openStudioUrl()
+  }
+
+  function showError(message: string) {
+    if (!errorBox) return
+    errorBox.textContent = message
+    errorBox.classList.remove('hidden')
+  }
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    errorBox?.classList.add('hidden')
+
+    const data = new FormData(form)
+    const email = String(data.get('email') ?? '').trim().toLowerCase()
+    const password = String(data.get('password') ?? '')
+
+    if (!email || !password) {
+      showError('Enter your email and password.')
+      return
+    }
+
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = 'Signing in…'
+    }
+
+    try {
+      await login(email, password)
+      window.location.href = destination()
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Something went wrong.')
+      if (submit) {
+        submit.disabled = false
+        submit.textContent = 'Sign in'
+      }
+    }
+  })
+</script>

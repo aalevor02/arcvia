@@ -1,0 +1,104 @@
+---
+import brand from '@arcvia/brand'
+import Legal from '../layouts/Legal.astro'
+import plans from '@arcvia/brand/plans'
+---
+
+<Legal
+  title="Refund policy"
+  description={`Refunds and cancellations at ${brand.name}.`}
+  updated="2026-08-18"
+>
+  {
+    !plans.billingEnabled ? (
+      <>
+        <p>
+          <strong>{brand.name} does not currently take payments.</strong> There
+          is nothing to refund, no subscription to cancel and no card on file.
+        </p>
+        <p>
+          This page exists because the policy below is what will apply the day
+          billing is switched on, and it is fairer to publish it in advance than
+          to produce it at the moment someone is first asked to pay.
+        </p>
+        <h2>What applies today</h2>
+        <ul>
+          <li>Every feature is available at no cost.</li>
+          <li>
+            Credits meter GPU usage only. Running out is not a payment prompt.
+          </li>
+          <li>
+            You can export your models and renders and leave at any time,
+            without asking us.
+          </li>
+        </ul>
+        <h2 id="when-billing-starts">When billing starts</h2>
+      </>
+    ) : null
+  }
+
+  <h2>Subscriptions</h2>
+  <p>
+    Subscriptions are billed in advance for the chosen period. You can cancel at
+    any time; cancellation stops the next renewal and you keep access until the
+    end of the period already paid for.
+  </p>
+
+  <h3>First 14 days</h3>
+  <p>
+    A first subscription can be refunded in full within 14 days of the initial
+    charge, for any reason. Write to us and we will process it — you do not have
+    to justify it.
+  </p>
+
+  <h3>After 14 days</h3>
+  <p>
+    Part-used periods are not refunded pro rata, with two exceptions:
+  </p>
+  <ul>
+    <li>
+      <strong>A sustained outage.</strong> If the service is unavailable for a
+      material part of a billing period, we refund that part without being
+      asked.
+    </li>
+    <li>
+      <strong>A charge you did not authorise.</strong> Refunded in full, and we
+      will investigate how it happened.
+    </li>
+  </ul>
+
+  <h2>Credits</h2>
+  <p>
+    Credits purchased separately are consumed on use and are not refundable once
+    spent, because the GPU time they represent has been used.
+  </p>
+  <p>
+    <strong>Unused credits are refundable</strong> at the price paid, pro rata,
+    for 90 days from purchase. Credits included with a subscription carry
+    forward while the subscription is active but have no cash value.
+  </p>
+
+  <h2>Failed renders</h2>
+  <p>
+    A render or bake that fails through a fault on our side is refunded to your
+    credit balance automatically. You do not need to ask, and it does not count
+    against any cap.
+  </p>
+  <p>
+    A render that completes but that you dislike is not a failure and is not
+    refunded — the compute was spent producing exactly what was requested.
+  </p>
+
+  <h2>Enterprise agreements</h2>
+  <p>
+    Where a signed agreement exists, its terms take precedence over this page.
+  </p>
+
+  <h2>How to request a refund</h2>
+  <p>
+    Contact us through the <a href="/contact/">contact page</a> with the account
+    email and, where relevant, the invoice or job reference. We aim to respond
+    within two working days, and approved refunds are returned to the original
+    payment method.
+  </p>
+</Legal>

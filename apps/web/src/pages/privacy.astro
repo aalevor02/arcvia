@@ -1,0 +1,125 @@
+---
+import brand from '@arcvia/brand'
+import Legal from '../layouts/Legal.astro'
+---
+
+<Legal
+  title="Privacy policy"
+  description={`How ${brand.name} handles your data and your clients' project files.`}
+  updated="2026-08-18"
+>
+  <p>
+    This policy covers {brand.name} — the marketing site, the studio editor, the
+    render pipeline and any walkthrough you publish through us. It is written to
+    be read, not to be survived.
+  </p>
+
+  <h2>What we collect</h2>
+
+  <h3>Account data</h3>
+  <p>
+    Your name, work email, organisation name and mobile number. The mobile
+    number exists solely to send a one-time verification code; we do not use it
+    for marketing.
+  </p>
+
+  <h3>Project data</h3>
+  <p>
+    Everything you upload or create: floor plans, CAD and PDF drawings, 3D
+    models, textures, scene files and rendered output. <strong
+      >This is your material and your clients' material, and we treat it as
+      confidential.</strong
+    > We do not use it to train models, we do not show it to other customers,
+    and we do not publish anything unless you explicitly publish it.
+  </p>
+
+  <h3>Usage data</h3>
+  <p>
+    Which renders you queued, how much GPU time they used, and errors thrown by
+    the application. This is what lets us bound compute cost and fix crashes.
+  </p>
+
+  <h2>What we do not collect</h2>
+  <ul>
+    <li>
+      Payment card details. When billing is enabled, card data goes directly to
+      the payment provider and never reaches our servers.
+    </li>
+    <li>
+      Your password. It is stored only as a salted hash and cannot be recovered
+      by us — which is why a forgotten password is reset, not retrieved.
+    </li>
+    <li>
+      Third-party analytics by default. Analytics is off unless an ID is
+      configured for the deployment you are using.
+    </li>
+  </ul>
+
+  <h2>Where it lives</h2>
+  <p>
+    Account records and scene files are stored in object storage and a database
+    in the region configured for your deployment. Rendering happens on GPU
+    workers that receive a scene, produce an image, and retain nothing after the
+    job completes.
+  </p>
+
+  <h2>Who else sees it</h2>
+  <p>We share data with a small, fixed set of processors:</p>
+  <table>
+    <thead>
+      <tr><th>Processor</th><th>Purpose</th><th>What it receives</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Object storage / CDN</td>
+        <td>Storing and serving scenes and renders</td>
+        <td>Project files</td>
+      </tr>
+      <tr>
+        <td>SMS provider</td>
+        <td>One-time verification codes</td>
+        <td>Mobile number</td>
+      </tr>
+      <tr>
+        <td>Email provider</td>
+        <td>Password resets and service notices</td>
+        <td>Email address</td>
+      </tr>
+      <tr>
+        <td>Payment provider</td>
+        <td>Subscriptions, once billing is enabled</td>
+        <td>Billing name and address</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>We do not sell data, and we do not share it for advertising.</p>
+
+  <h2>Published walkthroughs</h2>
+  <p>
+    A walkthrough you publish is served at a public URL. Anyone with the link
+    can open it — that is the entire point of it. Treat a published link as
+    public, and use the access controls if a project should not be.
+  </p>
+
+  <h2>How long we keep it</h2>
+  <ul>
+    <li>Project files: until you delete them, or 30 days after you close your account.</li>
+    <li>Render output: until you delete it.</li>
+    <li>Usage and billing records: as long as required for tax and accounting.</li>
+    <li>Password reset tokens: one hour, or until used.</li>
+  </ul>
+
+  <h2>Your rights</h2>
+  <p>
+    You can ask for a copy of your data, ask us to correct it, or ask us to
+    delete it. Deletion of project files is immediate and irreversible — we do
+    not keep a shadow copy. Write to <a href="/contact/">our team</a> and we will
+    action it.
+  </p>
+
+  <h2>Changes</h2>
+  <p>
+    If this policy changes materially we will say so in the product before the
+    change takes effect, not quietly amend the date at the top.
+  </p>
+</Legal>
