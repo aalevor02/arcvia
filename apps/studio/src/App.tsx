@@ -1,209 +1,175 @@
-import { useEffect, useRef, useState } from 'react'
-import { SceneViewer, type LightSpec } from './viewer/SceneViewer'
-import { submitRender, pollRender, type RenderPreset } from './lib/renderClient'
+import { useEffect, useState } from 'react'
+import Dashboard from './screens/Dashboard'
+import PlanEditor from './screens/PlanEditor'
+import { getToken, getUser, redeemHandoff } from './lib/api'
 
-const PRESETS: { id: RenderPreset; label: string; credits: number; note: string }[] = [
-  { id: 'preview', label: 'Preview', credits: 1, note: '240px · 4 samples' },
-  { id: 'isometric', label: 'Isometric', credits: 3, note: '1920×1080 · 32 samples' },
-  { id: 'full', label: 'Full still', credits: 5, note: '2560×1440 · 128 samples' },
-  { id: 'bake', label: 'Lightmap bake', credits: 25, note: 'Whole scene · slow' },
-]
+/**
+ * Router.
+ *
+ * Hand-rolled rather than pulling in a routing library, because the studio has
+ * exactly two routes and no nesting, no loaders and no layouts to coordinate.
+ * A router dependency would add more API surface than the thing it routes.
+ *
+ * State lives in the URL (`?scene=<id>`) rather than in component state so that
+ * reload, back, and a shared link all land in the same place. An editor whose
+ * open project vanishes on refresh is the sort of thing people only forgive
+ * once.
+ */
+
+type Route =
+  | { screen: 'dashboard' }
+  | { screen: 'editor'; sceneId: string; start?: string }
+
+/**
+ * In-flight hand-off redemptions, keyed by ticket.
+ *
+ * Module scope on purpose: it has to outlive a component remount, which is
+ * exactly the case StrictMode creates.
+ */
+const pending: Record<string, Promise<boolean>> = {}
+
+function readRoute(): Route {
+  const params = new URLSearchParams(window.location.search)
+  const sceneId = params.get('scene')
+  if (!sceneId) return { screen: 'dashboard' }
+  return { screen: 'editor', sceneId, start: params.get('start') ?? undefined }
+}
 
 export default function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const viewerRef = useRef<SceneViewer | null>(null)
+  const [route, setRoute] = useState<Route>(readRoute)
 
-  const [status, setStatus] = useState('Load a model to begin')
-  const [stats, setStats] = useState<{ triangles: number; objects: number } | null>(null)
-  const [exposure, setExposure] = useState(1)
-  const [job, setJob] = useState<{ id: string; status: string; progress: number } | null>(null)
-  const [lights] = useState<LightSpec[]>([])
+  /**
+   * Arriving from the site with a hand-off ticket.
+   *
+   * `null` while a ticket is being redeemed, so the signed-out screen does not
+   * flash up in the half-second before the session exists — which would be the
+   * first thing a user sees after clicking "Open the studio", and would look
+   * exactly like the sign-in having failed.
+   */
+  const [redeeming, setRedeeming] = useState(() =>
+    new URLSearchParams(window.location.search).has('ticket'),
+  )
 
   useEffect(() => {
-    if (!canvasRef.current) return
+    const params = new URLSearchParams(window.location.search)
+    const ticket = params.get('ticket')
+    if (!ticket) return
 
-    const viewer = new SceneViewer({
-      canvas: canvasRef.current,
-      onProgress: (f) => setStatus(`Loading… ${Math.round(f * 100)}%`),
-      onReady: (info) => {
-        setStats(info)
-        setStatus('Ready')
-      },
-      onError: (err) => setStatus(err.message),
+    // The ticket is single-use, and StrictMode invokes this effect twice in
+    // development. Without a guard the second call spends a ticket that is
+    // already gone, gets a 400, and — because the two requests race — the
+    // failing one can resolve first and render the signed-out screen over a
+    // session that was in fact established. Deduplicating by ticket value
+    // fixes both the wasted request and the flash.
+    const inFlight = (pending[ticket] ??= redeemHandoff(ticket))
+
+    void inFlight.finally(() => {
+      // Strip the ticket from the URL either way. It is single-use, so leaving
+      // it in the address bar means any refresh or shared link carries a dead
+      // credential — and puts it in browser history for no reason.
+      params.delete('ticket')
+      const query = params.toString()
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (query ? `?${query}` : ''),
+      )
+      setRedeeming(false)
     })
-    viewerRef.current = viewer
-
-    // StrictMode mounts effects twice in development. Without this teardown the
-    // first viewer keeps its WebGL context and rAF loop alive forever, and you
-    // end up debugging a "phantom" renderer that is not the one on screen.
-    return () => {
-      viewer.dispose()
-      viewerRef.current = null
-    }
   }, [])
 
-  async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file || !viewerRef.current) return
+  // The back button must work. Without this the URL changes and the view does
+  // not, which is worse than having no history at all.
+  useEffect(() => {
+    const onPop = () => setRoute(readRoute())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
-    const url = URL.createObjectURL(file)
-    setStatus('Loading…')
-    await viewerRef.current.loadModel(url)
-    URL.revokeObjectURL(url)
-  }
-
-  async function handleRender(preset: RenderPreset) {
-    const viewer = viewerRef.current
-    if (!viewer) return
-
-    setStatus(`Submitting ${preset}…`)
-    try {
-      const { jobId } = await submitRender({
-        sceneId: new URLSearchParams(location.search).get('scene') ?? '',
-        preset,
-        camera: viewer.cameraSpec(),
-      })
-
-      setJob({ id: jobId, status: 'queued', progress: 0 })
-
-      // Poll rather than hold a socket open. A bake can take minutes, and a
-      // dropped websocket mid-render is a worse failure than a missed poll.
-      const result = await pollRender(jobId, (update) =>
-        setJob({ id: jobId, status: update.status, progress: update.progress }),
-      )
-
-      setStatus(
-        result.status === 'done' ? 'Render complete' : `Render ${result.status}`,
-      )
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Render failed')
-      setJob(null)
+  const navigate = (next: Route) => {
+    let url = window.location.pathname
+    if (next.screen === 'editor') {
+      const params = new URLSearchParams({ scene: next.sceneId })
+      if (next.start) params.set('start', next.start)
+      url += `?${params}`
     }
+    window.history.pushState(null, '', url)
+    setRoute(next)
   }
 
-  return (
-    <div style={styles.shell}>
-      <aside style={styles.panel}>
-        <h1 style={styles.brand}>Arcvia Studio</h1>
-
-        <section style={styles.section}>
-          <label style={styles.label}>Model</label>
-          <input
-            type="file"
-            accept=".glb,.gltf,.fbx"
-            onChange={handleFile}
-            style={styles.input}
-          />
-          {stats && (
-            <p style={styles.meta}>
-              {stats.objects.toLocaleString()} objects ·{' '}
-              {stats.triangles.toLocaleString()} triangles
-            </p>
-          )}
-        </section>
-
-        <section style={styles.section}>
-          <label style={styles.label}>
-            Exposure <span style={styles.mono}>{exposure.toFixed(2)}</span>
-          </label>
-          <input
-            type="range"
-            min="0.1"
-            max="3"
-            step="0.05"
-            value={exposure}
-            onChange={(e) => {
-              const value = Number(e.target.value)
-              setExposure(value)
-              viewerRef.current?.setExposure(value)
-            }}
-            style={{ width: '100%' }}
-          />
-        </section>
-
-        <section style={styles.section}>
-          <label style={styles.label}>Render</label>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              onClick={() => handleRender(preset.id)}
-              disabled={Boolean(job) || !stats}
-              style={styles.presetButton}
-            >
-              <span>
-                <strong>{preset.label}</strong>
-                <br />
-                <span style={styles.meta}>{preset.note}</span>
-              </span>
-              <span style={styles.credits}>{preset.credits}cr</span>
-            </button>
-          ))}
-        </section>
-
-        {job && (
-          <section style={styles.section}>
-            <label style={styles.label}>
-              {job.status} · {job.progress}%
-            </label>
-            <div style={styles.track}>
-              <div style={{ ...styles.fill, width: `${job.progress}%` }} />
-            </div>
-          </section>
-        )}
-
-        <p style={{ ...styles.meta, marginTop: 'auto' }}>{status}</p>
-      </aside>
-
-      <div style={styles.stage}>
-        <canvas ref={canvasRef} style={{ display: 'block' }} />
+  // Auth is checked here rather than per screen: every route below needs a
+  // session, and the marketing site owns sign-in, so there is nothing to render
+  // for a signed-out visitor except a way back to it.
+  if (redeeming) {
+    return (
+      <div className="backdrop" style={{ position: 'static', height: '100%' }}>
+        <div className="modal" style={{ textAlign: 'center' }}>
+          <p className="muted">Signing you in…</p>
+        </div>
       </div>
+    )
+  }
+
+  if (!getToken() || !getUser()) return <SignedOut />
+
+  return route.screen === 'editor' ? (
+    <PlanEditor
+      sceneId={route.sceneId}
+      start={route.start}
+      onBack={() => navigate({ screen: 'dashboard' })}
+    />
+  ) : (
+    <div className="dashboard">
+      <header className="topbar">
+        <span className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            A
+          </span>
+          Arcvia Studio
+        </span>
+        <span className="spacer" />
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          {getUser()?.email}
+        </span>
+      </header>
+      <Dashboard
+        onOpen={(sceneId, start) => navigate({ screen: 'editor', sceneId, start })}
+      />
     </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  shell: { display: 'grid', gridTemplateColumns: '280px 1fr', height: '100%' },
-  panel: {
-    background: 'var(--panel)',
-    borderRight: '1px solid var(--line)',
-    padding: '20px 18px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 22,
-    overflowY: 'auto',
-  },
-  brand: { fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' },
-  section: { display: 'flex', flexDirection: 'column', gap: 8 },
-  label: {
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    color: 'var(--ink-soft)',
-  },
-  input: { fontSize: 12, color: 'var(--ink-soft)' },
-  meta: { fontSize: 11, color: 'var(--ink-soft)' },
-  mono: { fontFamily: 'ui-monospace, monospace', color: 'var(--ink)' },
-  presetButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    padding: '9px 11px',
-    borderRadius: 8,
-    border: '1px solid var(--line)',
-    background: 'transparent',
-    color: 'var(--ink)',
-    cursor: 'pointer',
-    textAlign: 'left',
-    fontSize: 12,
-  },
-  credits: {
-    fontFamily: 'ui-monospace, monospace',
-    fontSize: 11,
-    color: 'var(--accent)',
-  },
-  track: { height: 4, borderRadius: 999, background: 'var(--line)', overflow: 'hidden' },
-  fill: { height: '100%', background: 'var(--accent)', transition: 'width .3s' },
-  stage: { position: 'relative', overflow: 'hidden' },
+function SignedOut() {
+  /**
+   * The studio has no login form of its own, on purpose: one sign-in flow,
+   * owned by the site, is one place for password reset, OTP and rate limiting
+   * to live.
+   *
+   * Nothing needs to be passed back. The site's login already lands on its
+   * `/handoff/` page, which mints a one-time ticket and forwards it here — so
+   * the round trip ends where it started, signed in.
+   */
+  const site = `${window.location.protocol}//${window.location.hostname}:4321`
+
+  return (
+    <div className="backdrop" style={{ position: 'static', height: '100%' }}>
+      <div className="modal" style={{ textAlign: 'center' }}>
+        <span className="brand-mark" style={{ margin: '0 auto 14px' }} aria-hidden="true">
+          A
+        </span>
+        <h2>Sign in to start designing</h2>
+        <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+          The studio uses the same account as the main site.
+        </p>
+        <div className="modal-actions" style={{ justifyContent: 'center' }}>
+          <a className="btn btn-primary" href={`${site}/login/`}>
+            Sign in
+          </a>
+          <a className="btn" href={`${site}/register/`}>
+            Create an account
+          </a>
+        </div>
+      </div>
+    </div>
+  )
 }
