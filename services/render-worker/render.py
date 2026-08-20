@@ -318,6 +318,22 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     # object's lighting into its neighbour's region.
     inset = 0.02 * cell
 
+    # ---- Does the caller already own the layout? --------------------------
+    #
+    # The studio generates its own geometry, so it can lay lightmap UVs out
+    # deterministically before sending anything (see plan/lightmapUV.ts) and
+    # then pass `prebakedUv: true`. When it does, this must NOT unwrap:
+    # smart_project would produce a different layout from the one the browser
+    # samples with, so every surface would light with some other surface's
+    # bake. That renders perfectly and is very hard to read as a UV bug.
+    #
+    # The saving is the point of the arrangement. Unwrapping here means the
+    # geometry has to travel back carrying its new UVs — tens of megabytes, and
+    # the reason a Shapespark export ships 27 MB of buffers. Agreeing the layout
+    # up front means only the atlas image returns.
+    prebaked = bool(spec.get("prebakedUv", False))
+    print(f"ARCVIA_BAKE_UV:{'prebaked' if prebaked else 'smart-project'}", flush=True)
+
     for index, obj in enumerate(meshes):
         # Deselect INSIDE the loop, every iteration.
         #
@@ -334,11 +350,20 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
 
         # 1. A dedicated lightmap UV channel, kept separate from the artist's
         #    texture UVs (which usually overlap deliberately, for tiling).
+        #
+        #    When the caller supplied the layout that channel already exists —
+        #    glTF TEXCOORD_1 arrives as the mesh's second UV layer — and the
+        #    only job here is to make it the one Cycles bakes into.
         uv_name = "ArcviaLightmapUV"
-        if uv_name in obj.data.uv_layers:
-            obj.data.uv_layers.remove(obj.data.uv_layers[uv_name])
-        uv_layer = obj.data.uv_layers.new(name=uv_name)
-        obj.data.uv_layers.active = uv_layer
+
+        if prebaked and len(obj.data.uv_layers) > 1:
+            uv_layer = obj.data.uv_layers[len(obj.data.uv_layers) - 1]
+            obj.data.uv_layers.active = uv_layer
+        else:
+            if uv_name in obj.data.uv_layers:
+                obj.data.uv_layers.remove(obj.data.uv_layers[uv_name])
+            uv_layer = obj.data.uv_layers.new(name=uv_name)
+            obj.data.uv_layers.active = uv_layer
 
         # BOTH of these are required, and they are not the same thing.
         #
@@ -353,20 +378,21 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
         # successful bake and the output is worthless.
         uv_layer.active_render = True
 
-        # 2. Actually unwrap. This is the step whose absence caused the bug.
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.04)
-        bpy.ops.object.mode_set(mode="OBJECT")
+        # 2 and 3. Unwrap, then squeeze the result into this object's atlas
+        #          cell — unless the caller already did both.
+        if not prebaked:
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.04)
+            bpy.ops.object.mode_set(mode="OBJECT")
 
-        # 3. Squeeze this object's unwrap into its own atlas cell.
-        col, row = index % cells, index // cells
-        for loop_uv in obj.data.uv_layers[uv_name].data:
-            u, v = loop_uv.uv
-            loop_uv.uv = (
-                col * cell + inset + u * (cell - 2 * inset),
-                row * cell + inset + v * (cell - 2 * inset),
-            )
+            col, row = index % cells, index // cells
+            for loop_uv in obj.data.uv_layers[uv_name].data:
+                u, v = loop_uv.uv
+                loop_uv.uv = (
+                    col * cell + inset + u * (cell - 2 * inset),
+                    row * cell + inset + v * (cell - 2 * inset),
+                )
 
         # 4. Point every material at the shared bake target.
         if not obj.data.materials:
