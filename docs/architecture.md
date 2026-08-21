@@ -153,10 +153,16 @@ Three things come out of the same pass:
   dozen rooms agreeing beats one hand-drawn calibration line. The studio applies
   it only to an underlay nobody has calibrated by hand.
 
-OCR (`rapidocr-onnxruntime`) and PDF reading (`pymupdf`) are optional extras.
-Without them the service still runs, with unnamed rooms and a scale the user
-sets by hand. `/health` reports `reads_text` and `reads_pdf` so callers can say
-which of the two they are getting.
+OCR (`rapidocr-onnxruntime`) is an optional extra. Without it the service still
+runs, with unnamed rooms and a scale the user sets by hand. `/health` reports
+`reads_text` so callers can say which they are getting.
+
+PDF reading is `pypdfium2` + `pdfplumber`, both permissive and both in
+`requirements.txt`; `/health` reports `reads_pdf`. A second reader, PyMuPDF, can
+be selected with `ARCVIA_PDF_BACKEND=pymupdf` for diagnosis — it is **not** in
+`requirements.txt` and a release never has it, because it is AGPL and AGPL
+reaches network use. `/health` reports `pdf_backend` so it is always visible
+which one produced a given result. See `services/floorplan-ai/requirements-dev.txt`.
 
 ### PDFs, because that is what people have
 

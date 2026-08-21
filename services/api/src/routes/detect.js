@@ -196,8 +196,8 @@ export async function registerDetectRoutes(app) {
  * Send a stored PDF to the detector and hand back what it says.
  *
  * Shared by both document routes because the failure paths are the whole job:
- * a detector that is not running, a detector without PyMuPDF installed, and a
- * file that is not really a PDF each need a different answer, and each is far
+ * a detector that is not running, a detector installed without PDF support, and
+ * a file that is not really a PDF each need a different answer, and each is far
  * more likely than success being interesting.
  */
 async function proxyDocument(request, reply, path, file, { raw = false } = {}) {
@@ -232,7 +232,12 @@ async function proxyDocument(request, reply, path, file, { raw = false } = {}) {
     // worth more than a generic failure, because the fix is one pip install and
     // the user cannot be expected to guess that.
     reply.status(503).send({
-      message: 'This installation cannot read PDFs. Install PyMuPDF in services/floorplan-ai.',
+      // Names the libraries the documented install actually uses. This used to
+      // say "install PyMuPDF", which stopped being true when PyMuPDF was
+      // dropped for its AGPL terms — and an error message that sends someone to
+      // install the wrong library costs more than no message at all.
+      message:
+        'This installation cannot read PDFs. Run `pip install -r requirements.txt` in services/floorplan-ai.',
       code: 'PDF_UNSUPPORTED',
     })
     return null

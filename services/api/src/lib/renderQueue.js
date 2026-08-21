@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { db } from '../store.js'
 import { renderWithAi } from './aiRender.js'
+import { settleRefund } from './refunds.js'
 import { put } from './storage.js'
 
 /**
@@ -145,6 +146,16 @@ async function start(job) {
 
     if (status === 'done') completedToday += 1
     await db.update('renderJobs', job.id, { status, ...patch })
+
+    // A job that failed for our reasons must not cost the user anything.
+    // The remote path has always done this from the worker callback; this,
+    // the local path, never did — which is why the database reached 29 failed
+    // jobs against 6 refunds. settleRefund is idempotent, so if a cancel
+    // killed this process the decision is already closed and this is a no-op.
+    if (status === 'failed') {
+      await settleRefund(job.id, 'render-failed')
+    }
+
     drain()
   }
 
@@ -165,6 +176,63 @@ async function start(job) {
         ownerId: job.ownerId,
       })
       await finish('done', { progress: 100, outputUrl, markers: { device: 'cloud' } })
+    } catch (error) {
+      await finish('failed', { error: error.message })
+    }
+    return
+  }
+
+  // CAD reconstruction. Spawns the Python engine rather than Blender, and is
+  // tracked in `running` like any other job so the daily cap, the concurrency
+  // limit and boot reconciliation all apply without special cases.
+  if (job.preset === 'cad') {
+    running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
+
+    try {
+      const { reconstruct } = await import('./cadEngine.js')
+      const { model, glbPath, plan } = await reconstruct({
+        inputPath: job.spec.inputPath,
+        outDir: job.spec.outDir,
+        unit: job.spec.unit,
+        layers: job.spec.layers,
+        autoLayers: job.spec.autoLayers !== false,
+        height: job.spec.height,
+        frame: job.spec.frame,
+        onProgress: (percent) => {
+          const active = running.get(job.id)
+          if (active) active.progress = percent
+        },
+      })
+
+      // A blocking verdict means the engine built something it does not
+      // believe. Publishing that is worse than failing: a villa 4 cm across
+      // renders beautifully, and nobody downstream can tell.
+      const verify = model.verify ?? { ok: true, checks: [] }
+      if (!verify.ok) {
+        const why = (verify.checks ?? [])
+          .filter((c) => c.level === 'blocking')
+          .map((c) => c.message)
+          .join(' ')
+        await finish('failed', { error: `The drawing did not reconstruct. ${why}` })
+        return
+      }
+
+      const outputUrl = glbPath ? await publish(glbPath, job) : null
+      const planUrl = plan ? await publish(plan, job).catch(() => null) : null
+      await finish('done', {
+        progress: 100,
+        outputUrl,
+        planUrl,
+        markers: {
+          device: 'cpu',
+          rooms: model.rooms?.count ?? 0,
+          named: model.rooms?.named ?? 0,
+          walls: model.walls?.total ?? 0,
+          openings: model.openings?.total ?? 0,
+          unit: model.unit,
+          layers: model.layersUsed,
+        },
+      })
     } catch (error) {
       await finish('failed', { error: error.message })
     }
@@ -291,7 +359,12 @@ async function start(job) {
  */
 async function publish(outputPath, job) {
   const bytes = await readFile(outputPath)
-  const contentType = extname(outputPath) === '.glb' ? 'model/gltf-binary' : 'image/png'
+  const BY_EXTENSION = {
+    '.glb': 'model/gltf-binary',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+  }
+  const contentType = BY_EXTENSION[extname(outputPath)] ?? 'image/png'
 
   const stored = await put(bytes, contentType, {
     prefix: `renders/${job.ownerId}`,

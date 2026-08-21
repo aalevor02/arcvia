@@ -11,6 +11,7 @@ import { registerBillingRoutes } from './routes/billing.js'
 import { registerReferralRoutes } from './routes/referral.js'
 import { registerUploadRoutes } from './routes/uploads.js'
 import { registerDetectRoutes } from './routes/detect.js'
+import { registerCadRoutes } from './routes/cad.js'
 import { isOriginAllowed } from './lib/origins.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -24,7 +25,11 @@ const app = Fastify({
   },
   // Uploaded floor plans and GLB exports are large; the default 1MB is far too
   // small. Real caps are enforced per-route.
-  bodyLimit: 32 * 1024 * 1024,
+  // Must move in step with the multipart fileSize below and with
+  // uploads.js's MAX_DOCUMENT_BYTES. They were 32/32/64, which made the
+  // 64 MB branch unreachable — a large drawing was refused by a limit no
+  // error message mentioned.
+  bodyLimit: 64 * 1024 * 1024,
 })
 
 await app.register(cors, {
@@ -45,7 +50,7 @@ await app.register(cors, {
 })
 
 await app.register(multipart, {
-  limits: { fileSize: 32 * 1024 * 1024, files: 4 },
+  limits: { fileSize: 64 * 1024 * 1024, files: 4 },
 })
 
 app.get('/health', async () => ({
@@ -64,6 +69,7 @@ await app.register(registerBillingRoutes, { prefix: '/billing' })
 await app.register(registerReferralRoutes, { prefix: '/referral' })
 await app.register(registerUploadRoutes, { prefix: '/uploads' })
 await app.register(registerDetectRoutes, { prefix: '/detect' })
+await app.register(registerCadRoutes, { prefix: '/cad' })
 await app.register(registerLeadRoutes)
 
 app.setErrorHandler((error, request, reply) => {

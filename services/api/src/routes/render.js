@@ -1,6 +1,7 @@
 import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
-import { spend, refund, InsufficientCredits } from '../lib/credits.js'
+import { spend, InsufficientCredits } from '../lib/credits.js'
+import { settleRefund, declineRefund } from '../lib/refunds.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
 import { resolveUrl } from '../lib/storage.js'
 import { AI_STYLES, isStyle } from '../lib/aiRender.js'
@@ -55,6 +56,19 @@ const PRESETS = {
     maxBounces: 0,
     diffuseBounces: 0,
   },
+  // CAD reconstruction. Not a camera at all — the width/height fields are
+  // meaningless here and stay zero, exactly as the `ai` preset does. What it
+  // buys is every piece of long-job machinery the queue already owns: the daily
+  // cap, concurrency, metering, refund-on-failure, cancel, and reconciliation
+  // after a restart.
+  cad: {
+    action: 'cadReconstruct',
+    width: 0,
+    height: 0,
+    samples: 0,
+    maxBounces: 0,
+    diffuseBounces: 0,
+  },
   bake: {
     action: 'lightmapBake',
     width: 2048, // lightmap texture resolution, not a camera framing
@@ -79,9 +93,8 @@ const PRESETS = {
  * definition abandoned — this process has just started and is running none of
  * them — and is failed and refunded.
  *
- * Refunds at the current tariff rather than the recorded `creditsCharged`,
- * which is what the cancel and callback paths already do. If prices ever move,
- * all three want changing together.
+ * Refunds go through `settleRefund`, which pays back the recorded
+ * `creditsCharged` and stamps the job so no other path can pay it twice.
  */
 export async function reconcileRenderJobs() {
   const orphans = await db.find(
@@ -94,9 +107,10 @@ export async function reconcileRenderJobs() {
       status: 'failed',
       error: 'The render server restarted while this job was running.',
     })
-    if (PRESETS[job.preset]) {
-      await refund(job.ownerId, PRESETS[job.preset].action, { jobId: job.id, reason: 'restart' })
-    }
+    // No `PRESETS` guard. A job whose preset is no longer registered still
+    // took the user's credits, and skipping it was exactly how orphaned jobs
+    // kept them — silently, because nothing errors when a lookup misses.
+    await settleRefund(job.id, 'restart', PRESETS[job.preset]?.action)
   }
 
   return orphans.length
@@ -187,6 +201,9 @@ export async function registerRenderRoutes(app) {
       sceneId,
       ownerId: request.auth.userId,
       preset,
+      // Recorded so a refund prices itself from what this job actually was,
+      // not from whatever `PRESETS` happens to hold when it fails.
+      action: config.action,
       status: 'queued',
       progress: 0,
       creditsCharged: charge.charged,
@@ -274,8 +291,14 @@ export async function registerRenderRoutes(app) {
 
     // Refund only if no GPU time was consumed. A job already rendering has
     // cost real money whether or not the user still wants the result.
+    //
+    // Both branches close the decision, and that is the point: killing a
+    // running job makes it report a failure moments later, and the failure
+    // path would otherwise refund what we just decided not to.
     if (job.status === 'queued') {
-      await refund(request.auth.userId, PRESETS[job.preset].action, { jobId: job.id })
+      await settleRefund(job.id, 'cancelled-before-start', PRESETS[job.preset]?.action)
+    } else {
+      await declineRefund(job.id, 'cancelled-while-rendering')
     }
 
     return { jobId: job.id, status: 'cancelled', refunded: job.status === 'queued' }
@@ -303,7 +326,7 @@ export async function registerRenderRoutes(app) {
 
     // A job that failed for our reasons should not cost the user anything.
     if (status === 'failed') {
-      await refund(job.ownerId, PRESETS[job.preset].action, { jobId: job.id })
+      await settleRefund(job.id, 'worker-reported-failure', PRESETS[job.preset]?.action)
     }
 
     return { ok: true }

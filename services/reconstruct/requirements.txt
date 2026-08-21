@@ -1,0 +1,29 @@
+# Reconstruction engine — CAD/plan -> semantic building model.
+#
+# Python 3.12. Not 3.13+: shapely and opencv have no settled wheel story there
+# yet, and this service is not the place to find that out.
+#
+# ── Why this is a separate venv from floorplan-ai ──────────────────────────────
+# floorplan-ai carries rapidocr, whose dependency on the FULL opencv-python will
+# happily uninstall the headless build underneath it. Quarantining that conflict
+# is the whole reason these are two processes: reconstruct talks to floorplan-ai
+# over HTTP as one evidence source among several, and never imports it.
+#
+# There is deliberately NO rapidocr here. If that ever changes, it does not.
+
+ezdxf==1.4.4          # the DXF reader. cad.py already depends on it; it was
+                      # never declared, which is why importing cad.py crashes
+                      # the floorplan-ai service at startup today.
+shapely>=2.1          # mitred wall bands, interior rings, polygon predicates
+numpy>=2.2            # the solver's sparse normal equations
+opencv-python-headless==4.10.0.84   # storey registration by template match.
+                      # headless: a server has no GTK/Qt and cannot load them.
+pypdfium2>=5.0        # PDF images at native resolution, and page rendering
+pdfplumber>=0.11      # vector paths and positioned text — the vector-PDF reader
+                      # is to be written against THIS, not PyMuPDF, which is
+                      # AGPL and would attach to hosting Arcvia as a service.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-multipart==0.0.20

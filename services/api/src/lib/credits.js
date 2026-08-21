@@ -125,8 +125,12 @@ export async function spend(userId, action, meta = {}) {
 }
 
 /** Refund a spend when the work it paid for failed. */
-export async function refund(userId, action, meta = {}) {
-  const cost = creditCost[action] ?? 0
+export async function refund(userId, action, meta = {}, { amount } = {}) {
+  // `amount` is what the user was actually charged, read off the job record.
+  // Pricing a refund from the CURRENT tariff misprices every one of them the
+  // moment a price moves — over-refunding if it fell, short-changing if it
+  // rose — so any caller that knows the recorded charge should pass it.
+  const cost = amount ?? creditCost[action] ?? 0
   if (cost === 0) return
 
   const user = await db.findOne('users', (u) => u.id === userId)

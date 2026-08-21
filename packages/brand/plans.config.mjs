@@ -31,6 +31,13 @@ export const creditCost = {
   isometricRender: 3, // 1920x1080, samples: 32
   fullRender: 5, // full-res still, samples: 128
   lightmapBake: 25, // whole-scene bake — the single most expensive action
+
+  // CAD reconstruction. Reading a drawing is free on purpose: a survey answers
+  // the questions a human must settle before a solve is worth running (which
+  // unit? which layers? which of the five plans on this sheet?), and charging
+  // for those makes people guess instead of check.
+  cadSurvey: 0,
+  cadReconstruct: 3, // CPU-only, tens of seconds — priced like an isometric
 }
 
 export const plans = {
