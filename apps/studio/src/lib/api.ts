@@ -157,6 +157,8 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   views?: SceneView[]
   hotspots?: Hotspot[]
   branding?: Branding | null
+  /** True when an access code is set. The code itself never leaves the server. */
+  protected?: boolean
 }
 
 export const listScenes = () =>
@@ -358,3 +360,19 @@ export function siteOrigin(): string {
   if (configured) return String(configured).replace(/\/$/, '')
   return `${window.location.protocol}//${window.location.hostname}:4321`
 }
+
+/**
+ * Set or clear the access code on a published walkthrough.
+ *
+ * An empty code removes the gate, deliberately: "publish it open" should be a
+ * decision someone can make on purpose, not something that only happens by
+ * never setting one.
+ *
+ * The code is sent once and never returned. The editor is told only whether a
+ * scene has one, via `Scene.protected`.
+ */
+export const setAccessCode = (id: string, code: string) =>
+  request<{ protected: boolean }>(`/scenes/${id}/access-code`, {
+    method: 'POST',
+    body: { code },
+  })

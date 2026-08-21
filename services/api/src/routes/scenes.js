@@ -1,5 +1,5 @@
 import { db } from '../store.js'
-import { requireAuth } from '../lib/auth.js'
+import { requireAuth, hashPassword, verifyPassword } from '../lib/auth.js'
 import { spend } from '../lib/credits.js'
 
 /**
@@ -54,7 +54,12 @@ export async function registerSceneRoutes(app) {
   app.get('/:id', { preHandler: requireAuth }, async (request, reply) => {
     const scene = await owned(request, reply)
     if (!scene) return
-    return { scene }
+    // Through `summarise`, like every other scene response. Returning the raw
+    // record leaked `ownerId` and, once access codes existed, the scrypt hash
+    // as well — to the owner, which sounds harmless until you consider that it
+    // lands in devtools, in any log that captures a response, and in whatever
+    // the client persists.
+    return { scene: summarise(scene) }
   })
 
   app.patch('/:id', { preHandler: requireAuth }, async (request, reply) => {
@@ -133,6 +138,34 @@ export async function registerSceneRoutes(app) {
   })
 
   // ---- Public read --------------------------------------------------------
+  // ---- Access code --------------------------------------------------------
+  // Set or clear the code that gates a published link. A pre-launch unit is
+  // commercially sensitive, and "the URL is unguessable" is not an answer a
+  // developer accepts for something they have not announced yet.
+  app.post('/:id/access-code', { preHandler: requireAuth }, async (request, reply) => {
+    const scene = await owned(request, reply)
+    if (!scene) return
+
+    const code = request.body?.code
+
+    // An empty code removes the gate. Explicit, because "publish it open" is a
+    // decision worth being able to make deliberately.
+    if (!code) {
+      await db.update('scenes', scene.id, { accessCodeHash: null })
+      return { protected: false }
+    }
+
+    if (String(code).length < 4) {
+      return reply.status(400).send({ message: 'Use at least four characters.' })
+    }
+
+    // Hashed with the same scrypt used for account passwords. A scene code is
+    // lower-stakes than a password, but people reuse them, and storing one in
+    // plain text makes a database leak worse than it needs to be.
+    await db.update('scenes', scene.id, { accessCodeHash: await hashPassword(String(code)) })
+    return { protected: true }
+  })
+
   // No auth: this is what a client following a shared link hits. Only published
   // scenes resolve, and only the fields a viewer needs are returned.
   app.get('/public/:slug', async (request, reply) => {
@@ -142,28 +175,122 @@ export async function registerSceneRoutes(app) {
     )
     if (!scene) return reply.status(404).send({ message: 'Walkthrough not found.' })
 
-    return {
-      scene: {
-        name: scene.name,
-        modelUrl: scene.modelUrl,
-        lightsUrl: scene.lightsUrl,
-        hdriUrl: scene.hdriUrl,
-        // The whole point of publishing. A scene with a bake renders with real
-        // light; one without falls back to the real-time rig, which is worse
-        // but still a walkthrough — so this is optional rather than required.
-        bakedUrl: scene.bakedUrl ?? null,
-        // Empty arrays rather than null: the page iterates these, and a null
-        // would make every consumer write the same guard.
-        views: scene.views ?? [],
-        hotspots: scene.hotspots ?? [],
-        branding: scene.branding ?? null,
-        // Credits travel with the scene because the obligation does. A CC-BY
-        // model's licence is met by the page the client opens, not by anything
-        // in the editor.
-        credits: scene.credits ?? [],
-      },
+    // A protected scene gives up its name and nothing else.
+    //
+    // The name is deliberate: a visitor needs to know they are at the right
+    // place before being asked for a code. Everything that would let them
+    // render it — the model, the atlas, the views — is withheld, because
+    // returning the URLs and hiding the page would be theatre.
+    if (scene.accessCodeHash) {
+      return { scene: { name: scene.name, protected: true } }
     }
+
+    return { scene: publicPayload(scene) }
   })
+
+  /**
+   * Exchange a code for the scene.
+   *
+   * ── What this does and does not protect ─────────────────────────────────
+   * It gates the *manifest*. The model and atlas behind it are content-
+   * addressed and served without auth, exactly like a presigned CDN URL, so
+   * anyone who has already been given those URLs keeps them.
+   *
+   * That is the same model the reference product uses and it is worth being
+   * plain about: this makes a link shareable-but-gated, not encrypted. It stops
+   * a forwarded link being opened by whoever received it, which is the actual
+   * request. It would not stop someone who had already loaded the scene.
+   */
+  app.post('/public/:slug/unlock', async (request, reply) => {
+    const slug = request.params.slug
+
+    if (throttled(slug)) {
+      return reply
+        .status(429)
+        .send({ message: 'Too many attempts. Try again in a few minutes.' })
+    }
+
+    const scene = await db.findOne(
+      'scenes',
+      (s) => s.publishedSlug === slug && s.published,
+    )
+    if (!scene) return reply.status(404).send({ message: 'Walkthrough not found.' })
+
+    // No code set: nothing to unlock, and answering "wrong code" would be a
+    // lie that sends someone hunting for a code that does not exist.
+    if (!scene.accessCodeHash) return { scene: publicPayload(scene) }
+
+    const ok = await verifyPassword(String(request.body?.code ?? ''), scene.accessCodeHash)
+    if (!ok) {
+      recordFailure(slug)
+      return reply.status(401).send({ message: 'That code did not work.' })
+    }
+
+    attempts.delete(slug)
+    return { scene: publicPayload(scene) }
+  })
+
+}
+
+/**
+ * Failed unlock attempts, per slug.
+ *
+ * A four-digit access code is guessable in ten thousand tries, which is nothing
+ * over HTTP. Throttling is what makes a short, sayable-over-the-phone code
+ * viable at all — without it the code length would have to grow to the point
+ * where nobody would use the feature.
+ *
+ * In memory, so it resets on deploy and is per-process. That is a real
+ * limitation and the right trade at this size: the alternative is a shared
+ * store for something that only has to make bulk guessing tedious.
+ */
+const attempts = new Map()
+
+const ATTEMPT_LIMIT = 8
+const ATTEMPT_WINDOW_MS = 10 * 60 * 1000
+
+function throttled(slug) {
+  const record = attempts.get(slug)
+  if (!record) return false
+  if (Date.now() > record.until) {
+    attempts.delete(slug)
+    return false
+  }
+  return record.count >= ATTEMPT_LIMIT
+}
+
+function recordFailure(slug) {
+  const record = attempts.get(slug) ?? { count: 0, until: Date.now() + ATTEMPT_WINDOW_MS }
+  record.count += 1
+  attempts.set(slug, record)
+}
+
+/**
+ * What a client is given for a published scene.
+ *
+ * Everything needed to render, and nothing else — no owner, no plan, no
+ * internal ids.
+ */
+function publicPayload(scene) {
+  return {
+    name: scene.name,
+    modelUrl: scene.modelUrl,
+    lightsUrl: scene.lightsUrl,
+    hdriUrl: scene.hdriUrl,
+    // The whole point of publishing. A scene with a bake renders with real
+    // light; one without falls back to the real-time rig, which is worse but
+    // still a walkthrough — so this is optional rather than required.
+    bakedUrl: scene.bakedUrl ?? null,
+    // Empty arrays rather than null: the page iterates these, and a null would
+    // make every consumer write the same guard.
+    views: scene.views ?? [],
+    hotspots: scene.hotspots ?? [],
+    branding: scene.branding ?? null,
+    // Credits travel with the scene because the obligation does. A CC-BY
+    // model's licence is met by the page the client opens, not by anything in
+    // the editor.
+    credits: scene.credits ?? [],
+  }
 }
 
 async function owned(request, reply) {
@@ -181,9 +308,23 @@ async function owned(request, reply) {
   return scene
 }
 
+/**
+ * A scene as its owner may see it.
+ *
+ * `accessCodeHash` is replaced by a boolean rather than passed through. A hash
+ * is not a secret the way a password is, but it has no business leaving the
+ * server: it appears in browser devtools, in any log that captures a response,
+ * and in whatever a client persists — and offline cracking of a four-character
+ * code is trivial. The editor only needs to know whether a code is set, which
+ * is exactly what it gets.
+ *
+ * Written as a deny-list of two fields on purpose. An allow-list would be safer
+ * still, but scenes gain fields often, and one that silently stops being
+ * returned is a bug that looks like data loss.
+ */
 function summarise(scene) {
-  const { ownerId, ...rest } = scene
-  return rest
+  const { ownerId, accessCodeHash, ...rest } = scene
+  return { ...rest, protected: Boolean(accessCodeHash) }
 }
 
 /**

@@ -10,6 +10,7 @@ import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
+import { setAccessCode } from '../lib/api'
 import type { Plan } from '../plan/types'
 
 interface Props {
@@ -93,6 +94,9 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     branding: null,
   })
   const [placing, setPlacing] = useState(false)
+  /** Whether a code gates the published link, and the box for changing it. */
+  const [gated, setGated] = useState(false)
+  const [code, setCode] = useState('')
 
   // Load the presentation the scene already has. Separate from the plan
   // because it is edited independently and far more often — a scene is lit
@@ -107,6 +111,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           hotspots: scene.hotspots ?? [],
           branding: scene.branding ?? null,
         })
+        setGated(Boolean(scene.protected))
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -566,6 +571,45 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
               </span>
             </span>
           </button>
+
+          <div style={{ marginTop: 8 }}>
+            <label style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+              {gated ? 'Access code is set' : 'Access code (optional)'}
+            </label>
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <input
+                type="password"
+                value={code}
+                placeholder={gated ? '••••••••' : 'Leave empty for an open link'}
+                onChange={(e) => setCode(e.target.value)}
+                style={{ flex: 1, fontSize: 11.5 }}
+              />
+              <button
+                className="btn btn-tiny"
+                onClick={() => {
+                  void setAccessCode(sceneId, code)
+                    .then((result) => {
+                      setGated(result.protected)
+                      setCode('')
+                      setStatus(
+                        result.protected
+                          ? 'Access code set — the link now asks for it.'
+                          : 'Access code removed — the link is open.',
+                      )
+                    })
+                    .catch((error) =>
+                      setStatus(error instanceof Error ? error.message : 'Could not save the code'),
+                    )
+                }}
+              >
+                {code ? 'Set' : 'Clear'}
+              </button>
+            </div>
+            <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              Gates the link, not the files behind it — enough to stop a
+              forwarded link being opened, not encryption.
+            </p>
+          </div>
 
           {shareUrl && (
             <div style={{ marginTop: 8 }}>

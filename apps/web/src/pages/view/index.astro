@@ -97,6 +97,16 @@ const title = 'Walkthrough'
       .spot .card span { color: var(--muted); }
       .spot[data-open='false'] .card { display: none; }
 
+      #gate { position: fixed; inset: 0; z-index: 4; display: grid; place-content: center;
+        gap: 10px; padding: 24px; background: var(--ground); text-align: center; }
+      #gate[hidden] { display: none; }
+      #gate p { margin: 0; color: var(--muted); font-size: 13px; }
+      #gate input { font: inherit; font-size: 14px; text-align: center; padding: 10px 14px;
+        border-radius: 999px; border: 1px solid var(--line); background: #10141b;
+        color: var(--ink); width: min(280px, 80vw); }
+      #gate button { font-size: 14px; }
+      #gateError { color: #ff8b8b; min-height: 18px; font-size: 12px; }
+
       #logo { height: 26px; width: auto; display: block; }
 
       #status { position: fixed; inset: 0; display: grid; place-items: center;
@@ -149,6 +159,15 @@ const title = 'Walkthrough'
       <h2>Models</h2>
       <ul id="creditList"></ul>
     </aside>
+
+    <form id="gate" hidden>
+      <strong>This walkthrough is private</strong>
+      <p id="gateName"></p>
+      <input id="code" type="password" autocomplete="off" placeholder="Access code"
+             aria-label="Access code" />
+      <button type="submit">Open</button>
+      <p id="gateError" role="alert"></p>
+    </form>
 
     <div id="status">
       <div>
@@ -203,6 +222,58 @@ const title = 'Walkthrough'
 
       const absolute = (url) => (url?.startsWith('/') ? api + url : url)
 
+      /**
+       * Ask for the access code and exchange it for the scene.
+       *
+       * Resolves with the scene once a code works, and never otherwise — a
+       * wrong code re-prompts rather than failing the page, because the usual
+       * reason for one is a typo or the wrong line of an email.
+       *
+       * The code is never stored. Remembering it would spare a returning
+       * visitor one step and would also mean a shared laptop keeps access to a
+       * pre-launch property, which is the thing the gate exists to prevent.
+       */
+      function unlock(slug, name) {
+        const gate = document.getElementById('gate')
+        const input = document.getElementById('code')
+        const error = document.getElementById('gateError')
+
+        document.getElementById('gateName').textContent = name ?? ''
+        els.status.classList.add('gone')
+        gate.hidden = false
+        input.focus()
+
+        return new Promise((resolve) => {
+          gate.addEventListener('submit', async (event) => {
+            event.preventDefault()
+            error.textContent = ''
+
+            const attempt = await fetch(
+              `${api}/scenes/public/${encodeURIComponent(slug)}/unlock`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: input.value }),
+              },
+            )
+
+            if (attempt.ok) {
+              const body = await attempt.json()
+              gate.hidden = true
+              els.status.classList.remove('gone')
+              resolve(body.scene)
+              return
+            }
+
+            // 429 carries its own message about waiting, which is more useful
+            // than a generic "wrong code" when the reason is a lockout.
+            const body = await attempt.json().catch(() => ({}))
+            error.textContent = body.message ?? 'That code did not work.'
+            input.select()
+          })
+        })
+      }
+
       async function main() {
         const slug = slugFromLocation()
         if (!slug) return fail('No walkthrough specified', 'This link is missing its scene.')
@@ -215,7 +286,18 @@ const title = 'Walkthrough'
           )
         }
 
-        const { scene } = await response.json()
+        let { scene } = await response.json()
+
+        // ---- Gated scenes ---------------------------------------------------
+        // A protected scene arrives with its name and nothing that renders it,
+        // so there is nothing to show until a code is exchanged. The name is
+        // displayed: a visitor needs to know they are in the right place before
+        // being asked for a credential.
+        if (scene.protected) {
+          scene = await unlock(slug, scene.name)
+          if (!scene) return
+        }
+
         document.title = scene.name ? `${scene.name} — Walkthrough` : 'Walkthrough'
         els.name.textContent = scene.name ?? 'Walkthrough'
 
