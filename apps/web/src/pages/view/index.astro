@@ -68,6 +68,37 @@ const title = 'Walkthrough'
       button:hover { border-color: rgba(255,255,255,.28); }
       button[aria-pressed='true'] { background: #2f6df6; border-color: #2f6df6; }
 
+      /* The view bar sits above the controls rather than beside them: on a
+         phone the two together would wrap into an unusable pile, and the views
+         are the thing a client actually uses. */
+      #views { left: 0; right: 0; bottom: 68px; display: flex; justify-content: center;
+        flex-wrap: wrap; gap: 6px; padding: 0 18px; }
+      #views button { font-size: 12px; padding: 7px 13px; }
+
+      /* Markers are DOM, not sprites: real text, selectable, legible at any
+         distance, and no texture to load. The cost is positioning them each
+         frame, which the viewer's after-render hook does. */
+      #spots { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+      .spot { position: absolute; transform: translate(-50%, -50%); pointer-events: auto;
+        display: grid; place-items: center; }
+      .spot > button {
+        width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 15px;
+        line-height: 1; background: var(--accent, #2f6df6); border: 2px solid rgba(255,255,255,.85);
+        color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.4);
+      }
+      .spot[data-open='true'] > button { background: #10141b; }
+      .spot .card {
+        position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+        width: max-content; max-width: 260px; padding: 10px 12px; border-radius: 10px;
+        background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
+        text-align: left; font-size: 12px; line-height: 1.5;
+      }
+      .spot .card strong { display: block; margin-bottom: 2px; }
+      .spot .card span { color: var(--muted); }
+      .spot[data-open='false'] .card { display: none; }
+
+      #logo { height: 26px; width: auto; display: block; }
+
       #status { position: fixed; inset: 0; display: grid; place-items: center;
         text-align: center; padding: 24px; z-index: 3; background: var(--ground); }
       #status.gone { display: none; }
@@ -103,6 +134,10 @@ const title = 'Walkthrough'
         Made with {brand.name}
       </a>
     </div>
+
+    <div id="spots"></div>
+
+    <div class="overlay" id="views" hidden></div>
 
     <div class="overlay" id="controls" hidden>
       <button id="walk" aria-pressed="false">Walk through it</button>
@@ -156,6 +191,8 @@ const title = 'Walkthrough'
         credits: document.getElementById('credits'),
         creditList: document.getElementById('creditList'),
         creditsToggle: document.getElementById('creditsToggle'),
+        views: document.getElementById('views'),
+        spots: document.getElementById('spots'),
       }
 
       const fail = (title, detail) => {
@@ -237,6 +274,106 @@ const title = 'Walkthrough'
           if (walking) els.walk.click()
           else viewer.frameModel()
         })
+
+        // ---- Branding -------------------------------------------------------
+        // Applied before anything is shown, so a client never sees Arcvia blue
+        // flash to the developer's colour.
+        const branding = scene.branding ?? {}
+        if (branding.accent) document.documentElement.style.setProperty('--accent', branding.accent)
+        if (branding.logoUrl) {
+          const logo = document.createElement('img')
+          logo.id = 'logo'
+          logo.src = absolute(branding.logoUrl)
+          logo.alt = scene.name ?? ''
+          els.name.replaceWith(logo)
+        }
+        if (branding.hideCredit) document.getElementById('brand')?.remove()
+
+        // ---- Named views ----------------------------------------------------
+        const views = scene.views ?? []
+        if (views.length > 0) {
+          els.views.hidden = false
+          for (const view of views) {
+            const button = document.createElement('button')
+            button.textContent = view.name
+            button.addEventListener('click', () => {
+              // Leave first-person before jumping: arriving at a named view
+              // still in walk mode drops the visitor there with the pointer
+              // locked, which reads as the view having failed.
+              if (walking) els.walk.click()
+              viewer.goToView(view)
+            })
+            els.views.appendChild(button)
+          }
+          // Open on the first view rather than an overview. It is the shot the
+          // author chose to lead with, and an overview of a single flat is
+          // rarely the most flattering thing to open on.
+          viewer.goToView(views[0], false)
+        }
+
+        // ---- Hotspots -------------------------------------------------------
+        const hotspots = scene.hotspots ?? []
+        const markers = hotspots.map((hotspot) => {
+          const marker = document.createElement('div')
+          marker.className = 'spot'
+          marker.dataset.open = 'false'
+
+          const dot = document.createElement('button')
+          dot.type = 'button'
+          dot.textContent = '+'
+          dot.setAttribute('aria-label', hotspot.title)
+
+          const card = document.createElement('div')
+          card.className = 'card'
+          const title = document.createElement('strong')
+          title.textContent = hotspot.title
+          card.appendChild(title)
+          if (hotspot.body) {
+            const body = document.createElement('span')
+            body.textContent = hotspot.body
+            card.appendChild(body)
+          }
+          if (hotspot.link) {
+            const link = document.createElement('a')
+            link.href = hotspot.link
+            link.target = '_blank'
+            link.rel = 'noreferrer noopener'
+            link.textContent = 'More'
+            card.appendChild(document.createElement('br'))
+            card.appendChild(link)
+          }
+
+          dot.addEventListener('click', () => {
+            const open = marker.dataset.open === 'true'
+            // One card at a time: two overlapping cards in a small room is
+            // unreadable, and the second click is almost always "show me that
+            // one instead".
+            for (const other of markers) other.el.dataset.open = 'false'
+            marker.dataset.open = String(!open)
+            dot.textContent = !open ? '×' : '+'
+          })
+
+          marker.append(dot, card)
+          els.spots.appendChild(marker)
+          return { el: marker, hotspot, dot }
+        })
+
+        // Positioned after every draw. Markers track the geometry they label,
+        // so they have to be recomputed whenever the camera moves at all.
+        if (markers.length > 0) {
+          viewer.onAfterRender = () => {
+            for (const { el, hotspot } of markers) {
+              const at = viewer.project(hotspot.position)
+              el.style.display = at.visible ? '' : 'none'
+              if (!at.visible) continue
+              el.style.left = at.x + 'px'
+              el.style.top = at.y + 'px'
+              // Fade with distance rather than hiding: a marker that vanishes
+              // as you back away looks broken, one that recedes looks placed.
+              el.style.opacity = String(Math.max(0.35, Math.min(1, 12 / at.distance)))
+            }
+          }
+        }
 
         // Attribution. Present when it is owed, absent when it is not.
         const credits = scene.credits ?? []

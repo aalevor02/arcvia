@@ -5,9 +5,11 @@ import { suggestedCamera } from '../plan/buildGeometry'
 import { activeFloor } from '../plan/planStore'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import { exportForBake, loadAndApply } from '../plan/bake'
-import { uploadScene, updateScene, storedUrl, publishScene, siteOrigin } from '../lib/api'
+import { uploadScene, updateScene, storedUrl, publishScene, siteOrigin, getScene } from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
+import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
+import { upsertHotspot, type Presentation } from '../plan/presentation'
 import type { Plan } from '../plan/types'
 
 interface Props {
@@ -85,6 +87,42 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [baked, setBaked] = useState(false)
   /** The public link, once this scene has been published. */
   const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [presentation, setPresentation] = useState<Presentation>({
+    views: [],
+    hotspots: [],
+    branding: null,
+  })
+  const [placing, setPlacing] = useState(false)
+
+  // Load the presentation the scene already has. Separate from the plan
+  // because it is edited independently and far more often — a scene is lit
+  // once and re-presented per client.
+  useEffect(() => {
+    let cancelled = false
+    void getScene(sceneId)
+      .then((scene) => {
+        if (cancelled) return
+        setPresentation({
+          views: scene.views ?? [],
+          hotspots: scene.hotspots ?? [],
+          branding: scene.branding ?? null,
+        })
+      })
+      .catch(() => {
+        /* a scene that will not load is already reported by the editor */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sceneId])
+
+  /** Persist, and keep the panel responsive by not awaiting the write. */
+  function updatePresentation(next: Presentation) {
+    setPresentation(next)
+    void updateScene(sceneId, next).catch(() =>
+      setStatus('That change could not be saved. Check your connection.'),
+    )
+  }
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -366,7 +404,26 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   return (
     <div className="editor-body" style={{ gridTemplateColumns: '1fr 260px' }}>
       <div className="stage">
-        <canvas ref={canvasRef} />
+        <canvas
+          ref={canvasRef}
+          style={placing ? { cursor: 'crosshair' } : undefined}
+          onPointerDown={(event) => {
+            if (!placing) return
+            const point = viewerRef.current?.pick(event.clientX, event.clientY)
+            if (!point) {
+              setStatus('That missed the model — click a wall, floor or object.')
+              return
+            }
+            updatePresentation({
+              ...presentation,
+              hotspots: upsertHotspot(presentation.hotspots, hotspotAt(point, presentation.hotspots)),
+            })
+            // One click, one hotspot. Staying in placing mode after a
+            // successful drop makes it far too easy to litter the model while
+            // trying to orbit.
+            setPlacing(false)
+          }}
+        />
         <p className="hint">{status}</p>
         <div className="stage-actions">
           <button
@@ -461,6 +518,14 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
             }}
           />
         </section>
+
+        <PresentationPanel
+          viewer={viewerRef.current}
+          presentation={presentation}
+          onChange={updatePresentation}
+          placing={placing}
+          onPlacingChange={setPlacing}
+        />
 
         <section>
           <span className="eyebrow">Render</span>

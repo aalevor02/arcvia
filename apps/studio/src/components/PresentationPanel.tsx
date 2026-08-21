@@ -1,0 +1,229 @@
+import { useState } from 'react'
+import type { SceneViewer } from '@arcvia/viewer'
+import {
+  slugId,
+  upsertView,
+  removeView,
+  reorderView,
+  removeHotspot,
+  type Hotspot,
+  type Presentation,
+  type SceneView,
+} from '../plan/presentation'
+
+interface Props {
+  viewer: SceneViewer | null
+  presentation: Presentation
+  onChange: (next: Presentation) => void
+  /** True while the author is picking a point in the 3D view for a hotspot. */
+  placing: boolean
+  onPlacingChange: (placing: boolean) => void
+}
+
+/**
+ * Authoring the presentation: named views, hotspots, branding.
+ *
+ * ── Why this is a separate panel and not part of Render ─────────────────────
+ * Rendering is about how the scene *looks*. This is about how it is *shown* —
+ * where a client is taken, what they are told, whose name is on it. They are
+ * used at different points: you light a scene once and then arrange the
+ * presentation repeatedly, per client, without touching the lighting.
+ */
+export default function PresentationPanel({
+  viewer,
+  presentation,
+  onChange,
+  placing,
+  onPlacingChange,
+}: Props) {
+  const [viewName, setViewName] = useState('')
+
+  const { views, hotspots, branding } = presentation
+
+  function captureView() {
+    if (!viewer) return
+
+    // Named from the box, or numbered. Numbering from the count rather than
+    // from a running counter means deleting "View 2" and capturing again
+    // reuses the name, which is what someone tidying up expects.
+    const name = viewName.trim() || `View ${views.length + 1}`
+    onChange({ ...presentation, views: upsertView(views, viewer.currentView(name)) })
+    setViewName('')
+  }
+
+  return (
+    <>
+      <section>
+        <span className="eyebrow">Views</span>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+          Move the camera where you want it, then capture. Clients get these as
+          buttons, in this order.
+        </p>
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={viewName}
+            placeholder="Kitchen"
+            onChange={(e) => setViewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && captureView()}
+            style={{ flex: 1, fontSize: 12 }}
+          />
+          <button className="btn" onClick={captureView} disabled={!viewer}>
+            Capture
+          </button>
+        </div>
+
+        {views.length === 0 ? (
+          <p className="muted" style={{ fontSize: 11.5 }}>
+            No views yet — the walkthrough will open on an overview.
+          </p>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            {views.map((view: SceneView, index: number) => (
+              <div key={view.id} className="stat" style={{ gap: 4 }}>
+                <button
+                  className="linklike"
+                  style={{ flex: 1, textAlign: 'left', fontSize: 12.5 }}
+                  onClick={() => viewer?.goToView(view)}
+                  title="Go to this view"
+                >
+                  {view.name}
+                </button>
+                <button
+                  className="btn btn-tiny"
+                  disabled={index === 0}
+                  onClick={() => onChange({ ...presentation, views: reorderView(views, view.id, -1) })}
+                  title="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  className="btn btn-tiny"
+                  disabled={index === views.length - 1}
+                  onClick={() => onChange({ ...presentation, views: reorderView(views, view.id, 1) })}
+                  title="Move down"
+                >
+                  ↓
+                </button>
+                <button
+                  className="btn btn-tiny"
+                  onClick={() => onChange({ ...presentation, views: removeView(views, view.id) })}
+                  title="Remove"
+                >
+                  ⌫
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <span className="eyebrow">Hotspots</span>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+          Labels pinned to the model — a finish, a dimension, a spec.
+        </p>
+
+        <button
+          className={placing ? 'btn btn-primary' : 'btn'}
+          style={{ width: '100%' }}
+          onClick={() => onPlacingChange(!placing)}
+          disabled={!viewer}
+        >
+          {placing ? 'Click a surface… (Esc to stop)' : 'Add a hotspot'}
+        </button>
+
+        {hotspots.map((hotspot: Hotspot) => (
+          <div key={hotspot.id} style={{ marginTop: 8 }}>
+            <div className="stat" style={{ gap: 4 }}>
+              <input
+                value={hotspot.title}
+                onChange={(e) =>
+                  onChange({
+                    ...presentation,
+                    hotspots: hotspots.map((h) =>
+                      h.id === hotspot.id ? { ...h, title: e.target.value } : h,
+                    ),
+                  })
+                }
+                style={{ flex: 1, fontSize: 12 }}
+              />
+              <button
+                className="btn btn-tiny"
+                onClick={() =>
+                  onChange({ ...presentation, hotspots: removeHotspot(hotspots, hotspot.id) })
+                }
+                title="Remove"
+              >
+                ⌫
+              </button>
+            </div>
+            <input
+              value={hotspot.body ?? ''}
+              placeholder="Detail (optional)"
+              onChange={(e) =>
+                onChange({
+                  ...presentation,
+                  hotspots: hotspots.map((h) =>
+                    h.id === hotspot.id ? { ...h, body: e.target.value } : h,
+                  ),
+                })
+              }
+              style={{ width: '100%', fontSize: 11.5, marginTop: 4 }}
+            />
+          </div>
+        ))}
+      </section>
+
+      <section>
+        <span className="eyebrow">Branding</span>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+          Per scene, not per account — an agency delivering to three developers
+          needs three logos.
+        </p>
+
+        <label style={{ display: 'block', fontSize: 11.5, marginTop: 6 }}>
+          Accent colour
+          <input
+            type="color"
+            value={branding?.accent ?? '#2f6df6'}
+            onChange={(e) =>
+              onChange({
+                ...presentation,
+                branding: { ...(branding ?? {}), accent: e.target.value },
+              })
+            }
+            style={{ display: 'block', width: '100%', height: 30, marginTop: 4 }}
+          />
+        </label>
+
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(branding?.hideCredit)}
+            onChange={(e) =>
+              onChange({
+                ...presentation,
+                branding: { ...(branding ?? {}), hideCredit: e.target.checked },
+              })
+            }
+          />
+          <span style={{ fontSize: 12 }}>Hide the Arcvia credit</span>
+        </label>
+      </section>
+    </>
+  )
+}
+
+/** Build a hotspot from a picked point, numbered so it is never nameless. */
+export function hotspotAt(
+  point: { x: number; y: number; z: number },
+  existing: Hotspot[],
+): Hotspot {
+  const title = `Point ${existing.length + 1}`
+  return {
+    id: slugId(title, `hotspot-${existing.length + 1}`),
+    title,
+    position: [point.x, point.y, point.z],
+  }
+}

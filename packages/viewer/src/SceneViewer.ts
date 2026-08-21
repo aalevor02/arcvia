@@ -768,6 +768,109 @@ export class SceneViewer {
   }
 
   /**
+   * What is under a screen point, in world space.
+   *
+   * For placing a hotspot: the author clicks the worktop and the marker lands
+   * on the worktop. Returns null when the click misses the model, which is a
+   * real outcome — clicking the sky should place nothing rather than guess a
+   * distance.
+   *
+   * Client coordinates, not canvas-relative, because that is what a pointer
+   * event carries and converting at the call site is one more thing for each
+   * caller to get subtly wrong.
+   */
+  pick(clientX: number, clientY: number): THREE.Vector3 | null {
+    if (!this.model) return null
+
+    const rect = this.options.canvas.getBoundingClientRect()
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    )
+
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(ndc, this.camera)
+
+    const hits = raycaster.intersectObject(this.model, true)
+    return hits.length > 0 ? hits[0].point.clone() : null
+  }
+
+  /**
+   * Where a world point falls on screen, and whether it should be drawn.
+   *
+   * Hotspot markers are DOM elements rather than sprites — real text, real
+   * links, selectable, accessible, and legible at any distance without a
+   * texture. The cost is that something has to place them every frame, which
+   * is this.
+   *
+   * `visible` is false behind the camera and, when `occlude` is set, when the
+   * model itself is in the way. Without the occlusion test a marker labelling
+   * the kitchen worktop hovers over the wall you are facing while standing in
+   * the hall, which reads as a bug rather than as a label on something
+   * elsewhere.
+   */
+  project(
+    position: [number, number, number],
+    { occlude = true } = {},
+  ): { x: number; y: number; visible: boolean; distance: number } {
+    const point = new THREE.Vector3(...position)
+    const distance = point.distanceTo(this.camera.position)
+
+    const ndc = point.clone().project(this.camera)
+    const rect = this.options.canvas.getBoundingClientRect()
+
+    // z beyond 1 is behind the near/far range — in practice, behind the camera.
+    let visible = ndc.z < 1 && ndc.x >= -1 && ndc.x <= 1 && ndc.y >= -1 && ndc.y <= 1
+
+    if (visible && occlude && this.model) {
+      const direction = point.clone().sub(this.camera.position).normalize()
+      const raycaster = new THREE.Raycaster(this.camera.position.clone(), direction)
+      const hits = raycaster.intersectObject(this.model, true)
+      // A small tolerance, because the marker sits *on* a surface: without it
+      // every hotspot occludes itself against the very thing it labels.
+      if (hits.length > 0 && hits[0].distance < distance - 0.05) visible = false
+    }
+
+    return {
+      x: ((ndc.x + 1) / 2) * rect.width,
+      y: ((1 - ndc.y) / 2) * rect.height,
+      visible,
+      distance,
+    }
+  }
+
+  /** Fires after every draw, for overlays that must track the camera. */
+  onAfterRender: (() => void) | null = null
+
+  /**
+   * Capture where the camera is now as a named view.
+   *
+   * The exact counterpart to `goToView`, and deliberately next to it: between
+   * them they own two conventions that are easy to get wrong in opposite
+   * directions — rotation stored as `[yaw, pitch]` rather than a quaternion,
+   * and stored in *degrees*. Split them across files and one side eventually
+   * saves radians while the other reads degrees, which produces a view that
+   * points at the floor and no error at all.
+   *
+   * Yaw and pitch rather than a quaternion because a view is authored by a
+   * person: "facing the window" is a direction someone can reason about and
+   * hand-edit, and four normalised components are not.
+   */
+  currentView(name: string, mode: 'fps' | 'orbit' = 'fps'): SceneView {
+    const euler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ')
+
+    return {
+      // Not a random id: a view keyed by its own name survives the scene being
+      // exported, hand-edited and re-imported, which a generated id does not.
+      id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'view',
+      name,
+      position: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+      rotation: [THREE.MathUtils.radToDeg(euler.y), THREE.MathUtils.radToDeg(euler.x)],
+      mode,
+    }
+  }
+
+  /**
    * Move to a named view, easing rather than cutting.
    *
    * A hard cut between two interior cameras is genuinely disorienting — the
@@ -979,6 +1082,11 @@ export class SceneViewer {
       // on.
       if (this.composer) this.recordFrameCost(this.lastFrameMs)
       this.needsRender = false
+
+      // After the draw, not before: an overlay that positions itself against
+      // the previous frame's camera lags one frame behind the scene, which on
+      // a drag looks like the markers are sliding around independently.
+      this.onAfterRender?.()
     }
   }
 

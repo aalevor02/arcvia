@@ -1,4 +1,5 @@
 import type { Plan } from '../plan/types'
+import type { SceneView, Hotspot, Branding } from '../plan/presentation'
 
 /**
  * Studio API client.
@@ -152,6 +153,10 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   bakedUrl: string | null
   hdriUrl: string | null
   floorPlanUrl: string | null
+  /** Presentation: where a client is taken, what they are told, whose name is on it. */
+  views?: SceneView[]
+  hotspots?: Hotspot[]
+  branding?: Branding | null
 }
 
 export const listScenes = () =>

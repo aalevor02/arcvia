@@ -82,6 +82,13 @@ export async function registerSceneRoutes(app) {
       'floorPlanUrl',
       'bakedUrl',
       'plan',
+      // What turns a model into a presentation. All three are authored in the
+      // studio and consumed by the published page, and none of them is worth a
+      // separate endpoint — they are scene content, edited the same way the
+      // plan is.
+      'views',
+      'hotspots',
+      'branding',
     ]
     const patch = Object.fromEntries(
       Object.entries(request.body ?? {}).filter(([k]) => allowed.includes(k)),
@@ -145,6 +152,11 @@ export async function registerSceneRoutes(app) {
         // light; one without falls back to the real-time rig, which is worse
         // but still a walkthrough — so this is optional rather than required.
         bakedUrl: scene.bakedUrl ?? null,
+        // Empty arrays rather than null: the page iterates these, and a null
+        // would make every consumer write the same guard.
+        views: scene.views ?? [],
+        hotspots: scene.hotspots ?? [],
+        branding: scene.branding ?? null,
         // Credits travel with the scene because the obligation does. A CC-BY
         // model's licence is met by the page the client opens, not by anything
         // in the editor.
