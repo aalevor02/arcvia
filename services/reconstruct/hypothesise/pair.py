@@ -32,7 +32,7 @@ between the two implementations is for.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from shapely.geometry import LineString, Point
 from shapely.strtree import STRtree
@@ -385,10 +385,18 @@ def join_corners(walls: list[Wall], tolerance: float = CORNER_TOLERANCE) -> list
     if not walls:
         return []
 
-    out = [
-        Wall(w.ax, w.ay, w.bx, w.by, w.thickness, w.paired, w.confidence, w.layer)
-        for w in walls
-    ]
+    # `replace` rather than a positional rebuild. The positional version listed
+    # eight fields and Wall has nine, so `duplicate` was reset to 0.0 on every
+    # wall that passed through here. Harmless in the live pipeline, where corner
+    # joining runs before the ring exists and there is no duplication to lose —
+    # and a trap for anything that re-joins a model already carrying it: on the
+    # villa a single round trip takes billable length 305.15 m to 458.71 m and
+    # the bill from 1.37M to 2.10M, silently, because a dropped field looks
+    # exactly like a field that was always zero.
+    #
+    # The real defect was that adding a field to Wall required knowing to come
+    # and edit this line. `replace` copies whatever Wall has now.
+    out = [replace(w) for w in walls]
     geoms = [LineString([(w.ax, w.ay), (w.bx, w.by)]) for w in out]
     tree = STRtree(geoms)
 

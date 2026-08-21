@@ -28,6 +28,42 @@ from .glb import MeshBuilder
 #: floor rather than a plane when the camera is near it.
 SLAB_THICKNESS = 0.12
 
+#: Walls the engine derived rather than read. Kept as a name because two
+#: separate modules test for it and a typo in either fails silently.
+DERIVED_PERIMETER = "<derived:perimeter>"
+
+#: How much thinner and shorter to build a derived perimeter segment than its
+#: recorded size.
+#:
+#: ── Why a two-millimetre number is load-bearing ──────────────────────────────
+#: 91% of the derived ring lies on top of a wall that was already drawn and is
+#: already extruded, so the mesh contains pairs of boxes sharing a face plane.
+#: Renders of the villa came back with large pure-black surfaces, and the
+#: obvious readings were both wrong. It is not a missing roof — a missing roof
+#: opens the interior to the sky, which is MORE light. It is not a sealed
+#: lightless volume either: a box built strictly inside another box renders
+#: nothing at all, measured, zero black pixels. Nor is it inverted normals; no
+#: box in the villa has negative signed volume.
+#:
+#: It is z-fighting. The renderer needs faces that are COPLANAR to within half a
+#: millimetre, co-oriented, and overlapping — and coincident boxes produce
+#: exactly that. Measured on the villa isometric, black pixels at luminance <= 8:
+#:
+#:     as built                       18,174
+#:     ring 1 mm thinner and shorter     911
+#:     ring 20 mm thinner and shorter    854
+#:     ring not built at all             930
+#:
+#: So breaking coplanarity beats deleting the ring, and keeps all 57 segments,
+#: all 23 rooms and every square metre of envelope. Both axes are required:
+#: thinner alone leaves 11,708 and shorter alone leaves 5,160, because a wall
+#: box shares its top face with its neighbour as well as its sides.
+#:
+#: 2 mm rather than 20: it is four times the 0.5 mm coplanarity threshold, and
+#: small enough that no quantity, clearance or camera solve can notice. Nothing
+#: reads this back — the schedule prices `Wall.thickness`, which is untouched.
+RING_INSET = 0.002
+
 
 def build_walls(
     mesh: MeshBuilder,
@@ -109,10 +145,17 @@ def _segment(mesh: MeshBuilder, wall, start: float, end: float,
         return
     dx, dy = dx / length, dy / length
 
+    thickness = wall.thickness
+    if wall.layer == DERIVED_PERIMETER:
+        thickness -= RING_INSET
+        height -= RING_INSET / 2
+        if thickness <= 0 or height <= 0:
+            return
+
     mesh.add_box_from_segment(
         wall.ax + dx * start, wall.ay + dy * start,
         wall.ax + dx * end, wall.ay + dy * end,
-        wall.thickness, height, base_z=base,
+        thickness, height, base_z=base,
     )
 
 

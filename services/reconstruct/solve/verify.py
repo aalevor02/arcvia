@@ -51,6 +51,41 @@ PLAUSIBLE_SPAN = (3.0, 400.0)
 #: something is not closing.
 WALL_RUN_BAND = (0.6, 1.6)
 
+#: Walls the engine derived rather than read off the drawing.
+DERIVED_PERIMETER = "<derived:perimeter>"
+
+#: How much of the solved indoor floor a derived envelope must contain before
+#: it is worth calling an envelope.
+#:
+#: ── Set on principle, because the evidence is thin and says so ───────────────
+#: Measured across every drawing here that produces a ring at all:
+#:
+#:     0.057  REDDY - SITE PLAN FOR 3D
+#:     0.299  SITE PLAN FOR 3D 16-02-24
+#:     0.459  DOWN VILLA -WD 22-1-24
+#:     1.000  LATEST DRAWINGS - SITE PLAN & ALL VILLAS
+#:
+#: One good example is not a sample to fit a threshold to, so this is not fitted
+#: to it. A building envelope must contain the floor it encloses; one that
+#: leaves out a tenth of it is wrong about the building's outline, and the villa
+#: leaves out more than half. 0.90 states that and does not pretend to be
+#: derived from four numbers.
+#:
+#: This warns on three of those four. That is not a mis-set band — it is the
+#: finding. `add_perimeter` closes at CLOSE_RADIUS = 1.0, which bridges a
+#: doorway but comes nowhere near spanning a 4-6 m room, so what it returns is
+#: the wall network thickened rather than a footprint. On the villa its boundary
+#: runs THROUGH the building, missing BED ROOM, SERVANT ROOM, HOME OFFICE and
+#: two wet rooms by 0.5 to 1.5 m.
+#:
+#: Reported rather than enforced, and the ratio is emitted whether it passes or
+#: fails: a quantity surveyor can act on "the envelope contains 46% of the floor
+#: it encloses" and can do nothing at all with a flag. Refusing the ring instead
+#: was tried and abandoned — every quantity computable at derivation time was
+#: measured and none of them predict this one, because the floor it is supposed
+#: to contain is precisely what the solve produces afterwards.
+ENVELOPE_COVERAGE_MIN = 0.90
+
 #: Interior walls in residential construction. Outside this, the unit is wrong
 #: or the pairing matched two unrelated lines.
 PLAUSIBLE_THICKNESS = (0.05, 0.60)
@@ -220,6 +255,57 @@ def check(
                    "walls are being counted twice or rooms are not all closing."),
                 round(ratio, 3),
             ))
+
+    # ---- Does the derived envelope contain the building? --------------------
+    # The ring exists to supply the outer boundary an open-plan drawing does not
+    # draw, and everything downstream trusts it to be one: rooms close against
+    # it, its length is priced, and it is extruded into every render. Nothing
+    # checked that it went round the building.
+    #
+    # Faces are unioned rather than summed, so a courtyard — a legitimate hole —
+    # is filled rather than counted against the envelope. Indoor floor only: a
+    # correct envelope excludes the lawn, and on this villa it does, getting 7
+    # of 8 outdoor labels right. It is the indoor half it fails.
+    ring = [w for w in walls if getattr(w, "layer", "") == DERIVED_PERIMETER]
+    indoor = [s for s in spaces if getattr(s, "kind", "") != "outdoor"]
+    if ring and indoor:
+        from shapely.geometry import LineString, Polygon
+        from shapely.ops import polygonize, unary_union
+
+        lines = [
+            LineString([(w.ax, w.ay), (w.bx, w.by)])
+            for w in ring
+            if w.length > 1e-6
+        ]
+        faces = list(polygonize(unary_union(lines))) if lines else []
+
+        rooms = []
+        for space in indoor:
+            if len(space.loop) < 3:
+                continue
+            poly = Polygon([(p[0], p[1]) for p in space.loop])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if not poly.is_empty:
+                rooms.append(poly)
+
+        if faces and rooms:
+            envelope = unary_union(faces)
+            floor = unary_union(rooms)
+            if floor.area > 1.0:
+                covered = floor.intersection(envelope).area / floor.area
+                level = "info" if covered >= ENVELOPE_COVERAGE_MIN else "warning"
+                v.checks.append(Check(
+                    "envelope-coverage", level,
+                    f"The derived envelope contains {covered * 100:.0f}% of the "
+                    f"{floor.area:.0f} m2 of indoor floor it encloses"
+                    + ("" if level == "info" else
+                       f" — below {ENVELOPE_COVERAGE_MIN * 100:.0f}%. Its "
+                       "boundary runs through the building rather than around "
+                       "it, so any quantity or classification that depends on "
+                       "being inside or outside it is unsafe."),
+                    round(covered, 3),
+                ))
 
     # ---- Openings ----------------------------------------------------------
     if unhosted:
