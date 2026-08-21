@@ -101,6 +101,16 @@ export interface Underlay {
   origin: Vec2
   /** Metres per image pixel — set by the calibration tool. */
   scale: number
+  /**
+   * Whether the scale is known rather than assumed.
+   *
+   * Exists so the reader can set the scale from the sizes printed on the
+   * drawing without ever overriding a person. An architect who has calibrated
+   * against a dimension they trust has said something; silently replacing it
+   * with a number read by OCR would be the software disagreeing with its user
+   * about a fact the user is better placed to know.
+   */
+  calibrated?: boolean
   opacity: number
   /**
    * Invert the image when drawing it.

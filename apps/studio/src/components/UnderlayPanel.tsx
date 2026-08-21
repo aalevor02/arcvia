@@ -1,5 +1,10 @@
 import { useRef, useState } from 'react'
-import { uploadFloorplan } from '../lib/api'
+import {
+  extractDocumentPage,
+  readDocument,
+  uploadFloorplan,
+  type DocumentSheet,
+} from '../lib/api'
 import { formatLength, type UnitSystem } from '../lib/format'
 import type { Underlay } from '../plan/types'
 
@@ -13,6 +18,15 @@ interface Props {
   onRemove(): void
   onStartCalibrate(): void
   onDetect(): void
+  /**
+   * The rest of an uploaded deck: its renders, elevations and other floors.
+   *
+   * Handed up rather than kept here because they outlive this panel. The
+   * renders are what the finished rooms are meant to look like, and the other
+   * floors are the next imports — both belong to the project, not to the
+   * control that happened to open the file.
+   */
+  onDeck?(deck: { url: string; sheets: DocumentSheet[] }): void
 }
 
 /**
@@ -32,27 +46,67 @@ export function UnderlayPanel({
   onRemove,
   onStartCalibrate,
   onDetect,
+  onDeck,
 }: Props) {
   const input = useRef<HTMLInputElement>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deck, setDeck] = useState<{ url: string; sheets: DocumentSheet[] } | null>(null)
+
+  async function place(url: string) {
+    // The server stores bytes and validates the type; it does not decode the
+    // image. The browser is already going to decode it to display it, so the
+    // dimensions come from here rather than adding an image library to the API
+    // for two numbers.
+    const { width, height } = await measure(url)
+    onPlace({ url, width, height })
+  }
 
   async function handleFile(file: File) {
-    setBusy(true)
     setError(null)
     try {
+      setBusy('Uploading…')
       const stored = await uploadFloorplan(file)
 
-      // The server stores bytes and validates the type; it does not decode the
-      // image. The browser is already going to decode it to display it, so the
-      // dimensions come from here rather than adding an image library to the
-      // API for two numbers.
-      const { width, height } = await measure(stored.url)
-      onPlace({ url: stored.url, width, height })
+      // An image is a drawing. A PDF is a document that might contain several,
+      // among a great many things that are not drawings at all.
+      if (!/\.pdf$/i.test(stored.url)) {
+        await place(stored.url)
+        return
+      }
+
+      setBusy('Reading the document…')
+      const outline = await readDocument(stored.url)
+      const found = { url: stored.url, sheets: outline.sheets }
+      setDeck(found)
+      onDeck?.(found)
+
+      const plans = outline.sheets.filter((sheet) => sheet.kind === 'plan')
+      if (plans.length === 0) {
+        setError(
+          'No floor plan was found in that document. Pick a page below, or upload the plan as an image.',
+        )
+        return
+      }
+      // One plan is not a choice, so it is not offered as one.
+      if (plans.length === 1) await pick(found.url, plans[0])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not upload that file.')
+      setError(err instanceof Error ? err.message : 'Could not read that file.')
     } finally {
-      setBusy(false)
+      setBusy(null)
+    }
+  }
+
+  async function pick(documentUrl: string, sheet: DocumentSheet) {
+    setError(null)
+    try {
+      setBusy('Extracting the plan…')
+      const stored = await extractDocumentPage(documentUrl, sheet.page, sheet.index)
+      await place(stored.url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not extract that page.')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -61,13 +115,15 @@ export function UnderlayPanel({
       <section>
         <span className="eyebrow">Trace a drawing</span>
         <p className="muted" style={{ fontSize: 12 }}>
-          Drop in a scan or export and draw over it. PNG, JPG or WebP.
+          A scan, an export, or the PDF you sent the client — the floor plans
+          inside a presentation deck are usually higher resolution than anything
+          you would screenshot out of it.
         </p>
 
         <input
           ref={input}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/webp,application/pdf"
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0]
@@ -76,9 +132,15 @@ export function UnderlayPanel({
             if (file) void handleFile(file)
           }}
         />
-        <button className="btn" disabled={busy} onClick={() => input.current?.click()}>
-          {busy ? 'Uploading…' : 'Upload a floor plan'}
+        <button
+          className="btn"
+          disabled={Boolean(busy)}
+          onClick={() => input.current?.click()}
+        >
+          {busy ?? 'Upload a plan or PDF'}
         </button>
+
+        {deck && <DeckSummary deck={deck} busy={Boolean(busy)} onPick={pick} />}
 
         {error && (
           <p className="alert alert-error" role="alert" style={{ fontSize: 12 }}>
@@ -167,6 +229,61 @@ export function UnderlayPanel({
         Remove drawing
       </button>
     </section>
+  )
+}
+
+/**
+ * What was in the document, and which page to trace.
+ *
+ * Shown even when a plan was picked automatically, because the interesting news
+ * is usually the rest of it: a deck that yielded one floor plan has typically
+ * also yielded twenty captioned interior renders, and those are what the
+ * finished rooms are supposed to look like. Saying nothing about them would
+ * quietly discard the most valuable half of the upload.
+ */
+function DeckSummary({
+  deck,
+  busy,
+  onPick,
+}: {
+  deck: { url: string; sheets: DocumentSheet[] }
+  busy: boolean
+  onPick(url: string, sheet: DocumentSheet): void
+}) {
+  const plans = deck.sheets.filter((sheet) => sheet.kind === 'plan')
+  const renders = deck.sheets.filter((sheet) => sheet.kind === 'render')
+  const rooms = [...new Set(renders.map((sheet) => sheet.room).filter(Boolean))]
+
+  return (
+    <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+      {plans.length > 1 && (
+        <>
+          <p className="muted" style={{ fontSize: 11.5 }}>
+            {plans.length} floor plans in that document. Trace them one at a
+            time — each floor is its own import.
+          </p>
+          {plans.map((sheet) => (
+            <button
+              key={`${sheet.page}-${sheet.index}`}
+              className="btn"
+              disabled={busy}
+              onClick={() => onPick(deck.url, sheet)}
+            >
+              {sheet.caption || `Page ${sheet.page}`}
+            </button>
+          ))}
+        </>
+      )}
+
+      {renders.length > 0 && (
+        <p className="muted" style={{ fontSize: 11.5 }}>
+          Also found {renders.length} interior render
+          {renders.length === 1 ? '' : 's'}
+          {rooms.length > 0 && <> of {rooms.join(', ').toLowerCase()}</>}. These
+          are matched to rooms by name once the plan is traced.
+        </p>
+      )}
+    </div>
   )
 }
 

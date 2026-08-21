@@ -285,7 +285,70 @@ export function uniqueName(base: string, taken: string[]): string {
 
 export interface DetectionAvailability {
   available: boolean
-  detector: { backend: string; model_loaded: boolean } | null
+  detector: {
+    backend: string
+    model_loaded: boolean
+    /** OCR: whether rooms come back named and the scale can be read. */
+    reads_text?: boolean
+    /** Whether a PDF can be opened at all. */
+    reads_pdf?: boolean
+  } | null
+}
+
+/**
+ * One image inside an uploaded PDF, and what the document says it is.
+ *
+ * Mirrors the reader's own shape rather than being reinterpreted on the way
+ * through: this is a description of a page, and there is nothing the studio
+ * knows about it that the reader did not.
+ */
+export interface DocumentSheet {
+  page: number
+  index: number
+  kind: 'plan' | 'elevation' | 'render' | 'board' | 'other'
+  caption: string
+  floor: string | null
+  /** For a render, the room it shows — the key that pairs it with a plan. */
+  room: string | null
+  width: number
+  height: number
+  share: number
+  /** Dominant colours of a render, most-used first. */
+  palette: string[]
+}
+
+export interface DocumentOutline {
+  pages: number
+  sheets: DocumentSheet[]
+}
+
+/**
+ * What is inside an uploaded PDF.
+ *
+ * Free and quick, because it reads structure rather than pixels — which matters
+ * more than it sounds: this is the moment a user finds out whether the file
+ * they have is any use, and metering that would be charging for a disappointment.
+ */
+export const readDocument = (url: string) =>
+  request<DocumentOutline>('/detect/document', { method: 'POST', body: { url } })
+
+/**
+ * Pull one image out of that PDF and store it as a drawing.
+ *
+ * Returns a stored file exactly like `uploadFloorplan`, so everything
+ * downstream — the underlay, detection, the render worker — carries on unaware
+ * that a PDF was ever involved.
+ */
+export async function extractDocumentPage(
+  url: string,
+  page: number,
+  index: number,
+): Promise<StoredFile> {
+  const stored = await request<StoredFile>('/detect/document/page', {
+    method: 'POST',
+    body: { url, page, index },
+  })
+  return { ...stored, url: stored.url.startsWith('/') ? BASE + stored.url : stored.url }
 }
 
 /**

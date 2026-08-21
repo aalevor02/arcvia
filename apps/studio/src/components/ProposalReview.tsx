@@ -1,9 +1,20 @@
-import { summarise, type ProposedWall } from '../plan/detections'
+import {
+  summarise,
+  type DetectedRoom,
+  type DetectedScale,
+  type ProposedWall,
+} from '../plan/detections'
 import { formatLength, formatThickness, type UnitSystem } from '../lib/format'
 
 interface Props {
   proposal: ProposedWall[]
   units: UnitSystem
+  /** The spaces the walls closed, named from the drawing where it says so. */
+  rooms: DetectedRoom[]
+  /** The scale implied by the room sizes printed on the drawing. */
+  scale: DetectedScale | null
+  /** Whether that scale was used, or the drawing was already calibrated. */
+  scaleApplied: boolean
   onAccept(): void
   onDiscard(): void
 }
@@ -21,15 +32,33 @@ interface Props {
  * So the proposal is drawn as a ghost over the drawing and the numbers are
  * stated plainly. Accepting is one click; so is throwing it away.
  */
-export function ProposalReview({ proposal, units, onAccept, onDiscard }: Props) {
+export function ProposalReview({
+  proposal,
+  units,
+  rooms,
+  scale,
+  scaleApplied,
+  onAccept,
+  onDiscard,
+}: Props) {
   const summary = summarise(proposal)
   const unpaired = summary.total - summary.paired
+  const named = rooms.filter((room) => room.name)
+  const merged = rooms.filter((room) => room.also.length > 0)
 
   return (
     <>
       <div className="stat">
         <span className="muted">Walls found</span>
         <span className="mono">{summary.total}</span>
+      </div>
+
+      {/* Rooms are the number that means something. Walls are found in any
+          drawing, and in plenty of things that are not drawings; enclosed rooms
+          are what tells you a building was read rather than a page of lines. */}
+      <div className="stat">
+        <span className="muted">Rooms closed</span>
+        <span className="mono">{rooms.length}</span>
       </div>
       <div className="stat">
         <span className="muted">Total run</span>
@@ -54,6 +83,50 @@ export function ProposalReview({ proposal, units, onAccept, onDiscard }: Props) 
           </>
         )}
       </p>
+
+      {named.length > 0 && (
+        <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+          Read from the drawing:{' '}
+          {named.map((room) => room.name).join(', ')}.
+        </p>
+      )}
+
+      {/* Two rooms read as one is the commonest remaining error and the easiest
+          to fix — a doorway too wide to bridge, or an opening with no wall over
+          it. Naming both halves turns a confusing merged room into a ten-second
+          correction. */}
+      {merged.map((room) => (
+        <p
+          key={room.name ?? room.also.join()}
+          className="muted"
+          style={{ fontSize: 11.5, lineHeight: 1.45 }}
+        >
+          <span style={{ color: 'var(--warn)' }}>●</span> {room.name} and{' '}
+          {room.also.join(', ')} were read as one space. Draw a wall between them
+          if they should be separate.
+        </p>
+      ))}
+
+      {scale && scaleApplied && (
+        <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+          Scale set from the sizes printed on the drawing
+          {scale.samples > 1 ? <>, agreed across {scale.samples} rooms</> : ' — from one room only, so check it'}
+          {scale.spread !== null && scale.spread > 0.15 && (
+            <>
+              . Those rooms disagree by {Math.round(scale.spread * 100)}%, which
+              usually means more than one drawing is on this sheet
+            </>
+          )}
+          .
+        </p>
+      )}
+
+      {scale && !scaleApplied && (
+        <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+          The drawing's printed sizes imply a different scale to the one you set.
+          Yours was kept.
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn btn-primary" style={{ flex: 1 }} onClick={onAccept}>

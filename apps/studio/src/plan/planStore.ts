@@ -606,6 +606,7 @@ export function calibrateUnderlay(
       underlay: {
         ...underlay,
         scale: underlay.scale * factor,
+        calibrated: true,
         // Pivot about `from`: everything moves away from it by `factor`.
         origin: {
           x: from.x + (underlay.origin.x - from.x) * factor,
@@ -613,6 +614,22 @@ export function calibrateUnderlay(
         },
       },
     }
+  })
+}
+
+/**
+ * Set the scale from the drawing's own printed dimensions.
+ *
+ * Pivots about the top-left corner rather than a clicked point, because there
+ * is no clicked point — this comes from reading the sizes an architect wrote on
+ * the plan, not from anyone measuring anything. The corner is the one part of
+ * the underlay whose position was never a judgement.
+ */
+export function rescaleUnderlay(plan: Plan, metresPerPixel: number): Plan {
+  return withFloor(plan, (floor) => {
+    const underlay = floor.underlay
+    if (!underlay || !(metresPerPixel > 0)) return floor
+    return { ...floor, underlay: { ...underlay, scale: metresPerPixel, calibrated: true } }
   })
 }
 

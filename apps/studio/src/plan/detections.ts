@@ -44,12 +44,47 @@ export interface DetectedObject {
   attaches_to: 'wall' | 'floor'
 }
 
+/**
+ * An area the reader found enclosed, and what the drawing calls it.
+ *
+ * Rooms come back from the reader rather than being worked out here, because
+ * the reader has to find them anyway — deciding which strokes are walls at all
+ * depends on which of them bound a room. Sending only the walls would mean
+ * throwing that away and rediscovering it, worse, from less information.
+ */
+export interface DetectedRoom {
+  polygon: DetectedPoint[]
+  /** Fraction of the building's footprint. */
+  area: number
+  /** Whatever was printed inside it, if anything was. */
+  name: string | null
+  /** `fitting` is joinery the drawing labelled — a wardrobe, a dresser. */
+  kind: 'room' | 'fitting'
+  /** The size printed inside it, in metres. */
+  size: number[] | null
+  /** Other room names inside the same outline: proof two spaces read as one. */
+  also: string[]
+}
+
+/** The scale read off the sizes the architect printed on the drawing. */
+export interface DetectedScale {
+  /** Metres per 1.0 of normalised x — that is, across the whole image. */
+  metres_per_unit: number
+  /** How many labelled rooms agreed on it. */
+  samples: number
+  /** How far apart they were. Null from a single room. */
+  spread: number | null
+}
+
 export interface DetectionResult {
   backend: string
   width: number
   height: number
   walls: DetectedWall[]
   objects: DetectedObject[]
+  /** Absent from older readers, so every use has to tolerate undefined. */
+  rooms?: DetectedRoom[]
+  scale?: DetectedScale | null
   low_confidence: boolean
 }
 
