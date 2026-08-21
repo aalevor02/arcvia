@@ -34,6 +34,39 @@ export const LICENCES = {
 }
 
 /**
+ * Sketchfab's two shapes for the same thing.
+ *
+ * `GET /v3/models/{uid}` returns `license.slug`. `GET /v3/search` returns
+ * `license.label` and no slug at all. Reading only the slug means every search
+ * result looks unlicensed and is refused — which fails closed, correctly, and
+ * also filters out the entire library.
+ *
+ * Exact-match lookup, not a prefix or an `includes`. "CC Attribution-
+ * NonCommercial" starts with "CC Attribution", and a loose match here would
+ * quietly approve exactly the licence the allow-list exists to exclude.
+ */
+const LABEL_TO_SLUG = {
+  'cc0 public domain': 'cc0',
+  'cc0 1.0 universal': 'cc0',
+  'public domain': 'cc0',
+  'cc attribution': 'by',
+  'cc attribution-sharealike': 'by-sa',
+}
+
+/**
+ * The licence slug for either shape, or null if it cannot be established.
+ *
+ * Null is a refusal, not an unknown to be resolved later: a licence nobody can
+ * name is one nobody can comply with.
+ */
+export function licenceSlug(licence) {
+  if (licence?.slug) return String(licence.slug).toLowerCase()
+
+  const label = String(licence?.label ?? '').toLowerCase().trim()
+  return LABEL_TO_SLUG[label] ?? null
+}
+
+/**
  * Approve a licence, or refuse it with a reason.
  *
  * The reason matters. Someone hitting this is mid-task with a model they have
@@ -41,7 +74,7 @@ export const LICENCES = {
  * override it, while a reason sends them back to the search with a filter.
  */
 export function checkLicence(licence) {
-  const slug = String(licence?.slug ?? '').toLowerCase()
+  const slug = licenceSlug(licence) ?? ''
   const allowed = LICENCES[slug]
   if (allowed) return allowed
 

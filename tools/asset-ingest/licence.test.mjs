@@ -1,4 +1,4 @@
-import { checkLicence, LICENCES } from './licence.mjs'
+import { checkLicence, LICENCES, licenceSlug } from './licence.mjs'
 
 /**
  * The licence gate.
@@ -20,6 +20,15 @@ const ok = (label, condition, extra = '') => {
   } else {
     failed++
     console.log(`FAIL  ${label}${extra ? '  ' + extra : ''}`)
+  }
+}
+
+/** Run the gate against a whole licence object, in either Sketchfab shape. */
+const acceptsLicence = (licence) => {
+  try {
+    return checkLicence(licence)
+  } catch {
+    return null
   }
 }
 
@@ -87,6 +96,40 @@ const accepts = (slug) => {
 
 ok('every allowed licence declares an attribution stance',
   Object.values(LICENCES).every((l) => typeof l.attribution === 'boolean'))
+
+// ---- Search results carry a label, not a slug ------------------------------
+// The two Sketchfab endpoints disagree: `/models/{uid}` returns `license.slug`,
+// `/search` returns `license.label` and no slug at all. Reading only the slug
+// fails closed — correctly, and also refuses the entire library, which is how
+// the batch picker came back with zero candidates for all 37 items.
+{
+  ok('a slug is used when present', licenceSlug({ slug: 'by' }) === 'by')
+  ok('a slug is lowercased', licenceSlug({ slug: 'CC0' }) === 'cc0')
+
+  ok('a CC-BY label maps to by', licenceSlug({ label: 'CC Attribution' }) === 'by')
+  ok('a CC0 label maps to cc0', licenceSlug({ label: 'CC0 Public Domain' }) === 'cc0')
+  ok(
+    'a ShareAlike label maps to by-sa',
+    licenceSlug({ label: 'CC Attribution-ShareAlike' }) === 'by-sa',
+  )
+  ok('labels are trimmed and case-folded', licenceSlug({ label: '  cc attribution  ' }) === 'by')
+
+  // The trap this mapping exists to avoid. "CC Attribution-NonCommercial"
+  // *starts with* "CC Attribution", so prefix or `includes` matching would
+  // approve precisely the licences the allow-list is there to keep out.
+  for (const label of [
+    'CC Attribution-NonCommercial',
+    'CC Attribution-NonCommercial-ShareAlike',
+    'CC Attribution-NoDerivs',
+  ]) {
+    ok(`"${label}" is not mistaken for CC Attribution`, licenceSlug({ label }) === null)
+    ok(`and "${label}" is refused outright`, acceptsLicence({ label }) === null)
+  }
+
+  ok('an unknown label is refused', licenceSlug({ label: 'Some New Licence' }) === null)
+  ok('a missing licence object is refused', licenceSlug(undefined) === null)
+  ok('a label-only CC-BY is accepted', Boolean(acceptsLicence({ label: 'CC Attribution' })))
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)
