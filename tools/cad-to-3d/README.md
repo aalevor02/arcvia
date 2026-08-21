@@ -188,6 +188,59 @@ and a deck.
 Result: lower ground traces to 96.0 m² against a published 106.32 (−9.7%), second
 to 102.7 against 106.66 (**−3.7%**).
 
+## The exterior walls, and why they were missing
+
+The single biggest defect in this pipeline for a long time: **villas had interior
+partitions and no elevations**, so a render looked straight through the building
+and a first-person walk put the visitor outside within two steps.
+
+The cause was an assumption, not a bug. Walls were extracted only from the
+drawings' wall layers — but on these plans a villa's *perimeter* is drawn as its
+**outline**, which the pipeline was already consuming as the floor slab and never
+building anything vertical from. The traced footprint IS the exterior wall line.
+
+`add_perimeter()` extrudes it, cut with the same opening prisms the interior
+walls use so windows line up with the plan, and skips any edge a real paired wall
+already covers (otherwise the elevation gets double thickness and z-fights along
+its whole length). About 27 walls per villa. It does more for the result than
+every material and lighting change combined.
+
+## Two outputs, not one
+
+**The model** (`villa-<type>.glb`) drives an interactive dollhouse view: one
+object per floor so levels can lift apart, PBR surfaces, a sky dome, ~8-13 MB.
+
+**The film** (`villa-<type>.mp4`) is a pre-rendered Cycles orbit. Real-time
+photoreal is not reachable from plan-derived geometry; offline photoreal is, and
+this is what the page leads with. See *The film* below.
+
+Note the viewer has **no collision detection** and moves horizontally at a fixed
+floor height — it says so in `WalkController.ts`. First-person walking was tried
+and abandoned: the upper levels are open terraces and pool decks with few
+enclosing walls, so free roaming reads as broken rather than unfinished.
+
+## The film
+
+```bash
+blender --background --python render_hero.py -- <glb> anim/e1.png 120 64
+python encode_film.py "anim/e1_*.png" villa-e1.mp4 24
+```
+
+What actually moves the needle, in order:
+
+1. **A real HDRI sky** (CC0, Poly Haven). Sun angle, sky gradient and the colour
+   of the light all arrive correct, and it is what makes glass and stone read.
+2. **Ground.** A building floating in void never looks photographed.
+3. **AgX view transform** and a real camera: 35 mm, f/4, focused on the building.
+4. Samples, then denoise.
+
+The orbit renders a full 360°, so the last frame meets the first and the video
+loops seamlessly — do not duplicate either end when encoding.
+
+**There is no GPU for Cycles on this machine.** Everything is CPU, which is the
+binding constraint: ~55-60 s per frame at 1280x720 / 64 samples, so a 5-second
+120-frame loop is ~2 hours. Anything longer or larger needs a GPU or a farm.
+
 ## The bake
 
 `--bake N` runs a Cycles COMBINED bake into a 1024² atlas on a `lightmap_pack`
@@ -266,6 +319,8 @@ Not yet built:
 | `views.py <type>` | solves standable camera positions → TS snippet |
 | `blender_build.py` | builds + optionally bakes + exports GLB |
 | `trace_a1.py` | traces a rendered brochure plan into wall rectangles |
+| `render_hero.py` | Cycles beauty render; one frame, or an orbit sequence |
+| `encode_film.py` | frame sequence -> the looping MP4 the page plays |
 | `make_sky.py` | writes `sky.hdr`, the bake's world lighting |
 | `render_e1.py`, `render_interior.py` | headless check renders (Cycles; EEVEE renders black in `--background`) |
 | `build_e1.py`, `align_e1.py`, `views_e1.py`, `blender_build_e1.py` | the original single-villa scripts, kept as the readable reference implementation |

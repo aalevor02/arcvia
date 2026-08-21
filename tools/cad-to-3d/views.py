@@ -176,6 +176,12 @@ for fid, prefix, vid, name in WANTED:
                     yaw=yaw, clear=round(clear, 2), reach=round(reach, 2)))
     print(f"{name:28s} {fid:13s} clearance {clear:4.2f} m  target {reach:5.2f} m  yaw {yaw:3d}")
 
+# The gate opens on whichever view is listed first, so lead with the best room
+# in the house rather than whichever floor happened to be built first. Opening
+# on a bedroom camera facing a wall is the worst possible first impression.
+PRIORITY = ["living", "dining", "deck", "kitchen", "lounge", "master"]
+out.sort(key=lambda v: PRIORITY.index(v["id"]) if v["id"] in PRIORITY else 99)
+
 print("\n      walkthrough: {")
 print(f"        model: 'scenes/villa-{TID}.glb',")
 print("        eyeHeight: 1.6,")

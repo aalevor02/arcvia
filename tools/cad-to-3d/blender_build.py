@@ -17,7 +17,7 @@ double-expose. Black albedo + emissive reproduces the bake exactly through
 vanilla glTF, at the cost of realtime specular - which an unfurnished plaster
 shell was never going to show anyway.
 """
-import bpy, bmesh, json, math, sys, os
+import bpy, bmesh, json, math, sys, os, re
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 SRC, DST = argv[0], argv[1]
@@ -55,8 +55,66 @@ M_FLOOR = mat("floor_stone", (0.760, 0.722, 0.671, 1.0), 0.35)
 M_CEIL = mat("ceiling", (0.945, 0.941, 0.933, 1.0), 0.92)
 M_COL = mat("column", (0.863, 0.843, 0.812, 1.0), 0.80)
 M_GLASS = mat("glass", (0.85, 0.91, 0.93, 1.0), 0.06, 0.85)
+# Fine grain will not survive a 2-4 cm texel, so these differ by tone and
+# roughness rather than by texture - which is what actually reads at eye height.
+M_TIMBER = mat("timber", (0.372, 0.243, 0.145, 1.0), 0.55)
+M_WATER = mat("pool_water", (0.129, 0.376, 0.420, 1.0), 0.05, 0.55)
+M_FABRIC = mat("upholstery", (0.451, 0.443, 0.416, 1.0), 0.92)
+M_CERAMIC = mat("ceramic", (0.957, 0.957, 0.949, 1.0), 0.18)
+M_COUNTER = mat("counter_stone", (0.243, 0.247, 0.243, 1.0), 0.28)
 
 MESHES = []
+ASSET_OBJS = set()
+CURRENT_FLOOR = [""]
+FLOOR_OF = {}
+
+TEX_DIR = os.path.join(r"A:\Projects\CasaAltinho\_work\cad", "textures")
+_TEX = {}
+_tm = os.path.join(TEX_DIR, "manifest.json")
+if os.path.exists(_tm):
+    _TEX = json.load(open(_tm))
+
+# which downloaded surface dresses which material
+TEXTURE_FOR = {
+    "floor_stone": "floor_stone", "wall_plaster": "wall_plaster",
+    "ceiling": "ceiling", "column": "column", "timber": "floor_timber",
+    "counter_stone": "counter",
+}
+UV_METRES = 2.0        # one texture tile per 2 m of wall or floor
+
+
+def dress(m, key):
+    """Give a material real CC0 maps instead of a flat colour."""
+    entry = _TEX.get(key)
+    if not entry or not m.use_nodes:
+        return False
+    nt = m.node_tree
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf is None:
+        return False
+    made = False
+    if entry.get("Diffuse") and os.path.exists(entry["Diffuse"]):
+        t = nt.nodes.new("ShaderNodeTexImage")
+        t.image = bpy.data.images.load(entry["Diffuse"], check_existing=True)
+        t.location = (-600, 300)
+        nt.links.new(t.outputs["Color"], bsdf.inputs["Base Color"])
+        made = True
+    if entry.get("Rough") and os.path.exists(entry["Rough"]):
+        t = nt.nodes.new("ShaderNodeTexImage")
+        t.image = bpy.data.images.load(entry["Rough"], check_existing=True)
+        t.image.colorspace_settings.name = "Non-Color"
+        t.location = (-600, 0)
+        nt.links.new(t.outputs["Color"], bsdf.inputs["Roughness"])
+    if entry.get("nor_gl") and os.path.exists(entry["nor_gl"]):
+        t = nt.nodes.new("ShaderNodeTexImage")
+        t.image = bpy.data.images.load(entry["nor_gl"], check_existing=True)
+        t.image.colorspace_settings.name = "Non-Color"
+        t.location = (-600, -300)
+        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nm.location = (-350, -300)
+        nt.links.new(t.outputs["Color"], nm.inputs["Color"])
+        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+    return made
 
 
 def add_box(cx, cy, cz, sx, sy, sz, rotz, material, name):
@@ -72,6 +130,7 @@ def add_box(cx, cy, cz, sx, sy, sz, rotz, material, name):
     ob.data.materials.append(material)
     scene.collection.objects.link(ob)
     MESHES.append(ob)
+    FLOOR_OF[ob.name] = CURRENT_FLOOR[0]
 
 
 def add_prism(poly, z0, z1, material, name):
@@ -96,6 +155,7 @@ def add_prism(poly, z0, z1, material, name):
     ob.data.materials.append(material)
     scene.collection.objects.link(ob)
     MESHES.append(ob)
+    FLOOR_OF[ob.name] = CURRENT_FLOOR[0]
 
 
 def wall_cuts(w, openings, d, ax, ay, ux, uy):
@@ -162,6 +222,305 @@ def build_wall(w, base_z, openings, idx):
     piece(cursor, d, 0, h, M_WALL, "jamb")
 
 
+# Footprint (long x short, metres) -> height and material. A plan symbol is an
+# outline seen from above, so size and proportion are the only cues available -
+# but for massing they are enough to tell a bed from a coffee table.
+FURN_KINDS = [
+    (1.75, 2.35, 1.15, 2.10, 0.55, "bed"),
+    (1.70, 3.30, 0.72, 1.15, 0.42, "sofa"),
+    (1.15, 2.70, 0.78, 1.35, 0.75, "table"),
+    (1.40, 4.50, 0.40, 0.72, 0.90, "counter"),
+    (0.75, 1.45, 0.45, 0.95, 0.40, "low_table"),
+    (0.30, 0.75, 0.28, 0.75, 0.45, "chair"),
+]
+SANI_KINDS = [
+    (1.40, 2.20, 0.65, 1.00, 0.55, "tub"),
+    (0.80, 1.10, 0.75, 1.10, 0.12, "shower"),
+    (0.55, 0.85, 0.32, 0.60, 0.42, "wc"),
+    (0.35, 0.75, 0.30, 0.60, 0.85, "basin"),
+]
+
+
+def kind_of(table, w, d, default_h, default_name):
+    hi, lo = max(w, d), min(w, d)
+    for a, b, c, e, h, name in table:
+        if a <= hi <= b and c <= lo <= e:
+            return h, name
+    return default_h, default_name
+
+
+ASSET_DIR = os.path.join(r"A:\Projects\CasaAltinho\_work\cad", "assets")
+_ASSET_CACHE = {}
+_MANIFEST = {}
+_mf = os.path.join(ASSET_DIR, "manifest.json")
+if os.path.exists(_mf):
+    _MANIFEST = json.load(open(_mf))
+
+# massing kind -> which CC0 asset stands in for it. Poly Haven has no modern bed
+# and no sanitary ware, so those stay as blocks.
+ASSET_FOR = {"sofa": "sofa", "chair": "chair", "table": "table",
+             "low_table": "low_table", "armchair": "armchair", "plant": "plant",
+             "tv": "tv"}
+DECIMATE_TRIS = 1500
+
+
+def load_asset(kind):
+    """Import a CC0 asset once and keep it as a template to copy from."""
+    if kind in _ASSET_CACHE:
+        return _ASSET_CACHE[kind]
+    slug = ASSET_FOR.get(kind)
+    entry = _MANIFEST.get(slug) if slug else None
+    if not entry or not os.path.exists(entry["gltf"]):
+        _ASSET_CACHE[kind] = None
+        return None
+    before = set(bpy.context.scene.objects)
+    try:
+        bpy.ops.import_scene.gltf(filepath=entry["gltf"])
+    except Exception as e:
+        print(f"[asset] {slug} import failed: {e}")
+        _ASSET_CACHE[kind] = None
+        return None
+    new = [o for o in bpy.context.scene.objects if o not in before and o.type == "MESH"]
+    if not new:
+        _ASSET_CACHE[kind] = None
+        return None
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in new:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = new[0]
+    if len(new) > 1:
+        bpy.ops.object.join()
+    ob = bpy.context.view_layer.objects.active
+    # Photogrammetry assets are far denser than a lightmapped shell needs, and
+    # every copy carries that cost into the atlas and the export.
+    tris = len(ob.data.polygons)
+    if tris > DECIMATE_TRIS:
+        mod = ob.modifiers.new("dec", "DECIMATE")
+        mod.ratio = max(0.03, DECIMATE_TRIS / tris)
+        bpy.ops.object.modifier_apply(modifier="dec")
+    ob.name = f"asset_{kind}"
+    ob.hide_render = True
+    ob.location = (0, 0, -500)          # parked; copies are what get placed
+    print(f"[asset] {kind}: {slug} {tris} -> {len(ob.data.polygons)} tris")
+    _ASSET_CACHE[kind] = ob
+    return ob
+
+
+def place_asset(kind, cx, cy, z, w, d, rot, name):
+    tpl = load_asset(kind)
+    if tpl is None:
+        return False
+    ob = tpl.copy()
+    ob.data = tpl.data          # share the mesh until the join
+    ob.hide_render = False
+    scene.collection.objects.link(ob)
+    ob.location = (0, 0, 0)
+    ob.rotation_euler = (0, 0, 0)
+    ob.scale = (1, 1, 1)
+    bpy.context.view_layer.update()
+    bb = [v for v in ob.bound_box]
+    ax = max(p[0] for p in bb) - min(p[0] for p in bb)
+    ay = max(p[1] for p in bb) - min(p[1] for p in bb)
+    az = max(p[2] for p in bb) - min(p[2] for p in bb)
+    if ax <= 0 or ay <= 0:
+        scene.collection.objects.unlink(ob)
+        return False
+    # uniform scale, matched on the larger plan dimension - non-uniform scaling
+    # to force an exact footprint match visibly distorts a recognisable object
+    k = max(max(w, d) / max(ax, ay), 0.05)
+    ob.scale = (k, k, k)
+    ob.rotation_euler = (0, 0, rot)
+    ob.location = (cx, cy, z - min(p[2] for p in bb) * k)
+    ob.name = name
+    MESHES.append(ob)
+    ASSET_OBJS.add(ob.name)
+    FLOOR_OF[ob.name] = CURRENT_FLOOR[0]
+    return True
+
+
+def add_massing(fl, z, tag):
+    """Furniture and sanitary as blocks at the size and place the plan shows."""
+    n = 0
+    for it in (fl.get("furniture") or []):
+        h, name = kind_of(FURN_KINDS, it["w"], it["d"], 0.45, "piece")
+        if place_asset(name, it["c"][0], it["c"][1], z, it["w"], it["d"],
+                       math.radians(it["angle"]), f"fur_{tag}_{n}"):
+            n += 1
+            continue
+        m = M_FABRIC if name in ("bed", "sofa", "chair") else (
+            M_COUNTER if name == "counter" else M_TIMBER)
+        add_box(it["c"][0], it["c"][1], z + h / 2, max(it["w"], 0.15), max(it["d"], 0.15), h,
+                math.radians(it["angle"]), m, f"fur_{tag}_{n}")
+        n += 1
+    for it in (fl.get("sanitary") or []):
+        h, name = kind_of(SANI_KINDS, it["w"], it["d"], 0.45, "fitting")
+        add_box(it["c"][0], it["c"][1], z + h / 2, max(it["w"], 0.15), max(it["d"], 0.15), h,
+                math.radians(it["angle"]), M_CERAMIC, f"san_{tag}_{n}")
+        n += 1
+    return n
+
+
+def add_stairs(fl, z, rise, tag):
+    """Stepped flights, so a stair reads as a stair rather than a hole.
+
+    The viewer's walk controller has no collision and moves horizontally at a
+    fixed floor height, so these are visual only - a visitor still changes level
+    by picking a viewpoint, not by climbing. Making floors genuinely walk-
+    connected needs collision in the viewer, which is a change to the controls,
+    not to this geometry.
+    """
+    n = 0
+    for st in (fl.get("stairs") or []):
+        run = max(st["w"], st["d"])
+        wide = min(st["w"], st["d"])
+        if run < 1.5 or wide < 0.6:
+            continue
+        steps = max(6, min(20, int(rise / 0.18)))
+        ang = math.radians(st["angle"] if st["w"] >= st["d"] else st["angle"] + 90)
+        ux, uy = math.cos(ang), math.sin(ang)
+        for i in range(steps):
+            t = (i + 0.5) / steps
+            sx = st["c"][0] + ux * (t - 0.5) * run
+            sy = st["c"][1] + uy * (t - 0.5) * run
+            hz = rise * (i + 1) / steps
+            add_box(sx, sy, z + hz / 2, run / steps, wide, hz, ang,
+                    M_FLOOR, f"step_{tag}_{n}_{i}")
+        n += 1
+    return n
+
+
+DIMS = re.compile(r"(\d+\.?\d*)\s*[xX]\s*(\d+\.?\d*)")
+
+
+def add_patches(fl, z, tag):
+    """Pool and deck surfaces, sized from the room label's own dimensions.
+
+    Only placed when the label states a size - guessing the extent of a pool is
+    worse than leaving it flat floor.
+    """
+    n = 0
+    for l in (fl.get("labels") or []):
+        t = l["t"].upper()
+        pool = "POOL" in t
+        deck = any(k in t for k in ("DECK", "TERRACE", "BALCONY", "VERANDAH"))
+        if not (pool or deck):
+            continue
+        m = DIMS.search(l["t"])
+        if not m:
+            continue
+        w, d = float(m.group(1)), float(m.group(2))
+        if not (0.8 <= w <= 14 and 0.8 <= d <= 14):
+            continue
+        z0 = z - 0.35 if pool else z + 0.01
+        z1 = z - 0.02 if pool else z + 0.04
+        add_box(l["p"][0], l["p"][1], (z0 + z1) / 2, w, d, z1 - z0, 0.0,
+                M_WATER if pool else M_TIMBER, f"pat_{tag}_{n}")
+        n += 1
+    return n
+
+
+# Indicative furnishing, driven by the room schedule rather than the plan's
+# furniture symbols. The `furn` layer is a scatter of partial outlines - good
+# for where something sits, unreliable for what it is - whereas a room label is
+# unambiguous and states its own size. Offsets below are fractions of the room,
+# so a scheme scales with the room it is in.
+SCHEMES = {
+    "LIVING":   [("sofa", 0.0, -0.28, 0.0), ("low_table", 0.0, 0.02, 0.0),
+                 ("armchair", 0.30, 0.16, -2.4), ("plant", -0.36, 0.30, 0.0)],
+    "DINING":   [("table", 0.0, 0.0, 0.0), ("chair", 0.0, -0.22, 0.0),
+                 ("chair", 0.0, 0.22, 3.14), ("chair", -0.24, 0.0, 1.57),
+                 ("chair", 0.24, 0.0, -1.57)],
+    "FAMILY":   [("sofa", 0.0, -0.26, 0.0), ("low_table", 0.0, 0.04, 0.0),
+                 ("plant", 0.34, 0.30, 0.0)],
+    "LOUNGE":   [("sofa", 0.0, -0.26, 0.0), ("low_table", 0.0, 0.04, 0.0)],
+    "FOYER":    [("plant", 0.28, 0.24, 0.0)],
+    "ENTRANCE": [("plant", 0.26, 0.22, 0.0)],
+    "DECK":     [("armchair", -0.22, 0.0, 1.57), ("armchair", 0.22, 0.0, -1.57),
+                 ("low_table", 0.0, 0.0, 0.0)],
+    "TERRACE":  [("armchair", -0.20, 0.0, 1.57), ("plant", 0.30, 0.10, 0.0)],
+    "VERANDAH": [("armchair", -0.20, 0.0, 1.57), ("plant", 0.28, 0.12, 0.0)],
+}
+# nominal footprint (m) for each piece, before it is scaled into the room
+PIECE_SIZE = {"sofa": (2.10, 0.90), "armchair": (0.85, 0.85), "low_table": (1.05, 0.60),
+              "table": (1.80, 0.95), "chair": (0.48, 0.50), "plant": (0.55, 0.55),
+              "tv": (1.20, 0.12)}
+
+
+def add_scheme(fl, z, tag):
+    """Furnish the named rooms from the schedule."""
+    n = 0
+    for l in (fl.get("labels") or []):
+        t = l["t"].upper()
+        key = next((k for k in SCHEMES if k in t), None)
+        if not key:
+            continue
+        m = DIMS.search(l["t"])
+        if not m:
+            continue
+        rw, rd = float(m.group(1)), float(m.group(2))
+        if not (2.0 <= max(rw, rd) <= 13.0 and min(rw, rd) >= 1.2):
+            continue
+        for kind, fx, fy, rot in SCHEMES[key]:
+            pw, pd = PIECE_SIZE.get(kind, (0.8, 0.8))
+            cx = l["p"][0] + fx * rw
+            cy = l["p"][1] + fy * rd
+            if place_asset(kind, cx, cy, z, pw, pd, rot, f"sch_{tag}_{n}"):
+                n += 1
+            elif kind in ("sofa", "table", "armchair", "low_table", "chair"):
+                h = {"sofa": 0.42, "table": 0.75, "armchair": 0.45,
+                     "low_table": 0.40, "chair": 0.45}[kind]
+                add_box(cx, cy, z + h / 2, pw, pd, h, rot, M_FABRIC, f"sch_{tag}_{n}")
+                n += 1
+    return n
+
+
+def add_perimeter(fl, z, tag):
+    """Build the exterior wall from the floor slab outline.
+
+    The drawings draw a villa's perimeter as its outline, not as paired wall
+    faces, so extracting walls from the wall layers alone yields interior
+    partitions and no elevations - the building renders as a sectioned display
+    model you can see straight through. The traced footprint IS that perimeter
+    line, so extrude it.
+
+    Openings are cut with the same prisms the interior walls use, which is what
+    keeps windows and glazing lining up with the plan.
+    """
+    poly = fl.get("footprint") or []
+    if len(poly) < 3:
+        return 0
+    existing = [w for w in fl.get("walls") or [] if not w.get("unpaired")]
+    n = 0
+    for i in range(len(poly)):
+        ax, ay = poly[i - 1]
+        bx, by = poly[i]
+        d = math.hypot(bx - ax, by - ay)
+        if d < 0.45:
+            continue
+        # skip an edge that a real paired wall already covers, or the elevation
+        # gets a double thickness and z-fights along its whole length
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        covered = False
+        for w in existing:
+            wx0, wy0 = w["a"]
+            wx1, wy1 = w["b"]
+            wd = math.hypot(wx1 - wx0, wy1 - wy0)
+            if wd < 1e-6:
+                continue
+            ux, uy = (wx1 - wx0) / wd, (wy1 - wy0) / wd
+            t = max(0.0, min(wd, (mx - wx0) * ux + (my - wy0) * uy))
+            px, py = wx0 + ux * t, wy0 + uy * t
+            if math.hypot(px - mx, py - my) < 0.45:
+                covered = True
+                break
+        if covered:
+            continue
+        build_wall(dict(a=[ax, ay], b=[bx, by], t=0.23), z, fl.get("openings") or [],
+                   f"per_{tag}_{i}")
+        n += 1
+    return n
+
+
 def clip_halfplane(poly, ymin):
     out = []
     for i in range(len(poly)):
@@ -177,6 +536,7 @@ def clip_halfplane(poly, ymin):
 
 counts = {"walls": 0, "openings": 0, "columns": 0, "slabs": 0}
 for fl in B["floors"]:
+    CURRENT_FLOOR[0] = fl["id"]
     z = fl["level"]
     if fl["footprint"]:
         add_prism(fl["footprint"], z - SLAB, z, M_FLOOR, f"slab_{fl['id']}")
@@ -195,10 +555,16 @@ for fl in B["floors"]:
         if len(c) >= 3:
             add_prism(c, z, z + CLEAR, M_COL, f"col_{fl['id']}_{j}")
             counts["columns"] += 1
+    counts["massing"] = counts.get("massing", 0) + add_massing(fl, z, fl["id"])
+    counts["stairs"] = counts.get("stairs", 0) + add_stairs(fl, z, B["floorToFloor"], fl["id"])
+    counts["patches"] = counts.get("patches", 0) + add_patches(fl, z, fl["id"])
+    counts["furnished"] = counts.get("furnished", 0) + add_scheme(fl, z, fl["id"])
+    counts["perimeter"] = counts.get("perimeter", 0) + add_perimeter(fl, z, fl["id"])
 
 # Roof over the enclosed part of the top floor only. The pool and open deck sit
 # along one edge and must stay open to the sky; roofing the whole footprint turns
 # them into interior rooms and seals the level.
+CURRENT_FLOOR[0] = B["floors"][-1]["id"]
 top = B["floors"][-1]
 if top["footprint"]:
     open_air = [l["p"][1] for l in top.get("labels", [])
@@ -221,19 +587,58 @@ print(f"[build] {counts} objects={len(MESHES)}")
 if not MESHES:
     raise SystemExit("nothing built")
 
-bpy.ops.object.select_all(action="DESELECT")
-for ob in MESHES:
-    ob.select_set(True)
-bpy.context.view_layer.objects.active = MESHES[0]
-bpy.ops.object.join()
-ob = bpy.context.view_layer.objects.active
-ob.name = "Villa"
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.select_all(action="SELECT")
-bpy.ops.mesh.remove_doubles(threshold=0.0005)
-bpy.ops.mesh.normals_make_consistent(inside=False)
-bpy.ops.object.mode_set(mode="OBJECT")
-print(f"[mesh] verts={len(ob.data.vertices)} polys={len(ob.data.polygons)}")
+# Join per FLOOR, not into a single mesh. A dollhouse view has to lift each
+# level independently, which a fused mesh cannot do.
+import collections as _c
+by_floor = _c.defaultdict(list)
+for o in MESHES:
+    by_floor[FLOOR_OF.get(o.name, "misc")].append(o)
+
+floor_objs = []
+for fid, objs in by_floor.items():
+    objs = [o for o in objs if o.name in bpy.data.objects]
+    if not objs:
+        continue
+    shell = [o for o in objs if o.name not in ASSET_OBJS]
+    assets = [o for o in objs if o.name in ASSET_OBJS]
+    if shell:
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in shell:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = shell[0]
+        bpy.ops.object.make_single_user(object=True, obdata=True)
+        bpy.ops.object.join()
+        sh = bpy.context.view_layer.objects.active
+        # world-scale box UVs; imported assets already carry their own
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.cube_project(cube_size=UV_METRES, correct_aspect=True)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for m in sh.data.materials:
+            if m:
+                dress(m, TEXTURE_FOR.get(m.name, ""))
+        group = [sh] + assets
+    else:
+        group = assets
+    if len(group) > 1:
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in group:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = group[0]
+        bpy.ops.object.make_single_user(object=True, obdata=True)
+        bpy.ops.object.join()
+    ob = bpy.context.view_layer.objects.active
+    ob.name = f"floor_{fid}"
+    floor_objs.append(ob)
+    print(f"[floor] {ob.name}: {len(ob.data.polygons)} polys")
+
+for ob in list(bpy.context.scene.objects):
+    if ob.name.startswith("asset_"):
+        bpy.data.objects.remove(ob, do_unlink=True)
+
+ob = floor_objs[0]
+total = sum(len(o.data.polygons) for o in floor_objs)
+print(f"[mesh] {len(floor_objs)} floor objects, {total} polys")
 
 # ------------------------------------------------------------------- world --
 world = bpy.data.worlds.new("W")
@@ -288,60 +693,78 @@ if BAKE:
 
     scene.render.bake.use_pass_direct = True
     scene.render.bake.use_pass_indirect = True
-    scene.render.bake.margin = 6
-    bpy.ops.object.bake(type="COMBINED")
-    print("[bake] done")
+    scene.render.bake.margin = 8
+    # Ambient occlusion, NOT combined lighting.
+    #
+    # The previous approach baked full lighting into an emissive texture over a
+    # black base colour. It reproduces a bake exactly and it has no graceful
+    # failure: any face the atlas misses renders pure BLACK rather than merely
+    # unlit. Once furniture pushed the mesh to 40k polys the packer ran out of
+    # room and those faces became the black slabs filling the view.
+    #
+    # AO in glTF's standard occlusionTexture keeps every material's own colour
+    # and only darkens the contacts, so a packing failure degrades to "flat
+    # lit" instead of "invisible".
+    bpy.ops.object.bake(type="AO")
+    print("[bake] AO done")
 
-    # Replace every material with one emissive material carrying the bake.
-    baked = bpy.data.materials.new("baked")
-    baked.use_nodes = True
-    bnt = baked.node_tree
-    for n in list(bnt.nodes):
-        bnt.nodes.remove(n)
-    outn = bnt.nodes.new("ShaderNodeOutputMaterial")
-    pr = bnt.nodes.new("ShaderNodeBsdfPrincipled")
-    tex = bnt.nodes.new("ShaderNodeTexImage")
-    tex.image = img
-    pr.inputs["Base Color"].default_value = (0, 0, 0, 1)
-    pr.inputs["Roughness"].default_value = 1.0
-    bnt.links.new(tex.outputs["Color"], pr.inputs["Emission Color"]
-                  if "Emission Color" in pr.inputs else pr.inputs["Emission"])
-    pr.inputs["Emission Strength"].default_value = 1.0
-    bnt.links.new(pr.outputs["BSDF"], outn.inputs["Surface"])
-    ob.data.materials.clear()
-    ob.data.materials.append(baked)
+    # The exporter reads occlusion from a node group named "glTF Material
+    # Output" with an "Occlusion" input - it will not pick the image up from
+    # anywhere else in the tree.
+    for m in ob.data.materials:
+        if not m or not m.use_nodes:
+            continue
+        nt = m.node_tree
+        grp = bpy.data.node_groups.get("glTF Material Output")
+        if grp is None:
+            grp = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+            grp.interface.new_socket("Occlusion", in_out="INPUT",
+                                     socket_type="NodeSocketFloat")
+            gin = grp.nodes.new("NodeGroupInput")
+            gin.location = (0, 0)
+        node = nt.nodes.new("ShaderNodeGroup")
+        node.node_tree = grp
+        node.location = (400, -400)
+        tex = next((n for n in nt.nodes
+                    if n.type == "TEX_IMAGE" and n.image is img), None)
+        if tex is None:
+            tex = nt.nodes.new("ShaderNodeTexImage")
+            tex.image = img
+            tex.location = (100, -400)
+        sep = nt.nodes.new("ShaderNodeSeparateColor")
+        sep.location = (260, -400)
+        nt.links.new(tex.outputs["Color"], sep.inputs["Color"])
+        nt.links.new(sep.outputs[0], node.inputs["Occlusion"])
 
 
 def add_sky_dome():
-    """An inward-facing sky sphere, added after the bake.
+    """An inward-facing sky sphere.
 
-    The viewer hardcodes a dark background, so without this every window and
-    doorway reads as night once the model is emissive-only. The dome is added
-    after baking on purpose: at ~100,000 m2 it dwarfs the villa's ~1,500 m2 and
-    would swallow almost the whole lightmap atlas if it were packed with it.
+    The viewer hardcodes `scene.background = 0x11151c`, so without this every
+    window and doorway reads as night. Emissive, so it is unaffected by the
+    scene lighting and needs no bake.
     """
     bpy.ops.mesh.primitive_uv_sphere_add(radius=90.0, segments=32, ring_count=16,
                                          location=(0, 0, 0))
     d = bpy.context.active_object
     d.name = "Sky"
-    me = d.data
     bm = bmesh.new()
-    bm.from_mesh(me)
+    bm.from_mesh(d.data)
     bmesh.ops.reverse_faces(bm, faces=bm.faces[:])   # seen from inside
-    bm.to_mesh(me)
+    bm.to_mesh(d.data)
     bm.free()
 
     W, H = 8, 128
     img = bpy.data.images.new("skygrad", W, H)
     px = [0.0] * (W * H * 4)
     for row in range(H):
-        v = row / (H - 1)          # 0 = bottom of the sphere
+        v = row / (H - 1)
         if v < 0.5:
             k = v / 0.5
             r, g, b = (0.20 + 0.62 * k, 0.17 + 0.66 * k, 0.13 + 0.66 * k)
         else:
             k = (v - 0.5) / 0.5
-            r, g, b = (0.82 - 0.62 * k, 0.83 - 0.50 * k, 0.79 - 0.18 * k)
+            r, g, b = (0.82 - 0.55 * k, 0.85 - 0.42 * k, 0.88 - 0.10 * k)
         for col in range(W):
             i = (row * W + col) * 4
             px[i:i + 4] = [r, g, b, 1.0]
@@ -368,8 +791,28 @@ def add_sky_dome():
     print("[sky] dome added")
 
 
-if BAKE:
-    add_sky_dome()
+add_sky_dome()
+
+
+# Downscale every texture before export. The shell carries six PBR sets of three
+# maps each and every placed asset brings its own; at 1k that is ~15 MB per
+# villa, which across five types would weigh as much as the 75 MB reference this
+# is meant to beat. At the size these read on screen, 512 is indistinguishable.
+MAX_TEX = 512
+_shrunk = 0
+for img in bpy.data.images:
+    if img.name in ("Render Result", "Viewer Node") or not img.has_data:
+        continue
+    w, h = img.size
+    if max(w, h) <= MAX_TEX:
+        continue
+    k = MAX_TEX / max(w, h)
+    try:
+        img.scale(max(1, int(w * k)), max(1, int(h * k)))
+        _shrunk += 1
+    except Exception:
+        pass
+print(f"[textures] {_shrunk} images downscaled to {MAX_TEX}px")
 
 os.makedirs(os.path.dirname(DST), exist_ok=True)
 bpy.ops.export_scene.gltf(

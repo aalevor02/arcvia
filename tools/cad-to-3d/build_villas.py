@@ -399,13 +399,13 @@ for tid in targets:
             labels=[dict(t=l["t"], p=[round(l["p"][0] - ox, 3), round(l["p"][1] - oy, 3)])
                     for l in Lb],
             furniture=[dict(kind="furn", c=[round(q["c"][0] - ox, 3), round(q["c"][1] - oy, 3)],
-                            w=q["w"], d=q["d"], angle=q["angle"]) for q in pieces(Fu)],
+                            w=q["w"], d=q["d"], angle=q["angle"]) for q in pieces(Fu, gap=0.28)],
             sanitary=[dict(kind="sani", c=[round(q["c"][0] - ox, 3), round(q["c"][1] - oy, 3)],
                            w=q["w"], d=q["d"], angle=q["angle"])
-                      for q in pieces(Sa, max_len=2.2)],
+                      for q in pieces(Sa, gap=0.22, max_len=2.2)],
             stairs=[dict(c=[round(q["c"][0] - ox, 3), round(q["c"][1] - oy, 3)],
                          w=q["w"], d=q["d"], angle=q["angle"])
-                    for q in pieces(St, gap=0.35, min_len=1.2, max_len=7.0)],
+                    for q in pieces(St, gap=0.45, min_len=1.2, max_len=13.0)],
             footprint=poly, footprintArea=round(area, 2)))
         print(f"  {tid}/{fid:13s} lvl {idx*F2F:5.2f}m  walls={len(walls):3d} "
               f"furn={len(floors[-1]['furniture']):3d} sani={len(floors[-1]['sanitary']):2d} "
