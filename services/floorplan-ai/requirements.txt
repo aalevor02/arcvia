@@ -12,3 +12,22 @@ numpy==2.2.1
 # Trained detector backend. Commented out on purpose: it drags in torch
 # (~2.5 GB) and is only needed once you set FLOORPLAN_BACKEND=yolo.
 # ultralytics==8.3.55
+
+# Reading what the drawing says about itself: room names, and the printed sizes
+# that fix the scale. Optional — without it rooms come back unnamed and the user
+# calibrates by hand, which is where this started.
+#
+# Install with --no-deps. rapidocr depends on `opencv-python`, the full build,
+# and pip will happily uninstall the headless one above to satisfy it — pulling
+# in the GUI libraries a server does not have and cannot load. Everything it
+# actually needs is already here.
+#
+#     pip install onnxruntime
+#     pip install --no-deps rapidocr-onnxruntime
+#
+onnxruntime>=1.20
+# rapidocr-onnxruntime==1.4.4   <- see above; --no-deps only
+
+# Reading the PDF decks people actually send instead of drawings. Optional in
+# the same way: /health reports reads_pdf, and the service runs without it.
+pymupdf>=1.24

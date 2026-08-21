@@ -119,15 +119,64 @@ react   142 kB  (changes rarely)
 app      86 kB  (changes every deploy)
 ```
 
-### Detection has an honest fallback
+### Detection reads rooms, not lines
 
-`services/floorplan-ai` defaults to a classical-CV backend — morphological line
-extraction, no model weights, no GPU, no per-call cost. It runs anywhere and
-makes the product usable end-to-end today. A trained YOLO backend slots in
-behind the same interface once weights exist, and real customer plans flowing
-through the heuristic path are the training set for it.
+`services/floorplan-ai` has no model weights, no GPU and no per-call cost. It
+runs anywhere and makes the product usable end-to-end today. A trained YOLO
+backend slots in behind the same interface once weights exist, and real customer
+plans flowing through the heuristic path are the training set for it.
 
-The detector reports `low_confidence` and labels ambiguous gaps as `opening`
+**The reading runs backwards from the obvious direction, and that is the whole
+design.** The natural pipeline — extract every long straight stroke, then decide
+which are walls — cannot work on a furnished presentation plan. Nothing local to
+a stroke settles it: a double bed is 2 m and a partition is 3 m, both are drawn
+four pixels wide at brochure resolution, both are dark. Length, stroke weight,
+colour and pixel texture were each measured against real drawings and none
+separates them.
+
+What separates them is what the line *does*. A wall bounds a room; a bed sits
+inside one. So the detector seals doorways, floods the enclosed regions, and
+keeps only the strokes lying on a region's edge. Furniture is rejected because
+there is nothing behind it — and stair treads, hatching and the site boundary go
+with it, without a rule for any of them.
+
+Three things come out of the same pass:
+
+* **Rooms**, returned directly. The detector has to find them anyway to know
+  which strokes are walls, so sending only walls would throw that away.
+* **Names**, from OCR of the drawing's own labels. An architect writes SHOWER
+  inside the shower, and WARDROBE inside the wardrobe — which settles the one
+  question no pixel measurement can, since a labelled fitting is joinery rather
+  than structure.
+* **Scale**, from the sizes printed beside those names. `SHOWER 7'0"X5'9"`
+  compared against the region's size in pixels gives metres-per-pixel, and a
+  dozen rooms agreeing beats one hand-drawn calibration line. The studio applies
+  it only to an underlay nobody has calibrated by hand.
+
+OCR (`rapidocr-onnxruntime`) and PDF reading (`pymupdf`) are optional extras.
+Without them the service still runs, with unnamed rooms and a scale the user
+sets by hand. `/health` reports `reads_text` and `reads_pdf` so callers can say
+which of the two they are getting.
+
+### PDFs, because that is what people have
+
+Almost nobody sends a drawing. They send the deck they showed the client: a
+27-page slide document where page 3 carries two floor plans and the rest are
+captioned interior renders.
+
+`/document` describes such a file without extracting it, and `/document/page`
+pulls one image out. Two facts make this work without any model. A PDF stores
+its images at placed resolution, so the plan buried in a slide is a 4096px
+original — a *better* source than a screenshot of the same page. And every image
+is captioned, because the deck was made to be presented: "GROUND FLOOR -
+BEDROOM (NORTH ORIENTED)" states what it is, which floor, and which room. That
+caption is what pairs twenty-two renders with their rooms automatically.
+
+Pixels are consulted only when the caption is silent, and then only to separate
+a line drawing from a photograph.
+
+The detector reports `low_confidence` — now including *no enclosed rooms*, which
+is the signal that actually matters — and labels ambiguous gaps as `opening`
 rather than guessing door-vs-window. A confident wrong answer that reaches a
 client presentation is worse than an honest unknown.
 
