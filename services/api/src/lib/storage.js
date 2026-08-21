@@ -49,6 +49,20 @@ const ALLOWED = new Map([
   // back. Binary glTF only — the .gltf + separate-buffer form is several files
   // that have to stay together, and half an upload is worse than none.
   ['model/gltf-binary', '.glb'],
+  // Presentation decks. Almost nobody sends a bare drawing — they send the PDF
+  // they showed the client, with the floor plans on page three at a resolution
+  // no screenshot would match. Served back as an attachment, never inline:
+  // a PDF can carry script, and this origin hands out unauthenticated URLs.
+  ['application/pdf', '.pdf'],
+  // CAD drawings, for the reconstruction engine. DWG is what architects
+  // actually send; DXF is what they send when asked nicely. Both are read
+  // server-side and never served back inline.
+  ['image/vnd.dwg', '.dwg'],
+  ['image/vnd.dxf', '.dxf'],
+  // Vector plans produced by the reconstruction engine. Served as an
+  // ATTACHMENT, never inline — an SVG can carry script, and these URLs are
+  // unauthenticated and same-origin with the API. See uploads.js's disposition.
+  ['image/svg+xml', '.svg'],
 ])
 
 export const allowedTypes = () => [...ALLOWED.keys()]
@@ -114,6 +128,36 @@ export async function open(key) {
     if (!type) return null
 
     return { stream: createReadStream(path), size: info.size, contentType: type }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve a key to a local path, for a consumer that opens the file itself.
+ *
+ * `open()` hands back a read stream, which is right for serving bytes over HTTP
+ * and wrong for handing a file to a subprocess — the CAD engine is a separate
+ * Python process that opens the drawing itself, and giving it a stream would
+ * mean buffering a 34 MB DXF through Node for no reason.
+ *
+ * The safety is identical to `open()`'s, and deliberately so: the check is on
+ * the resolved path rather than the key text, the extension must be one we
+ * accepted, and anything that is not a real file inside ROOT comes back null so
+ * the caller answers 404 without confirming that a traversal was understood.
+ */
+export async function pathOf(key) {
+  const path = pathFor(key)
+  if (!path) return null
+
+  try {
+    const info = await stat(path)
+    if (!info.isFile()) return null
+
+    const contentType = [...ALLOWED.entries()].find(([, ext]) => extname(path) === ext)?.[0]
+    if (!contentType) return null
+
+    return { path, size: info.size, contentType }
   } catch {
     return null
   }

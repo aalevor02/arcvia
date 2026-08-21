@@ -18,7 +18,25 @@ import { allowedTypes, open, put, UnsupportedType } from '../lib/storage.js'
  */
 
 /** Floor plans are photographs of drawings, not textures. 12 MB is generous. */
+const CAD_TYPES = new Set(['image/vnd.dwg', 'image/vnd.dxf'])
+
+/**
+ * Types that must never render inline in this origin.
+ *
+ * A PDF can carry script and so can an SVG — and unlike a PNG, a browser will
+ * happily execute both. These URLs are unauthenticated and same-origin with the
+ * API, so an inline SVG would be stored XSS with a friendly interface.
+ */
+const INLINE_UNSAFE = new Set(['application/pdf', 'image/svg+xml'])
+
 const MAX_BYTES = 12 * 1024 * 1024
+
+/**
+ * Presentation decks are a different animal: twenty-odd 4K renders bound into
+ * one file, routinely forty megabytes and occasionally more. Refusing them at
+ * the image limit would refuse the format most clients actually have.
+ */
+const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
 
 /**
  * Generated scenes are bigger, and they are transient — they exist to be handed
@@ -34,21 +52,28 @@ export async function registerUploadRoutes(app) {
 
     const buffer = await file.toBuffer()
 
-    // Checked after reading because the multipart limit aborts the stream
-    // itself; this catches the case where the global limit is higher than the
-    // one that makes sense for this particular route.
-    if (buffer.length > MAX_BYTES) {
-      return reply.status(413).send({
-        message: `That file is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_BYTES / 1024 / 1024} MB.`,
-      })
-    }
-
     // Trust the sniffed bytes over the declared mimetype. A client can claim
-    // anything in the header, and the extension is attacker-chosen too.
+    // anything in the header, and the extension is attacker-chosen too. Done
+    // before the size check because the limit depends on what this turns out to
+    // be — a deck is allowed to be much larger than a drawing.
     const sniffed = sniff(buffer)
     if (!sniffed) {
       return reply.status(415).send({
-        message: `That does not look like an image. Supported: ${allowedTypes().join(', ')}.`,
+        message: `That is not a drawing, a CAD file or a PDF. Supported: ${allowedTypes().join(', ')}.`,
+      })
+    }
+
+    // Checked after reading because the multipart limit aborts the stream
+    // itself; this catches the case where the global limit is higher than the
+    // one that makes sense for this particular route.
+    // A CAD drawing is sized like a deck, not like a photograph. Real ones from
+    // one project run to 34 MB of DXF, so holding them to the 12 MB image limit
+    // refuses the files this route exists to accept.
+    const LARGE = new Set(['application/pdf', 'image/vnd.dwg', 'image/vnd.dxf'])
+    const limit = LARGE.has(sniffed) ? MAX_DOCUMENT_BYTES : MAX_BYTES
+    if (buffer.length > limit) {
+      return reply.status(413).send({
+        message: `That file is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. The limit is ${limit / 1024 / 1024} MB.`,
       })
     }
 
@@ -58,7 +83,10 @@ export async function registerUploadRoutes(app) {
         // guessing keys — the hash makes that impractical anyway, but the
         // prefix means a future "delete everything this user uploaded" is a
         // directory operation rather than a scan.
-        prefix: `floorplans/${request.auth.userId}`,
+        // CAD goes in its own prefix: it is read by a different engine, it is
+        // never served back to a browser, and keeping it separate means a
+        // retention rule can treat drawings differently from images.
+        prefix: `${CAD_TYPES.has(sniffed) ? 'cad' : 'floorplans'}/${request.auth.userId}`,
       })
       return reply.status(201).send(stored)
     } catch (error) {
@@ -120,6 +148,13 @@ export async function registerUploadRoutes(app) {
     return reply
       .header('Content-Type', file.contentType)
       .header('Content-Length', file.size)
+      // A PDF is the one stored type that can carry script, and these URLs are
+      // unauthenticated and same-origin with the API. Forcing a download means
+      // a hostile deck cannot run in this origin no matter who opens the link.
+      .header(
+        'Content-Disposition',
+        INLINE_UNSAFE.has(file.contentType) ? 'attachment' : 'inline',
+      )
       // Content-addressed, so the bytes behind a URL can never change.
       .header('Cache-Control', 'public, max-age=31536000, immutable')
       // Belt and braces: even though only image types are stored, tell the
@@ -157,12 +192,39 @@ function sniff(buffer) {
   // glTF binary: magic 'glTF' followed by a version word.
   if (buffer.toString('ascii', 0, 4) === 'glTF') return 'model/gltf-binary'
 
+  // PDF: "%PDF-"
+  if (buffer.toString('ascii', 0, 5) === '%PDF-') return 'application/pdf'
+
   // WebP: "RIFF" .... "WEBP"
   if (
     buffer.toString('ascii', 0, 4) === 'RIFF' &&
     buffer.toString('ascii', 8, 12) === 'WEBP'
   ) {
     return 'image/webp'
+  }
+
+  // DWG: the version string is the first six bytes — AC1015, AC1021, AC1032.
+  // Checked as a shape rather than a list, because new releases add new codes
+  // and LibreDWG reads more of them than any list here would stay current with.
+  if (
+    buffer.toString('ascii', 0, 2) === 'AC' &&
+    /^\d{4}$/.test(buffer.toString('ascii', 2, 6))
+  ) {
+    return 'image/vnd.dwg'
+  }
+
+  // Binary DXF announces itself.
+  if (buffer.toString('ascii', 0, 18) === 'AutoCAD Binary DXF') {
+    return 'image/vnd.dxf'
+  }
+
+  // ASCII DXF has no magic number — it is a group-code text file. The opening
+  // is a 0 group whose value is SECTION, followed by a 2 group naming it.
+  // Requiring both, near the start, keeps this from matching arbitrary text.
+  const head = buffer.toString('ascii', 0, Math.min(buffer.length, 1024))
+  const firstLine = head.split('\n').shift().trim()
+  if ((firstLine === '0' || firstLine === '999') && head.includes('SECTION')) {
+    return 'image/vnd.dxf'
   }
 
   return null
