@@ -10,3 +10,5 @@ test-plan.png
 __pycache__/
 .test/
 .test-api.log
+data/rates/*.bak
+reports/rates/
