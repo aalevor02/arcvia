@@ -1,4 +1,5 @@
 import { creditsFor, creditLine, uncredited } from '../src/catalogue/credits'
+import { CATALOGUE } from '../src/catalogue/items'
 import type { PlacedObject } from '../src/catalogue/types'
 
 /**
@@ -30,14 +31,22 @@ const place = (id: string, item: string, customUrl?: string): PlacedObject => ({
   ...(customUrl ? { customUrl } : {}),
 })
 
-// The catalogue ships without models today, so these assert the *shape* of the
-// answer rather than particular authors — which is the part that must hold when
-// models are added one at a time.
+// Catalogue items are chosen at runtime rather than named.
+//
+// The first version of this file hard-coded 'armchair' as its example of an
+// item with no model, and broke the day one was added — a test failing because
+// the product improved. Anything that asserts "an item without a model" has to
+// go and find one.
+const withoutModel = CATALOGUE.find((item) => !item.model)?.id
+const withModel = CATALOGUE.find((item) => item.model)?.id
+
 {
   check('an empty scene credits nobody', creditsFor([]).length === 0)
   check('an empty credit line is empty, not "undefined"', creditLine([]) === '')
 
-  const plain = [place('o1', 'sofa-3'), place('o2', 'armchair')]
+  check('the catalogue still has an item with no model', Boolean(withoutModel), withoutModel)
+
+  const plain = [place('o1', withoutModel!), place('o2', withoutModel!)]
   check(
     'objects with no model owe nothing',
     creditsFor(plain).length === 0,
@@ -86,10 +95,24 @@ const place = (id: string, item: string, customUrl?: string): PlacedObject => ({
 // record. Crediting it to the item it replaced would put one author's name on
 // another author's work, which is worse than saying nothing.
 {
-  const objects = [place('o1', 'sofa-3', 'https://example.com/mine.glb'), place('o2', 'armchair')]
+  // Deliberately overriding an item that *does* have a model. With an
+  // unmodelled item this assertion passes whatever the code does, which is how
+  // the first version of it managed to be both green and meaningless.
+  if (withModel) {
+    const overridden = [place('o1', withModel, 'https://example.com/mine.glb')]
+    check(
+      'a custom model is never credited to the catalogue item it replaced',
+      creditsFor(overridden).length === 0,
+      String(creditsFor(overridden).length),
+    )
+    check('and the catalogue item alone would have been credited', creditsFor([place('o2', withModel)]).length === 1)
+  } else {
+    check('skipped: no catalogue item has a model yet', true)
+    check('skipped: no catalogue item has a model yet', true)
+  }
 
-  check('a custom model is never credited to the catalogue item', creditsFor(objects).length === 0)
-  check('but it is reported as uncredited', uncredited(objects).length === 1)
+  const objects = [place('o1', withoutModel!, 'https://example.com/mine.glb'), place('o2', withoutModel!)]
+  check('a custom model is reported as uncredited', uncredited(objects).length === 1)
   check(
     'objects without a custom model are not flagged',
     uncredited(objects).every((o) => o.id === 'o1'),
