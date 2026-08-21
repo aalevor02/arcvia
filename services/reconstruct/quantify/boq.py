@@ -173,7 +173,9 @@ class Costing:
 
     #: Metres of wall per m2 of floor. Reported whether or not it is in band,
     #: because a reader checking a bill wants the number, not only the verdict.
-    wall_run_per_area: float = 0.0
+    #: None when there was no enclosed floor area to divide by. NOT 0.0 — that
+    #: reads as a measured ratio of zero and hides a check that never ran.
+    wall_run_per_area: float | None = None
 
     @property
     def total(self) -> float:
@@ -474,16 +476,50 @@ def build(
     # Same basis as `solve/verify.py`, so the two numbers are comparable. A
     # metric is only worth a band if everyone computing it computes it the same.
     enclosed = interior_area + paved_area + landscape_area
-    ratio = run / enclosed if enclosed > 0 else 0.0
-    if enclosed > 0 and not (WALL_RUN_BAND[0] <= ratio <= WALL_RUN_BAND[1]):
+
+    if enclosed <= 0:
+        # THE CHECK DID NOT RUN, WHICH IS NOT THE SAME AS PASSING IT.
+        #
+        # ── Why this stopped being hypothetical ─────────────────────────────
+        # This branch used to set the ratio to 0.0 and say nothing. A reader
+        # then sees `wallRunPerArea: 0.0` and cannot tell "this building has no
+        # wall per square metre" from "there was no square metre to divide by".
+        # The band test is correctly guarded so it never fires a false
+        # out-of-band — but silence plus a plausible-looking zero reads as a
+        # check that ran and passed.
+        #
+        # It is the same defect as every other one found on 2026-08-22: a value
+        # meaning "not computed" wearing a measurement's clothes. `unpriced`
+        # solved it for lines and `undetermined` for daylight; this is the third
+        # instance and it is the one guarding the bill's only independent check.
+        #
+        # A model with no enclosed region is about to become common rather than
+        # pathological: a session working the reconstruction is adding a
+        # plausibility guard that refuses a derived perimeter which does not
+        # contain the rooms it claims to enclose, and on this drawing that ring
+        # encloses 40% of the interior floor. When it is refused, spaces stop
+        # closing, and a bill still prices — INR 1,115,165 of it, measured — with
+        # its shape check silently absent.
+        costing.wall_run_per_area = None
         costing.provisional = True
         costing.provisional_reason = costing.provisional_reason or (
-            f"This model has {ratio:.2f} m of wall per m2 of floor, outside the "
-            f"{WALL_RUN_BAND[0]}-{WALL_RUN_BAND[1]} a building normally sits in. "
-            "Either the plan is unusually cellular, or walls are being counted "
-            "more than once — check the wall run before ordering against this."
+            "No enclosed floor area, so the wall-run-per-area check could not "
+            "run. This bill has no independent check on its wall quantities — "
+            "the one measurement that would catch walls counted twice is "
+            "missing, not passing."
         )
-    costing.wall_run_per_area = round(ratio, 3)
+    else:
+        ratio = run / enclosed
+        if not (WALL_RUN_BAND[0] <= ratio <= WALL_RUN_BAND[1]):
+            costing.provisional = True
+            costing.provisional_reason = costing.provisional_reason or (
+                f"This model has {ratio:.2f} m of wall per m2 of floor, outside "
+                f"the {WALL_RUN_BAND[0]}-{WALL_RUN_BAND[1]} a building normally "
+                "sits in. Either the plan is unusually cellular, or walls are "
+                "being counted more than once — check the wall run before "
+                "ordering against this."
+            )
+        costing.wall_run_per_area = round(ratio, 3)
 
     # ---- Masonry ------------------------------------------------------------
     if masonry == "brick":

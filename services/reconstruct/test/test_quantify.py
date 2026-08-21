@@ -521,5 +521,36 @@ ok("an unconvertible unit goes to `unpriced` rather than being priced anyway",
    len(unreconciled) >= 1,
    str([ln["note"] for ln in guessed["unpriced"]][:2]))
 
+print("\n-- boq: a check that did not run is not a check that passed --")
+# The bill's ONLY independent check on its wall quantities is wall run per unit
+# floor area. It is correctly guarded so it never fires a false out-of-band when
+# there is no floor area — but it used to report 0.0 in that case and say
+# nothing, and 0.0 reads as a measured ratio rather than as an absence.
+#
+# This stopped being hypothetical while it was being written. A session working
+# the reconstruction found that this drawing's derived perimeter encloses 40% of
+# the interior floor it claims to enclose, and is adding a guard to refuse such a
+# ring. When a ring is refused, spaces stop closing — and a bill still prices,
+# measured at INR 1,115,165 on the villa, with its shape check silently gone.
+no_area = {"elements": {**MODEL["elements"], "spaces": []}}
+blind = boq.build(no_area, full, height=3.0).as_dict(TODAY)
+
+ok("with no enclosed area the ratio is None, never 0.0",
+   blind["wallRunPerArea"] is None, str(blind["wallRunPerArea"]))
+ok("and the bill is marked provisional for it", blind["provisional"])
+ok("and says the check is MISSING rather than passing",
+   "could not run" in blind["provisionalReason"]
+   and "not passing" in blind["provisionalReason"],
+   blind["provisionalReason"][:70])
+ok("it still prices what it can, rather than refusing outright",
+   blind["total"] > 0, f"{blind['total']:,.0f}")
+
+# The ordinary path must keep reporting a number, or the fix has traded one
+# silent absence for another.
+normal = boq.build(MODEL, full, height=3.0).as_dict(TODAY)
+ok("a model with floor area still reports a real ratio",
+   isinstance(normal["wallRunPerArea"], float) and normal["wallRunPerArea"] > 0,
+   str(normal["wallRunPerArea"]))
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
