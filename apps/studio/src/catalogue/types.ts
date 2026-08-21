@@ -57,6 +57,43 @@ export interface CatalogueItem {
   tone?: 'wood' | 'fabric' | 'metal' | 'stone' | 'glass' | 'plant' | 'white'
   /** Shown in the picker when the difference between two items is not obvious. */
   note?: string
+  /**
+   * A real GLB to use instead of the parametric shape.
+   *
+   * The shape stays defined either way. It is what renders until this loads,
+   * what renders if this fails, and what the 2D plan draws — none of which
+   * wants a mesh. The model is an upgrade layered on top, never a replacement
+   * for the dimensions.
+   */
+  model?: AssetModel
+}
+
+/**
+ * A downloaded model and the terms it came with.
+ *
+ * ── Why the licence is a required field ─────────────────────────────────────
+ * Almost every free architectural model is CC-BY: free to use commercially,
+ * *provided* the author is credited. That is a cheap price and an easy one to
+ * fail to pay, because nothing breaks if you don't — the model loads, the room
+ * renders, the client is happy, and the obligation is silently unmet on a page
+ * that is now published on the open web.
+ *
+ * So attribution is not optional metadata attached later. A model cannot enter
+ * the catalogue without the information needed to credit it, and the published
+ * walkthrough builds its credits from exactly this. The one way to keep a legal
+ * obligation met is to make it impossible to add the asset without it.
+ */
+export interface AssetModel {
+  /** Where the conditioned GLB is served from. */
+  url: string
+  /** Spelled out, as it must appear in a credit: "CC Attribution 4.0". */
+  licence: string
+  /** The author, as they are named on the source site. */
+  author: string
+  /** Link back to the original, which most licences also require. */
+  source: string
+  /** Triangles after conditioning, so a scene's budget can be reasoned about. */
+  triangles?: number
 }
 
 /** An instance of a catalogue item, placed on a floor. */

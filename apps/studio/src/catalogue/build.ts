@@ -319,8 +319,22 @@ export function buildObject(object: PlacedObject, floorElevation: number): THREE
   const group = new THREE.Group()
   group.name = `object:${object.id}`
 
-  builder(group, sizeOf(object), item.tone ?? 'fabric')
+  const size = sizeOf(object)
+  builder(group, size, item.tone ?? 'fabric')
   if (group.children.length === 0) return null
+
+  // Tag, do not load. Building geometry is synchronous and must stay that way
+  // — the plan is rebuilt on every wall drag, and an await in that path would
+  // make the 2D and 3D views disagree for a frame on every edit. The tag is
+  // enough for `upgradeModels` to come along afterwards and swap it.
+  //
+  // A per-placement `customUrl` wins over the catalogue's own model, which is
+  // what makes "use this exact sofa here" possible without a catalogue entry.
+  const modelUrl = object.customUrl ?? item.model?.url
+  if (modelUrl) {
+    group.userData.modelUrl = modelUrl
+    group.userData.modelSize = size
+  }
 
   // plan (x, y) -> world (x, elevation, -y), the same mapping walls use.
   group.position.set(

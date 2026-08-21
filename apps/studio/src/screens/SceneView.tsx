@@ -6,6 +6,7 @@ import { activeFloor } from '../plan/planStore'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import { exportForBake, loadAndApply } from '../plan/bake'
 import { uploadScene, updateScene, storedUrl } from '../lib/api'
+import { upgradeModels, modelsSettled } from '../catalogue/models'
 import type { Plan } from '../plan/types'
 
 interface Props {
@@ -132,6 +133,14 @@ export default function SceneView({ plan, sceneId }: Props) {
     viewer.setBakedLighting(false)
     setBaked(false)
 
+    // Real furniture arrives afterwards, one model at a time, redrawing as
+    // each lands. Not awaited: this effect runs on every wall drag, and a room
+    // that will not update until a dozen GLBs have downloaded is a room that
+    // feels broken while you are drawing it.
+    void upgradeModels(group, () => viewer.requestRender()).then((upgraded) => {
+      if (upgraded > 0) setStatus(`${upgraded} object${upgraded === 1 ? '' : 's'} using real models`)
+    })
+
     // Framing the model fights the walk camera: it would yank the view back
     // outside the building on every edit.
     if (!walkingRef.current) viewer.frameModel()
@@ -198,6 +207,15 @@ export default function SceneView({ plan, sceneId }: Props) {
 
     setJob({ status: 'exporting', progress: 0 })
     try {
+      // Wait for furniture before exporting anything.
+      //
+      // The bake captures the scene as it stands. Export while models are
+      // still downloading and the atlas describes the stand-ins, then gets
+      // applied to the real furniture that arrives afterwards — geometry from
+      // one room lit by another, which renders perfectly and is baffling.
+      setStatus('Waiting for models to finish loading…')
+      await modelsSettled()
+
       const { blob, grid, meshes } = await exportForBake(model)
       const megabytes = (blob.size / 1024 / 1024).toFixed(1)
       setStatus(`Uploading ${megabytes} MB — ${meshes} meshes in a ${grid}x${grid} atlas`)
