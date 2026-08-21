@@ -384,7 +384,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       )}
 
       {mode === '3d' ? (
-        <SceneView plan={plan} sceneId={sceneId} />
+        <SceneView plan={plan} sceneId={sceneId} sceneName={scene?.name} />
       ) : (
       <div className="editor-body">
         {/* ---- Tools ---------------------------------------------------- */}

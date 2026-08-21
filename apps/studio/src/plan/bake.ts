@@ -57,8 +57,13 @@ export interface BakeProgress {
 export async function exportForBake(
   scene: THREE.Object3D,
 ): Promise<{ blob: Blob; grid: number; meshes: number }> {
-  // Clone first. Assigning UVs mutates geometry, and the live scene is the one
-  // on screen — rewriting its attributes mid-session would be felt.
+  // `clone(true)` copies the object graph but *shares* geometry by reference,
+  // and that is load-bearing rather than incidental: the live scene ends up
+  // carrying the same lightmap UVs that were exported, which is the only reason
+  // `loadAndApply` can attach the returned atlas to what is on screen.
+  //
+  // Deep-cloning the geometry here would look tidier and would silently break
+  // the whole round trip — the bake would succeed and apply to nothing.
   const clone = scene.clone(true)
   const layout = assignLightmapUVs(clone)
 

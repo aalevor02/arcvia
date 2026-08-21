@@ -7,11 +7,15 @@ import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient
 import { exportForBake, loadAndApply } from '../plan/bake'
 import { uploadScene, updateScene, storedUrl } from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
+import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import type { Plan } from '../plan/types'
 
 interface Props {
   plan: Plan
   sceneId: string
+  /** Used to name an exported file. Optional so the 3D view still renders
+   *  while the scene record is still loading. */
+  sceneName?: string
 }
 
 const PRESETS: { id: RenderPreset; label: string; credits: number; note: string }[] = [
@@ -43,7 +47,7 @@ function elapsed(ms: number): string {
  * it: the 3D view cannot fall out of sync with the drawing, because it *is* the
  * drawing, rebuilt.
  */
-export default function SceneView({ plan, sceneId }: Props) {
+export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewerRef = useRef<SceneViewer | null>(null)
   const walkRef = useRef<WalkController | null>(null)
@@ -256,6 +260,47 @@ export default function SceneView({ plan, sceneId }: Props) {
     }
   }
 
+  /**
+   * Export the whole building as a GLB.
+   *
+   * For any tool that imports glTF and does its own baking — Shapespark and
+   * the like. Those are destinations rather than rivals: the plan is still
+   * drawn here, the dimensions are still real, the catalogue is still the
+   * catalogue, and only the final render moves elsewhere. A studio that
+   * already pays for one of them should be able to draw in Arcvia and publish
+   * through the renderer they own.
+   *
+   * Ceilings are forced on regardless of the display toggle. That switch
+   * exists so an orbiting camera can see into the room while you work; a
+   * receiving tool bakes what it is given, and a building with no ceilings
+   * bakes as one lit from directly above through an open roof.
+   */
+  async function handleExport() {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    setStatus('Preparing the export…')
+    try {
+      await modelsSettled()
+
+      const complete = buildPlanGeometry(plan.floors, {
+        ceilings: true,
+        floorFinish: finish,
+      })
+      await upgradeModels(complete)
+
+      const { blob, meshes, triangles } = await exportGlb(complete)
+      downloadBlob(blob, filenameFor(sceneName ?? sceneId))
+
+      setStatus(
+        `Exported ${meshes} meshes, ${triangles.toLocaleString()} triangles — ` +
+          `${(blob.size / 1024 / 1024).toFixed(1)} MB`,
+      )
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Export failed')
+    }
+  }
+
   async function handleRender(preset: RenderPreset) {
     if (preset === 'bake') return handleBake()
 
@@ -409,6 +454,24 @@ export default function SceneView({ plan, sceneId }: Props) {
               </span>
             </button>
           ))}
+
+          <button
+            className="btn"
+            style={{ justifyContent: 'space-between', marginTop: 8 }}
+            onClick={() => void handleExport()}
+            disabled={Boolean(job) || empty}
+            title="A .glb of the whole building, for Shapespark or any tool that imports glTF"
+          >
+            <span style={{ textAlign: 'left' }}>
+              <strong style={{ display: 'block', fontSize: 12.5 }}>Export .glb</strong>
+              <span className="muted" style={{ fontSize: 11 }}>
+                Whole building · ceilings included
+              </span>
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
+              free
+            </span>
+          </button>
 
           {job?.markers?.device === 'CPU' && (
             <p className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
