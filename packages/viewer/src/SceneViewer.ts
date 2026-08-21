@@ -490,6 +490,31 @@ export class SceneViewer {
   }
 
   /**
+   * Change the camera's field of view.
+   *
+   * ── Why this matters more than walking speed ────────────────────────────
+   * 50 degrees is right for looking *at* a building from outside and wrong for
+   * being inside one. At 50 a 3 m room fills the screen with a single wall,
+   * there is no peripheral vision to steer by, and a doorway two metres to the
+   * side is off-screen — which is what makes moving around feel cramped and
+   * disorienting rather than slow.
+   *
+   * Games settled on 65 to 75 for exactly this reason, and interior
+   * walkthroughs are the same problem. The cost is mild perspective
+   * exaggeration at the frame edges, which nobody notices while moving and
+   * everybody notices the absence of.
+   */
+  setFieldOfView(degrees: number): void {
+    this.camera.fov = Math.max(30, Math.min(100, degrees))
+    this.camera.updateProjectionMatrix()
+    this.needsRender = true
+  }
+
+  getFieldOfView(): number {
+    return this.camera.fov
+  }
+
+  /**
    * Stand the camera inside the model, at eye height.
    *
    * Entering a walkthrough from wherever the orbit camera happened to be puts

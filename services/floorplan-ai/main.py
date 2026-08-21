@@ -27,6 +27,7 @@ Run:  uvicorn main:app --port 8090
 from __future__ import annotations
 
 import io
+import math
 import os
 from typing import Literal
 
@@ -205,6 +206,7 @@ def detect_heuristic(image: np.ndarray) -> tuple[list[WallSegment], list[Detecti
             )
 
     walls = reject_text_strokes(walls)
+    walls = reject_thin_strokes(walls)
     walls = merge_collinear(walls)
 
     # Openings: gaps in an otherwise continuous wall run are doors and windows.
@@ -214,6 +216,60 @@ def detect_heuristic(image: np.ndarray) -> tuple[list[WallSegment], list[Detecti
     objects = detect_openings(walls)
 
     return walls, objects
+
+
+def _span(wall: WallSegment) -> float:
+    """Normalised length of a segment."""
+    return math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y)
+
+
+def reject_thin_strokes(walls: list[WallSegment]) -> list[WallSegment]:
+    """
+    Drop furniture outlines that are the right length to pass for walls.
+
+    ── The problem ─────────────────────────────────────────────────────────────
+    Length alone does not separate a wall from a bed. A double bed is 2 m, a
+    three-seater sofa 2.1 m, a kitchen run 3 m — all comfortably longer than the
+    minimum a wall has to clear. On a furnished presentation plan the result is
+    a building whose beds and sofas have been extruded into walls, which is
+    exactly what a client sees and cannot explain.
+
+    ── What actually separates them ────────────────────────────────────────────
+    Weight of line. Architects draw walls heavy — often poché, filled solid —
+    and furniture with a thin outline, precisely so a reader can tell structure
+    from contents at a glance. That convention is near universal, and morphology
+    already measures it: every candidate carries the thickness of its stroke.
+
+    The reference comes from the longest segments in the drawing, because those
+    are always external walls. Nothing else in a floor plan runs the full width
+    of the building — there is no three-metre sofa in a four-metre room. So the
+    longest tenth defines what "wall weight" means for *this* drawing, at
+    whatever resolution it happened to be scanned, and anything markedly thinner
+    is contents rather than structure.
+    """
+    if len(walls) < 8:
+        return walls
+
+    longest = sorted(walls, key=_span, reverse=True)
+    reference = longest[: max(3, len(longest) // 10)]
+
+    weights = sorted(w.thickness for w in reference)
+    typical = weights[len(weights) // 2]
+    if typical <= 0:
+        return walls
+
+    # Just over half. Generous on purpose: a partition is genuinely thinner than
+    # an external wall, and losing real internal walls to catch furniture is the
+    # worse trade — a missing partition is visible and easily drawn in, whereas
+    # a sofa extruded into a wall is baffling and hard to even describe.
+    floor_weight = typical * 0.55
+    kept = [w for w in walls if w.thickness >= floor_weight]
+
+    # If that would discard almost everything, this drawing has no weight
+    # convention to read — a single-line CAD export, say — and the filter has
+    # nothing to say about it. Passing it through unchanged beats returning an
+    # empty plan for a drawing that was perfectly fine.
+    return kept if len(kept) >= len(walls) * 0.25 else walls
 
 
 def reject_text_strokes(walls: list[WallSegment]) -> list[WallSegment]:

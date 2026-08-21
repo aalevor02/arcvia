@@ -345,9 +345,15 @@ const title = 'Walkthrough'
             // Stand inside before enabling, or the visitor enters the
             // walkthrough in the garden looking at the building.
             viewer.standInside(1.6)
+            // Wider inside than out, and brisker than a real walking pace: at
+            // 50 degrees a small room fills the screen with one wall, and at
+            // 2.7 m/s a client spends the tour stopping and turning.
+            viewer.setFieldOfView(72)
+            walk.setSpeed(4.5)
             walk.enable()
           } else {
             walk.disable()
+            viewer.setFieldOfView(50)
             viewer.frameModel()
           }
         })

@@ -39,7 +39,7 @@ export class WalkController {
   private lastTime = 0
 
   private readonly eyeHeight: number
-  private readonly speed: number
+  private speed: number
   private readonly maxPitch: number
 
   constructor(
@@ -52,6 +52,23 @@ export class WalkController {
     this.eyeHeight = options.eyeHeight ?? 1.6
     this.speed = options.speed ?? 2.68
     this.maxPitch = THREE.MathUtils.degToRad(options.maxPitch ?? 85)
+  }
+
+  /**
+   * Change the walking pace.
+   *
+   * 2.68 m/s is a real human walking speed and it is genuinely too slow inside
+   * a flat: a room is crossed in two seconds, so most of the time is spent
+   * stopping and turning rather than moving, which reads as sluggish even
+   * though it is accurate. Somebody touring a property is not taking a walk,
+   * they are looking for the kitchen.
+   */
+  setSpeed(metresPerSecond: number): void {
+    this.speed = Math.max(0.5, Math.min(12, metresPerSecond))
+  }
+
+  getSpeed(): number {
+    return this.speed
   }
 
   enable(): void {

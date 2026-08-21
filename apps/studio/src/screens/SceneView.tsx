@@ -103,6 +103,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     branding: null,
   })
   const [placing, setPlacing] = useState(false)
+  /** Walking pace, metres per second. */
+  const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
   const [gated, setGated] = useState(false)
   const [code, setCode] = useState('')
@@ -232,6 +234,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     if (walking) {
       walk.disable()
       walkingRef.current = false
+      // Back to the framing that suits looking at a building from outside.
+      viewer.setFieldOfView(50)
       viewer.frameModel()
       setWalking(false)
       setStatus('Ready')
@@ -247,6 +251,11 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
 
     viewer.cameraObject.position.set(start.position.x, start.height, -start.position.y)
     walk.setFloorLevel(floor.elevation)
+    // Wider inside than out. At 50 degrees a small room fills the screen with
+    // one wall and a doorway two metres away is off-frame, which is what makes
+    // moving around feel cramped rather than slow.
+    viewer.setFieldOfView(72)
+    walk.setSpeed(pace)
     walk.enable()
     walkingRef.current = true
     setWalking(true)
@@ -603,6 +612,30 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           placing={placing}
           onPlacingChange={setPlacing}
         />
+
+        <section>
+          <span className="eyebrow">Walkthrough</span>
+          <label style={{ fontSize: 11.5 }}>
+            Walking pace <span className="mono">{pace.toFixed(1)} m/s</span>
+            <input
+              type="range"
+              min="1.5"
+              max="9"
+              step="0.5"
+              value={pace}
+              onChange={(e) => {
+                const next = Number(e.target.value)
+                setPace(next)
+                walkRef.current?.setSpeed(next)
+              }}
+            />
+          </label>
+          <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+            A real walk is 2.7 m/s and feels slow indoors — a room is crossed in
+            two seconds, so most of the time goes on stopping and turning. Hold
+            shift to move faster still.
+          </p>
+        </section>
 
         <section>
           <span className="eyebrow">Photoreal</span>
