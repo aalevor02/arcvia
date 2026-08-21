@@ -233,6 +233,24 @@ export class PlanCanvas {
 
   // ---- View ----------------------------------------------------------------
 
+  /**
+   * The pan and zoom, so it can outlive this renderer.
+   *
+   * The editor tears the 2D canvas down when it switches to the 3D view and
+   * builds a fresh one on the way back. Without carrying the view across, every
+   * trip through 3D drops you back at the default framing — which, on a plan
+   * you had zoomed into to nudge one wall, means finding your place again every
+   * single time.
+   */
+  getView(): ViewState {
+    return { zoom: this.view.zoom, centre: { ...this.view.centre } }
+  }
+
+  setView(view: ViewState): void {
+    this.view = { zoom: view.zoom, centre: { ...view.centre } }
+    this.invalidate()
+  }
+
   /** Frame everything drawn, with margin. No geometry means a sensible default. */
   zoomToFit(): void {
     const vertices = Object.values(this.floor.vertices)
