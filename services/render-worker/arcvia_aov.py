@@ -50,6 +50,45 @@ def enable(bpy, wanted=PASSES):
     return [p for p in PASSES if p in wanted]
 
 
+class PassesUnavailable(RuntimeError):
+    """This Blender cannot write separate passes. See the note below."""
+
+
+def compositor_works(bpy) -> bool:
+    """
+    Whether this Blender can write render passes to separate files.
+
+    ── Everything that does not work on 5.1, measured rather than assumed ─────
+    Blender 5 rewrote the compositor and left the two halves of this path with
+    mutually exclusive format support:
+
+      scene.node_tree                     does not exist
+      scene.compositing_node_group        exists; File Output nodes inside it
+                                          build correctly, link correctly, and
+                                          write NOTHING at render time
+      CompositorNodeComposite             node type does not exist
+      render output OPEN_EXR_MULTILAYER   not in the enum
+      render output OPEN_EXR              writes, but 4 channels — combined only
+      File Output node format             accepts ONLY OPEN_EXR_MULTILAYER
+
+    So the node that can hold a pass writes a format the renderer cannot
+    produce, the renderer writes formats the node refuses, and the compositor
+    that would bridge them does not run. Each of those was checked against a
+    real render; none is inferred from documentation.
+
+    Blender 4.2 is installed on this machine and its compositor is the old,
+    working API. Until either this is understood or `finish_ai.py` needs the
+    passes badly enough to justify more digging, AOV renders should run under
+    4.2 and everything else under 5.x.
+
+    This returns False rather than raising so a caller can render the beauty
+    pass and skip the AOVs, which is the sensible degradation — the passes only
+    feed an optional diffusion finish that is not built.
+    """
+    version = bpy.app.version
+    return version[0] < 5
+
+
 def wire_outputs(bpy, out_dir: str, stem: str, wanted=PASSES):
     """
     Route each pass to its own file through the compositor.
@@ -60,6 +99,18 @@ def wire_outputs(bpy, out_dir: str, stem: str, wanted=PASSES):
     the actual depth range in frame onto 0..1, which is what every
     depth-conditioned model expects.
     """
+    if not compositor_works(bpy):
+        # Loud, not silent. The previous behaviour built a correct graph in a
+        # tree nothing executes and returned a list of passes it had "wired",
+        # so every caller believed the files existed. An empty list and an
+        # explicit reason is the difference between a missing feature and a
+        # phantom one.
+        raise PassesUnavailable(
+            f"Blender {'.'.join(map(str, bpy.app.version))} cannot write "
+            "separate render passes — see compositor_works(). Run the AOV "
+            "render under Blender 4.2, or skip --aov."
+        )
+
     scene = bpy.context.scene
     scene.use_nodes = True
 
@@ -138,8 +189,8 @@ def wire_outputs(bpy, out_dir: str, stem: str, wanted=PASSES):
         offset["b"].default_value = (0.5, 0.5, 0.5, 1.0)
         file_output("normal", offset["out"], colour="RGB")
 
-    if "ao" in wanted and "AO" in layers.outputs:
-        file_output("ao", layers.outputs["AO"])
+    if "ao" in wanted and "Ambient Occlusion" in layers.outputs:
+        file_output("ao", layers.outputs["Ambient Occlusion"])
 
     return written
 

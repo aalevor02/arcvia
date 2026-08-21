@@ -23,7 +23,7 @@ from hypothesise import openings as op  # noqa: E402
 from hypothesise.pair import Face, join_corners, pair_faces  # noqa: E402
 from solve import spaces as sp  # noqa: E402
 from solve import verify as vf  # noqa: E402
-from solve.frames import segment_frames  # noqa: E402
+from solve.frames import MIN_CHANNEL, segment_frames  # noqa: E402
 
 passed = 0
 failed = 0
@@ -118,6 +118,69 @@ ok("each frame is one room's worth of walls",
    str([len(f.wall_indices) for f in frames]))
 ok("and each spans about one room",
    all(f.span < 6 for f in frames), str([round(f.span, 2) for f in frames]))
+
+
+print("\n-- frames: drawings the gutter cannot separate --")
+# The villa that prompted this. `DOWN VILLA -WD 22-1-24.dxf` draws two storeys
+# of one building 2.477 m apart on one sheet. The gutter is added to BOTH boxes,
+# so the 3.0 m default merges anything within 6.0 m and the two storeys came out
+# as one flat 505 m2 "building" with 901 m of wall — a bill of quantities for
+# something that does not exist.
+#
+# Offsets are derived from the fixture and from MIN_CHANNEL rather than written
+# as literals, so these keep testing the rule and not a pair of numbers that
+# happened to work. Two rooms offset by `d` leave a gap of `d - H + T` between
+# their centrelines.
+def _offset_for(gap: float) -> float:
+    return H - T + gap
+
+
+two_storeys = join_corners(
+    pair_faces(room_faces() + room_faces(0.0, _offset_for(MIN_CHANNEL * 2)))
+)
+frames = segment_frames(two_storeys, min_walls=3)
+ok("two plans closer than the gutter are still separated",
+   len(frames) == 2, str(len(frames)))
+ok("and each says why it was cut",
+   all("channel" in f.origin for f in frames),
+   str([f.origin for f in frames]))
+
+# The guards. A courtyard is not a gutter: the perimeter runs past it on both
+# sides, so the projection has no gap at all. This is why the test is a
+# projection and not a search for empty rectangles — an empty rectangle is
+# everywhere in a floor plan.
+one_plan = join_corners(pair_faces(room_faces()))
+ok("a single room is never cut",
+   len(segment_frames(one_plan, min_walls=3)) == 1)
+ok("and it reports that it was not cut",
+   segment_frames(one_plan, min_walls=3)[0].origin == "component")
+
+# A gap under the floor stays merged, deliberately. Two plans a metre apart are
+# indistinguishable from one plan with a wide corridor, and guessing wrong in
+# this direction merely reproduces the old behaviour rather than inventing a new
+# failure.
+tight = join_corners(
+    pair_faces(room_faces() + room_faces(0.0, _offset_for(MIN_CHANNEL * 0.8)))
+)
+ok("a gap under MIN_CHANNEL is left alone",
+   len(segment_frames(tight, min_walls=3)) == 1,
+   str(len(segment_frames(tight, min_walls=3))))
+
+# `min_walls` on BOTH sides. The villa's upper storey has a 7.73 m gap in x
+# that looks exactly like a gutter and is one stray callout line off to the
+# right — wider than the real gutter that separates the two storeys, so width
+# alone cannot tell them apart.
+with_stray = one_plan + [w for w in join_corners(pair_faces(room_faces(30.0, 0.0)))[:1]]
+ok("a stray line is not a drawing",
+   len(segment_frames(with_stray, min_walls=3)) == 1,
+   str(len(segment_frames(with_stray, min_walls=3))))
+
+# Nothing may be lost. A wall that fell into neither side of a cut would vanish
+# from every frame, and it would vanish silently.
+pieces = segment_frames(two_storeys, min_walls=3)
+ok("a cut divides the linework and does not drop any",
+   sorted(i for f in pieces for i in f.wall_indices) == list(range(len(two_storeys))),
+   f"{sum(len(f.wall_indices) for f in pieces)} of {len(two_storeys)}")
 
 
 print("\n-- openings --")
@@ -267,6 +330,48 @@ ok("an unbuildable wall thickness is BLOCKING", not bad_unit.ok,
 huge = vf.check(input_segments=40, walls=walls, spaces=spaces, openings=[],
                 unhosted=0)
 ok("a plausible model is not blocked by warnings alone", huge.ok)
+
+
+# -- The duplication accounting is invariant under the closing radius --------
+# Found by accident. `add_perimeter` emits the building envelope WHOLE, because
+# on a real drawing that ring IS the outer boundary and shrinking it destroys
+# the closure it exists to provide: measured, at R=0.50 the villa drops from 23
+# rooms to 9. But most of the ring lies on walls already drawn, so every derived
+# segment records how much of itself duplicates one.
+#
+# Sweeping R to test a rival theory produced the evidence that the accounting is
+# right: BILLABLE length held at 290-305 m across the whole sweep, a 2.5%
+# spread, while TOTAL swung 290-459 m, 58%. Subtracting duplication recovers the
+# same wall run whatever the closing radius does.
+#
+# Nobody designed a test for that, so here it is. It is the property that breaks
+# first if the duplication measurement drifts, and such a drift is invisible in
+# the geometry while doubling a bill of materials.
+print("")
+print("-- billable length is invariant under CLOSE_RADIUS --")
+from hypothesise import perimeter as _per   # noqa: E402
+
+# The room's four centrelines: 2*(4.0-0.23) + 2*(3.0-0.23) = 13.08 m.
+_TRUE_RUN = 2 * (W - T) + 2 * (H - T)
+_billables, _totals = [], []
+for _R in (1.5, 1.0, 0.75, 0.5):
+    _ws = _per.add_perimeter(walls, radius=_R)
+    _total = sum(w.length for w in _ws)
+    _totals.append(_total)
+    _billables.append(_total - sum(w.duplicate for w in _ws))
+
+_spread = (max(_billables) - min(_billables)) / max(_billables)
+ok("billable length is the same at every closing radius", _spread < 0.02,
+   f"{[round(b, 2) for b in _billables]}  spread {_spread:.1%}")
+ok("and it equals the walls actually drawn",
+   all(abs(b - _TRUE_RUN) < 0.05 for b in _billables),
+   f"{_billables[0]:.2f} vs {_TRUE_RUN:.2f}")
+ok("while TOTAL length is not invariant, which is why the two must differ",
+   (max(_totals) - min(_totals)) / max(_totals) > 0.2,
+   f"{[round(t, 2) for t in _totals]}")
+ok("anything drawn reports zero duplication",
+   all(w.duplicate == 0.0 for w in _per.add_perimeter(walls)
+       if w.layer != "<derived:perimeter>"))
 
 
 print(f"\n{passed} passed, {failed} failed")

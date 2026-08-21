@@ -45,6 +45,12 @@ MIN_PAIRED_FRACTION = 0.30
 #: A plausible building's longest plan dimension, metres.
 PLAUSIBLE_SPAN = (3.0, 400.0)
 
+#: Wall run per m2 of floor. Indian residential sits near 0.8-1.2; the band is
+#: widened to 0.6-1.6 so an unusually cellular or unusually open plan is not
+#: flagged for being unusual. Outside it, something is being double-counted or
+#: something is not closing.
+WALL_RUN_BAND = (0.6, 1.6)
+
 #: Interior walls in residential construction. Outside this, the unit is wrong
 #: or the pairing matched two unrelated lines.
 PLAUSIBLE_THICKNESS = (0.05, 0.60)
@@ -183,6 +189,36 @@ def check(
                 f"Largest room is {biggest:.1f} m2. A room that big is usually "
                 "several rooms whose dividing walls were not detected.",
                 round(biggest, 1),
+            ))
+
+    # ---- Wall run against floor area ---------------------------------------
+    # An independent check, and that is the whole point of it. Every other test
+    # here interrogates the geometry using the geometry. This compares two
+    # quantities the reconstruction derives SEPARATELY — total wall length and
+    # enclosed floor area — so a fault that flatters one of them shows up as a
+    # ratio that does not occur in real buildings.
+    #
+    # It is how the villa's compounded faults were caught from the cost side:
+    # 1.82 m/m2 before, 1.21 after, against a normal band of 0.8-1.2 for Indian
+    # residential. Neither number looks wrong alone.
+    #
+    # Billable length, not total: the derived perimeter is emitted whole so the
+    # rooms close, and counting the duplicated ring here would make a correct
+    # model look abnormal. See hypothesise/perimeter.py.
+    if spaces and walls:
+        floor = sum(s.area for s in spaces)
+        billable = sum(w.length - getattr(w, "duplicate", 0.0) for w in walls)
+        if floor > 5:
+            ratio = billable / floor
+            lo, hi = WALL_RUN_BAND
+            level = "info" if lo <= ratio <= hi else "warning"
+            v.checks.append(Check(
+                "wall-run-per-area", level,
+                f"{ratio:.2f} m of wall per m2 of floor"
+                + ("" if level == "info" else
+                   f" — outside the {lo}-{hi} band real buildings occupy. Either "
+                   "walls are being counted twice or rooms are not all closing."),
+                round(ratio, 3),
             ))
 
     # ---- Openings ----------------------------------------------------------

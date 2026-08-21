@@ -133,8 +133,14 @@ def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool) -> dict | N
     cam = place_camera(view)
     passes = []
     if want_aov:
-        passes = aov.enable(bpy)
-        aov.wire_outputs(bpy, str(out_dir), f"{stem}.{view['id']}")
+        try:
+            passes = aov.enable(bpy)
+            aov.wire_outputs(bpy, str(out_dir), f"{stem}.{view['id']}")
+        except aov.PassesUnavailable as exc:
+            # Degrade to the beauty pass rather than fail the render. The AOVs
+            # only feed an optional diffusion finish; the picture is the job.
+            print(f"ARCVIA_NO_AOV:{exc}")
+            passes = []
 
     bpy.context.scene.render.filepath = str(target)
     bpy.ops.render.render(write_still=True)

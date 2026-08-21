@@ -70,6 +70,12 @@ class Wall:
     paired: bool
     confidence: float
     layer: str = ""
+    #: Metres of this wall that lie on top of another wall already in the model.
+    #: Zero for anything read off a drawing. Non-zero only for a derived
+    #: perimeter, which is emitted whole because the geometry needs the closed
+    #: ring — see hypothesise/perimeter.py. Anything QUANTIFYING wall length
+    #: must subtract this, or it bills the same masonry twice.
+    duplicate: float = 0.0
 
     @property
     def length(self) -> float:
@@ -83,6 +89,7 @@ class Wall:
             "paired": self.paired,
             "confidence": round(self.confidence, 3),
             "layer": self.layer,
+            "duplicate": round(self.duplicate, 4),
         }
 
 
@@ -441,9 +448,16 @@ def summarise(walls: list[Wall]) -> dict:
     """What the user is being asked to accept."""
     paired = [w for w in walls if w.paired]
     thicknesses = sorted(round(w.thickness, 3) for w in paired)
+    duplicated = sum(w.duplicate for w in walls)
+    gross = sum(w.length for w in walls)
     return {
         "total": len(walls),
         "paired": len(paired),
+        # `totalLength` is what exists as geometry. `billableLength` is what may
+        # be charged for — the derived perimeter is emitted whole so the rooms
+        # close, and most of it lies on walls already counted.
+        "billableLength": round(gross - duplicated, 2),
+        "duplicateLength": round(duplicated, 2),
         "unpaired": len(walls) - len(paired),
         "totalLength": round(sum(w.length for w in walls), 2),
         "medianThickness": thicknesses[len(thicknesses) // 2] if thicknesses else None,
