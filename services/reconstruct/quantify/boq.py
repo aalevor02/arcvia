@@ -28,12 +28,35 @@ from datetime import date
 
 from .rates import RateLibrary, Rate
 
-#: Mortar as a fraction of masonry volume, for a 10 mm bed.
+#: The brick the rate library actually prices, and the bed it is laid on.
 #:
-#: The conventional take-off figure. Real consumption depends on the block and
-#: the mason; 0.30 is the number Indian estimating tables use for brickwork in
-#: cement mortar and it is stated here so it can be argued with.
-MORTAR_FRACTION = 0.30
+#: ── Why both figures are derived from these rather than asserted ────────────
+#: The first version carried MORTAR_FRACTION = 0.30 *and* a brick volume of
+#: 9.5 x 4.5 x 3.5 inches — a brick with its mortar bed already included. So the
+#: count divided a volume that had already had 30% taken out for mortar by a
+#: unit that also contained mortar, and deducted it twice. The brick count came
+#: out about a quarter low, and nothing about it looked wrong: it is a large
+#: number nobody has an instinct for, in a bill full of large numbers.
+#:
+#: Two constants that have to agree about the same physical fact will eventually
+#: stop agreeing. Deriving both from the brick and the bed makes that impossible
+#: — change either dimension and the count and the mortar volume move together.
+#:
+#: 9 x 4 x 3 inches is what `Red Clay Brick` in the library is specified as.
+BRICK_NOMINAL_M = (0.2286, 0.1016, 0.0762)
+MORTAR_BED_M = 0.010
+
+_BRICK_ONLY_M3 = BRICK_NOMINAL_M[0] * BRICK_NOMINAL_M[1] * BRICK_NOMINAL_M[2]
+_BRICK_UNIT_M3 = (
+    (BRICK_NOMINAL_M[0] + MORTAR_BED_M)
+    * (BRICK_NOMINAL_M[1] + MORTAR_BED_M)
+    * (BRICK_NOMINAL_M[2] + MORTAR_BED_M)
+)
+
+#: How much of a cubic metre of brickwork is mortar. ~23% for a 10 mm bed on
+#: this brick — close to the 0.30 the tables quote for larger beds, and derived
+#: rather than quoted so it always matches the brick above.
+MORTAR_FRACTION = 1 - (_BRICK_ONLY_M3 / _BRICK_UNIT_M3)
 
 #: Cement mortar 1:6 — bags of cement and cubic metres of sand per m3 of mortar.
 CEMENT_BAGS_PER_M3_MORTAR = 4.5
@@ -42,8 +65,25 @@ SAND_M3_PER_M3_MORTAR = 0.9
 #: Plaster, both faces, 12 mm internal.
 PLASTER_THICKNESS = 0.012
 
-#: A red clay brick with its mortar bed occupies this much. 9x4x3 inch nominal.
-BRICK_VOLUME_M3 = 0.2413 * 0.1143 * 0.0889
+#: Metres of wall per square metre of floor, outside which a bill is marked.
+#:
+#: ── An independent measurement, which is why it is worth having ─────────────
+#: Wall run and floor area are derived separately — one from the wall graph, one
+#: from the room polygons — so comparing them checks the reconstruction against
+#: itself using nothing the arithmetic here depends on. Indian residential sits
+#: around 0.8-1.2; the band is wider because an unusually cellular or unusually
+#: open plan is atypical, not wrong.
+#:
+#: It found the fault it was written for before it existed. The villa read 1.82
+#: with two storeys merged and the perimeter double-counted, and 1.21 once both
+#: were fixed — the ratio moved when neither the geometry nor the prices did.
+#:
+#: The same band and the same basis as `solve/verify.py`'s `wall-run-per-area`,
+#: on purpose. Two checks of one quantity that disagree about what is normal are
+#: worse than either alone. This one is not redundant with it: the engine's is a
+#: note on the shape, and this is a stamp that travels on the bill.
+WALL_RUN_BAND = (0.6, 1.6)
+
 
 
 @dataclass
@@ -81,6 +121,29 @@ class Costing:
     unpriced: list[Line] = field(default_factory=list)
     band: str = "base"
 
+    #: Set when the model's scale was not confirmed by more than one source.
+    #:
+    #: ── A model is a shape; a schedule is a claim ───────────────────────────
+    #: The distinction is not mine — it came from the session that owns the
+    #: reconstruction engine, and it settles where scale confidence belongs.
+    #:
+    #: A GLB at the wrong scale is a shape you can look at and say "that is not
+    #: seven metres". A bill of quantities at the wrong scale is a number
+    #: somebody orders bricks against. So the geometry is allowed through with a
+    #: warning and every figure that asserts a dimension is stamped here.
+    #:
+    #: Refusing outright was considered and rejected for a better reason than
+    #: convenience: most drawings print few dimensions an OCR can read — both
+    #: Avarana plans yielded exactly one — so a hard block would teach users to
+    #: pass a hand-typed scale, which has no provenance at all. A marked
+    #: estimate beats an unmarked assertion.
+    provisional: bool = False
+    provisional_reason: str = ""
+
+    #: Metres of wall per m2 of floor. Reported whether or not it is in band,
+    #: because a reader checking a bill wants the number, not only the verdict.
+    wall_run_per_area: float = 0.0
+
     @property
     def total(self) -> float:
         return sum(line.amount for line in self.lines)
@@ -98,12 +161,23 @@ class Costing:
         for line in self.lines:
             by_section[line.section] = by_section.get(line.section, 0.0) + line.amount
 
+        stamped = [
+            {**line.as_dict(), "provisional": self.provisional} for line in self.lines
+        ]
+
         return {
             "band": self.band,
+            # Stamped on the envelope AND on every line. A total gets copied
+            # into an email; a line gets copied into a purchase order. Marking
+            # only the envelope means the mark is lost at exactly the point the
+            # number becomes an instruction to a supplier.
+            "provisional": self.provisional,
+            "provisionalReason": self.provisional_reason,
+            "wallRunPerArea": self.wall_run_per_area,
             "total": round(self.total, 2),
             "currency": "INR",
             "bySection": {k: round(v, 2) for k, v in sorted(by_section.items())},
-            "lines": [line.as_dict() for line in self.lines],
+            "lines": stamped,
             # Never dropped. A BOQ that silently omits what it could not price
             # is a BOQ that is quietly too cheap, and the omission is invisible
             # precisely where it matters most.
@@ -134,10 +208,28 @@ def _wall_volumes(model: dict, height: float) -> tuple[float, float, float]:
         a, b = wall["a"], wall["b"]
         length = ((b["x"] - a["x"]) ** 2 + (b["y"] - a["y"]) ** 2) ** 0.5
         thickness = float(wall.get("thickness", 0.23))
-        run += length
-        volume += length * thickness * height
+
+        # Charge on the billable length, not the built length.
+        #
+        # ── Two lengths that are both correct ───────────────────────────────
+        # `add_perimeter` derives the building envelope, and on a drawing whose
+        # exterior is unpaired single lines that ring IS the outer boundary —
+        # remove it and the rooms stop closing. So the geometry needs the whole
+        # ring, and most of it lies on top of walls that were already there.
+        # Measured on the villa: 341.4 m derived, 310.8 m of it within a wall
+        # thickness of a real wall. Coincident walls render on top of each
+        # other, so nothing about the model looks wrong — and half the masonry
+        # in the bill was for wall that gets built once.
+        #
+        # `duplicate` is per segment and 0.0 for anything actually drawn, so a
+        # model predating the fix costs exactly as it did before.
+        duplicate = float(wall.get("duplicate", 0.0))
+        billable = max(length - duplicate, 0.0)
+
+        run += billable
+        volume += billable * thickness * height
         # Two faces per wall, for plaster and paint.
-        face_area += 2 * length * height
+        face_area += 2 * billable * height
 
     hole_area = 0.0
     hole_volume = 0.0
@@ -164,6 +256,60 @@ def build(
 ) -> Costing:
     """Quantities from the reconstruction, priced against the library."""
     costing = Costing(band=band)
+
+    # Scale confidence travels with the model, so the schedule inherits it
+    # without the caller having to remember to pass it. A raster import states
+    # it; a DXF has no `scale.trustworthy` key and is trusted, because a CAD
+    # drawing's units come from the file rather than from reading a photograph.
+    # The two intake paths disagree about what `scale` is: the DXF path stores a
+    # bare float (metres per drawing unit, taken from the file header), the
+    # raster path a dict carrying its own confidence. Reading it as a dict
+    # unconditionally raises on every DXF model — which would have made this
+    # check fire exclusively on the path that needs it least.
+    scale = model.get("scale")
+    scale = scale if isinstance(scale, dict) else {}
+
+    if scale.get("trustworthy") is False:
+        costing.provisional = True
+        costing.provisional_reason = (
+            scale.get("warning")
+            or "The model's scale was not confirmed against a second source."
+        )
+
+    # A model built from more than one storey on a single slab doubles every
+    # quantity below, and nothing in the arithmetic can notice. Detected by the
+    # reconstruction's own frame segmentation; surfaced here because this is
+    # where the doubling turns into an order for twice the bricks.
+    # This bill covers ONE drawing on the sheet.
+    #
+    # ── Why that needs saying out loud ──────────────────────────────────────
+    # The frame segmenter used to merge a villa's two storeys, drawn 2.48 m
+    # apart, into a single flat building — which made every quantity here about
+    # double. That is fixed: the sheet now resolves into separate frames and one
+    # of them is reconstructed.
+    #
+    # The fix moves the danger rather than removing it. A bill built from frame
+    # 0 of 8 is a bill for one storey of a two-storey house, and it is *correct*
+    # — correctly half of what the client is going to build. Nothing in the
+    # arithmetic can tell, because a single storey costed accurately looks
+    # exactly like a whole building costed accurately. Somebody quotes half a
+    # house and finds out on site.
+    frames = model.get("frames")
+    used = model.get("frameUsed")
+    index = used.get("index") if isinstance(used, dict) else used
+
+    if isinstance(frames, list) and len(frames) > 1:
+        origin = (frames[index].get("origin") if isinstance(index, int)
+                  and 0 <= index < len(frames) and isinstance(frames[index], dict)
+                  else None)
+        costing.provisional = True
+        costing.provisional_reason = (
+            f"This is drawing {(index if isinstance(index, int) else 0) + 1} of "
+            f"{len(frames)} on the sheet"
+            + (f" ({origin})" if origin else "")
+            + ". If the others are further storeys of the same building, this "
+            "bill covers one of them."
+        )
 
     def add(section, description, quantity, unit, rule, *terms, tier=None, note=""):
         rate = library.find(*terms, tier=tier)
@@ -213,23 +359,54 @@ def build(
 
     floor_area = interior_area
 
-    # ---- Masonry ------------------------------------------------------------
-    masonry_volume = volume * (1 - MORTAR_FRACTION)
+    # The shape check, before anything is priced.
+    #
+    # Deliberately last of the three provisional tests, so a model that is both
+    # off-scale and oddly proportioned reports the scale — which is the cause a
+    # user can act on, where the ratio is only ever a symptom.
+    # Every enclosed region, INCLUDING the soft landscape the bill excludes.
+    #
+    # The costing drops the lawn because nobody tiles a lawn. The ratio must not,
+    # because the wall run in the numerator still contains the compound and site
+    # walls that go round it — and dividing a site-inclusive numerator by a
+    # site-excluding denominator inflates the figure for a correct model. It read
+    # 1.94 that way against the engine's 1.21 on the same building, which is a
+    # check disagreeing with itself rather than finding anything.
+    #
+    # Same basis as `solve/verify.py`, so the two numbers are comparable. A
+    # metric is only worth a band if everyone computing it computes it the same.
+    enclosed = interior_area + paved_area + landscape_area
+    ratio = run / enclosed if enclosed > 0 else 0.0
+    if enclosed > 0 and not (WALL_RUN_BAND[0] <= ratio <= WALL_RUN_BAND[1]):
+        costing.provisional = True
+        costing.provisional_reason = costing.provisional_reason or (
+            f"This model has {ratio:.2f} m of wall per m2 of floor, outside the "
+            f"{WALL_RUN_BAND[0]}-{WALL_RUN_BAND[1]} a building normally sits in. "
+            "Either the plan is unusually cellular, or walls are being counted "
+            "more than once — check the wall run before ordering against this."
+        )
+    costing.wall_run_per_area = round(ratio, 3)
 
+    # ---- Masonry ------------------------------------------------------------
     if masonry == "brick":
+        # Divides the WHOLE wall volume, because the unit already carries its
+        # own share of the bed. Taking the mortar out first and then dividing by
+        # a unit that includes it is the double deduction described above.
         add(
             "Masonry", "Red clay brickwork",
-            masonry_volume / BRICK_VOLUME_M3, "piece",
-            f"wall volume {volume:.1f} m3, less {MORTAR_FRACTION:.0%} mortar, "
-            f"divided by brick volume {BRICK_VOLUME_M3:.5f} m3",
+            volume / _BRICK_UNIT_M3, "piece",
+            f"wall volume {volume:.1f} m3 divided by one brick plus its "
+            f"{MORTAR_BED_M * 1000:.0f} mm bed ({_BRICK_UNIT_M3:.5f} m3), "
+            f"= {1 / _BRICK_UNIT_M3:.0f} bricks/m3",
             "red clay brick",
         )
     else:
+        block_unit = (0.6 + MORTAR_BED_M) * (0.2 + MORTAR_BED_M) * (0.2 + MORTAR_BED_M)
         add(
             "Masonry", "AAC block work",
-            masonry_volume / (0.6 * 0.2 * 0.2), "piece",
-            f"wall volume {volume:.1f} m3, less {MORTAR_FRACTION:.0%} mortar, "
-            "divided by 600x200x200 block volume",
+            volume / block_unit, "piece",
+            f"wall volume {volume:.1f} m3 divided by one 600x200x200 block plus "
+            f"its bed ({block_unit:.5f} m3)",
             "aac block", "600",
         )
 
@@ -244,7 +421,10 @@ def build(
         "Masonry", "Sand for mortar",
         mortar_volume * SAND_M3_PER_M3_MORTAR, "m³",
         f"mortar {mortar_volume:.2f} m3 x {SAND_M3_PER_M3_MORTAR} m3/m3",
-        "m sand",
+        # "m sand" matched "Coarse Aggregate | 20 mm | Sand, Aggregate & Earth"
+        # under the old substring search, because the joined haystack read
+        # "...20 mm sand, aggregate...". The library's material is "M-Sand".
+        "m-sand",
     )
 
     # ---- Finishes -----------------------------------------------------------

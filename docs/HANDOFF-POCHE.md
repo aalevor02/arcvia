@@ -229,6 +229,24 @@ wall or throws away the detector's measured thickness.
 - **Do NOT exclude `*HIDDEN` layers by name.** `A1 WALLS HIDDEN` carries 838 m of the
   main wall run; excluding it cut 126 walls to 26. The name heuristic **pre-selects
   and never decides.**
+- **The frame gutter reaches TWICE its own value, and a sheet can put two plans
+  closer than that.** `segment_frames` inflates *both* wall boxes by `gutter`, so
+  `DEFAULT_GUTTER = 3.0` merges anything within **6.0 m**. The villa draws its two
+  storeys **2.477 m apart** and they merged into one flat 505 m² building with
+  901 m of wall — a bill of quantities for a building that does not exist, and it
+  passed VERIFY. No gutter value fixes it: separating them needs < 1.238 m and the
+  upper storey has a 7.73 m internal gap. `solve/frames.py` now applies a second
+  criterion — an axis-projection channel that no wall crosses — with `min_walls`
+  on both sides and a minimum side share. Read its docstring before touching it;
+  the guards each exist for a measured reason.
+- **A projection gap, not an empty rectangle.** An empty rectangle is everywhere in
+  a floor plan; a courtyard, corridor or open-plan void produces no gap in the
+  projection because walls elsewhere at the same coordinate fill the band. This is
+  why the split is a projection test. The one shape that can produce a genuine
+  projection gap inside a single drawing is a **partitions-only plan with no
+  perimeter** — the same shape `add_perimeter` exists for. Known limit, recorded
+  in the tests rather than hidden: every frame is still returned, so `--frame`
+  recovers the other half, and `Frame.origin` says whether a cut happened.
 - **Wall faces arrive fragmented.** 32% fall below the length minimum. Merge
   collinear runs *before* filtering, or the long face loses its partner.
 - `guess_item()` cannot return `tv`, `wc` or `wb` — `_MEANINGLESS` eats 2–3 letter

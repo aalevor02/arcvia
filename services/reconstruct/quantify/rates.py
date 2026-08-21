@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -84,6 +85,30 @@ class Rate:
         if not self.rate_date:
             return None
         return ((today or date.today()) - self.rate_date).days
+
+
+def _contains_phrase(haystack: str, needle: str) -> bool:
+    """
+    Does `haystack` contain `needle` as whole words?
+
+    ── The mispricing this closes ──────────────────────────────────────────────
+    Plain substring matching priced the mortar sand as coarse aggregate. Looking
+    for "m sand" found it inside "Coarse Aggregate | 20 mm | Sand, Aggregate &
+    Earth", because the concatenated haystack reads "...20 mm sand, aggregate..."
+    and "mm sand" contains "m sand". Nothing errored; the bill simply carried the
+    wrong material at the wrong rate, under the right description.
+
+    This is the same failure the asset hub's licence gate was built to avoid —
+    "CC Attribution-NonCommercial" starts with "CC Attribution" — written up
+    there at length and then reintroduced here a few hours later in a different
+    module. Substring matching over a joined haystack is worth treating as a
+    defect on sight, not a shortcut with an edge case.
+
+    Word boundaries rather than tokenisation, because the needles are phrases:
+    "kitchen sink" has to keep its order and its adjacency, which a set of tokens
+    would throw away.
+    """
+    return re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) is not None
 
 
 def _number(value: str, default: float = 0.0) -> float:
@@ -170,7 +195,7 @@ class RateLibrary:
                 continue
 
             haystack = f"{rate.material} {rate.specification} {rate.category}".lower()
-            if not all(needle in haystack for needle in needles):
+            if not all(_contains_phrase(haystack, needle) for needle in needles):
                 continue
 
             # Prefer a direct market reference over a derived estimate: one is a
