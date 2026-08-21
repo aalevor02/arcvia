@@ -376,3 +376,45 @@ export const setAccessCode = (id: string, code: string) =>
     method: 'POST',
     body: { code },
   })
+
+/**
+ * Upload a viewport capture, for a photoreal render.
+ *
+ * The snapshot arrives as a data URL because that is what a canvas produces,
+ * and the upload route wants bytes — so it is decoded here rather than making
+ * every caller do it. Sent as PNG: the capture is the *structure* an image
+ * model has to preserve, and JPEG artefacts around window frames and skirtings
+ * are exactly the detail it would otherwise smear.
+ */
+export async function uploadCapture(dataUrl: string): Promise<StoredFile> {
+  const [header, base64] = dataUrl.split(',')
+  const type = header.match(/data:([^;]+)/)?.[1] ?? 'image/png'
+
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+  const body = new FormData()
+  body.append('file', new Blob([bytes], { type }), 'view.png')
+
+  const token = getToken()
+  const response = await fetch(`${BASE}/uploads/floorplan`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  })
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  if (!response.ok) {
+    throw new ApiError(
+      typeof payload.message === 'string' ? payload.message : 'Could not upload the view.',
+      response.status,
+    )
+  }
+  // Returned as stored — a path, which is what the render route resolves.
+  return payload as unknown as StoredFile
+}
+
+/** The photoreal styles the server will accept. */
+export const renderStyles = () =>
+  request<{ styles: { id: string; name: string }[] }>('/render/styles').then((r) => r.styles)

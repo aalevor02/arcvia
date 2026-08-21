@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { db } from '../store.js'
+import { renderWithAi } from './aiRender.js'
 import { put } from './storage.js'
 
 /**
@@ -145,6 +146,29 @@ async function start(job) {
     if (status === 'done') completedToday += 1
     await db.update('renderJobs', job.id, { status, ...patch })
     drain()
+  }
+
+  // An AI render is a job in every sense that matters here — it costs money,
+  // it takes long enough to need polling, and it must be reconciled after a
+  // restart — so it runs through the same queue rather than beside it. It just
+  // makes an HTTP call instead of spawning Blender.
+  if (job.preset === 'ai') {
+    // Tracked in `running` like any other job so the daily cap, the concurrency
+    // limit and boot reconciliation all apply without special cases.
+    running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
+
+    try {
+      const outputUrl = await renderWithAi({
+        sourcePath: job.spec.inputUrl,
+        styleId: job.spec.style,
+        note: job.spec.note,
+        ownerId: job.ownerId,
+      })
+      await finish('done', { progress: 100, outputUrl, markers: { device: 'cloud' } })
+    } catch (error) {
+      await finish('failed', { error: error.message })
+    }
+    return
   }
 
   if (MODE === 'remote') {

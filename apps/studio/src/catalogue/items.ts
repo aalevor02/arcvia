@@ -37,6 +37,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 2.1, depth: 0.9, height: 0.82 },
     shape: 'sofa',
     tone: 'fabric',
+    model: {
+      url: '/models/sofa-3.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'fafzie',
+      source:
+        'https://sketchfab.com/3d-models/sofa-three-seater-aa9d48102f894cb8b38df184bed8e92d',
+      triangles: 1664,
+      yaw: 180,
+    },
   },
   {
     id: 'sofa-2',
@@ -46,6 +55,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.5, depth: 0.9, height: 0.82 },
     shape: 'sofa',
     tone: 'fabric',
+    model: {
+      url: '/models/sofa-2.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Salehin Sajid',
+      source:
+        'https://sketchfab.com/3d-models/modern-sofa-set-134ed79242174c0897588b7360d59ac1',
+      triangles: 5000,
+    },
   },
   {
     id: 'armchair',
@@ -72,6 +89,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.45, depth: 0.5, height: 0.9 },
     shape: 'chair',
     tone: 'wood',
+    model: {
+      url: '/models/dining-chair.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'MadeByYeshe',
+      source:
+        'https://sketchfab.com/3d-models/wooden-dining-chair-61837ea5c8924eb0babc89e68c1dce66',
+      triangles: 3000,
+      yaw: 180,
+    },
   },
   {
     id: 'bench',
@@ -81,6 +107,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.4, depth: 0.4, height: 0.45 },
     shape: 'box',
     tone: 'wood',
+    model: {
+      url: '/models/bench.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Hed1n',
+      source:
+        'https://sketchfab.com/3d-models/church-wooden-bench-seat-48cfb57f2dae4145ad556620e5cd6b8f',
+      triangles: 4822,
+    },
   },
 
   // ---- Tables --------------------------------------------------------------
@@ -92,6 +126,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.8, depth: 0.9, height: 0.75 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/dining-table-6.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'bezope',
+      source:
+        'https://sketchfab.com/3d-models/modern-wooden-dining-table-cb2e355c72464b5ea1d3b9e9d94b97f3',
+      triangles: 1842,
+    },
   },
   {
     id: 'dining-table-4',
@@ -101,6 +143,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.2, depth: 0.8, height: 0.75 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/dining-table-4.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'KOREA HERITAGE SERVICE [KHS]',
+      source:
+        'https://sketchfab.com/3d-models/small-dining-table-31c5cc998f1043ebb16883cac05c49f3',
+      triangles: 1212,
+    },
   },
   {
     id: 'coffee-table',
@@ -110,6 +160,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.1, depth: 0.6, height: 0.42 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/coffee-table.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'm31odyr',
+      source:
+        'https://sketchfab.com/3d-models/wooden-coffee-table-fc8a0589c58b4016b4968ad743e8639d',
+      triangles: 4632,
+    },
   },
   {
     id: 'side-table',
@@ -128,6 +186,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.4, depth: 0.7, height: 0.75 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/desk.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'bretzel44',
+      source:
+        'https://sketchfab.com/3d-models/desk-luxe-9c843e63770c44019fe33e065d17fcff',
+      triangles: 5000,
+    },
   },
 
   // ---- Beds ----------------------------------------------------------------
@@ -140,6 +206,15 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'bed',
     tone: 'fabric',
     note: '6ft × 6ft8in',
+    model: {
+      url: '/models/bed-king.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'kane_sk06',
+      source:
+        'https://sketchfab.com/3d-models/large-king-size-bed-5cbdfeb2136849acb15ca8694ab16c72',
+      triangles: 5000,
+      yaw: 180,
+    },
   },
   {
     id: 'bed-queen',
@@ -150,6 +225,15 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'bed',
     tone: 'fabric',
     note: '5ft × 6ft8in',
+    model: {
+      url: '/models/bed-queen.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Francesco Coldesina',
+      source:
+        'https://sketchfab.com/3d-models/double-bed-c505ffffc1524865ba63af837346f1f7',
+      triangles: 5000,
+      yaw: 180,
+    },
   },
   {
     id: 'bed-single',
@@ -159,6 +243,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.91, depth: 1.9, height: 0.6 },
     shape: 'bed',
     tone: 'fabric',
+    model: {
+      url: '/models/bed-single.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'rhcreations',
+      source:
+        'https://sketchfab.com/3d-models/single-bed-2-81ada0e24e1647d8a0d6d0708a696f84',
+      triangles: 3554,
+    },
   },
   {
     id: 'bedside',
@@ -168,6 +260,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.45, depth: 0.4, height: 0.55 },
     shape: 'cabinet',
     tone: 'wood',
+    model: {
+      url: '/models/bedside.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'patriciu',
+      source:
+        'https://sketchfab.com/3d-models/bedside-table-ba32c03d924943c982ece9043e9ae9cb',
+      triangles: 2000,
+    },
   },
 
   // ---- Storage -------------------------------------------------------------
@@ -179,6 +279,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.8, depth: 0.6, height: 2.1 },
     shape: 'cabinet',
     tone: 'wood',
+    model: {
+      url: '/models/wardrobe.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'BraveShadingCreations',
+      source:
+        'https://sketchfab.com/3d-models/wardrobecloset-in-low-poly-ab04fc9439554f5c94fa33bc6bbdd230',
+      triangles: 2876,
+    },
   },
   {
     id: 'wardrobe-small',
@@ -188,6 +296,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.6, height: 2.1 },
     shape: 'cabinet',
     tone: 'wood',
+    model: {
+      url: '/models/wardrobe-small.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Joel.del.Val',
+      source:
+        'https://sketchfab.com/3d-models/small-wardrobe-6240391fb70c4759bcc8cb5915dfb8d2',
+      triangles: 2040,
+    },
   },
   {
     id: 'bookshelf',
@@ -215,6 +331,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.45, height: 0.85 },
     shape: 'cabinet',
     tone: 'wood',
+    model: {
+      url: '/models/chest.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Nathan Pedreño',
+      source:
+        'https://sketchfab.com/3d-models/chest-of-drawers-dresser-b73634a9b9724d4b8e2f68cc76f2c895',
+      triangles: 1268,
+    },
   },
 
   // ---- Kitchen -------------------------------------------------------------
@@ -227,6 +351,15 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'counter',
     tone: 'stone',
     note: '600 mm deep, 900 mm high',
+    model: {
+      url: '/models/counter.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'jimbogies',
+      source:
+        'https://sketchfab.com/3d-models/basic-kitchen-cabinets-and-counter-d2918a9d978144f38012973b28eea9f6',
+      triangles: 5000,
+      yaw: 270,
+    },
   },
   {
     id: 'island',
@@ -236,6 +369,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.8, depth: 0.9, height: 0.9 },
     shape: 'counter',
     tone: 'stone',
+    model: {
+      url: '/models/island.glb',
+      licence: 'CC Attribution 4.0',
+      author: 's_ebo_l',
+      source:
+        'https://sketchfab.com/3d-models/island-kitchen-f1fb9cfb220d4b04aeda6c4e33335ac5',
+      triangles: 5000,
+    },
   },
   {
     id: 'sink-unit',
@@ -245,6 +386,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.2, depth: 0.6, height: 0.9 },
     shape: 'sink',
     tone: 'metal',
+    model: {
+      url: '/models/sink-unit.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'GrillPork',
+      source:
+        'https://sketchfab.com/3d-models/kitchen-cabinet-with-sink-a6792027730c4ac6bf13accc31f717f8',
+      triangles: 1422,
+      yaw: 180,
+    },
   },
   {
     id: 'fridge',
@@ -254,6 +404,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.7, depth: 0.7, height: 1.8 },
     shape: 'appliance',
     tone: 'metal',
+    model: {
+      url: '/models/fridge.glb',
+      licence: 'CC Attribution 4.0',
+      author: 're1monsen',
+      source:
+        'https://sketchfab.com/3d-models/heavy-duty-fridge-refrigerator-freezer-85d9e19e35bf4060a1cdb4cc132bcfa3',
+      triangles: 5000,
+    },
   },
   {
     id: 'hob',
@@ -263,6 +421,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.6, depth: 0.6, height: 0.9 },
     shape: 'appliance',
     tone: 'metal',
+    model: {
+      url: '/models/hob.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'keepiteasy',
+      source:
+        'https://sketchfab.com/3d-models/kitchen-stove-bc2003a5497a42c79c0c6097995a1971',
+      triangles: 5000,
+    },
   },
   {
     id: 'overhead',
@@ -273,6 +439,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 1.45,
     shape: 'box',
     tone: 'wood',
+    model: {
+      url: '/models/overhead.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'NRJohnson',
+      source:
+        'https://sketchfab.com/3d-models/kitchen-cabinets-east-wall-814d9a58e9a44288a37e78b5c3d3d776',
+      triangles: 5000,
+    },
   },
 
   // ---- Bathroom ------------------------------------------------------------
@@ -284,6 +458,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.38, depth: 0.7, height: 0.78 },
     shape: 'wc',
     tone: 'white',
+    model: {
+      url: '/models/wc.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Ekbercg',
+      source:
+        'https://sketchfab.com/3d-models/toilet-2b7d5c96159c42589dd970d81e877668',
+      triangles: 4999,
+      yaw: 270,
+    },
   },
   {
     id: 'basin',
@@ -294,6 +477,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 0.8,
     shape: 'basin',
     tone: 'white',
+    model: {
+      url: '/models/basin.glb',
+      licence: 'CC Attribution-ShareAlike 4.0',
+      author: 'Yaiyeondurising',
+      source:
+        'https://sketchfab.com/3d-models/memoirs-washbasinsink-579df71336a9493f8f52ddc815d2fc39',
+      triangles: 4999,
+    },
   },
   {
     id: 'bathtub',
@@ -303,6 +494,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.7, depth: 0.75, height: 0.55 },
     shape: 'tub',
     tone: 'white',
+    model: {
+      url: '/models/bathtub.glb',
+      licence: 'CC Attribution 4.0',
+      author: '3ddominator',
+      source:
+        'https://sketchfab.com/3d-models/bathtub-3350f81025974c53808a2efd2b31d4fd',
+      triangles: 5000,
+    },
   },
   {
     id: 'shower',
@@ -403,6 +602,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 0,
     shape: 'ceiling-light',
     tone: 'white',
+    model: {
+      url: '/models/ceiling-light.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Mark Peters',
+      source:
+        'https://sketchfab.com/3d-models/bar-ceiling-light-2048px2-2ba27702aabe4d37822956a2b7bf43d8',
+      triangles: 1500,
+    },
   },
   {
     id: 'pendant',
@@ -414,6 +621,14 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'pendant',
     tone: 'metal',
     note: 'Drops 700 mm',
+    model: {
+      url: '/models/pendant.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'LowKenEn',
+      source:
+        'https://sketchfab.com/3d-models/ikea-hektar-pendant-lamp-58e6e6f5fb7447489c1a8f3c6dd5f7ec',
+      triangles: 1499,
+    },
   },
   {
     id: 'wall-light',
@@ -424,6 +639,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 1.8,
     shape: 'box',
     tone: 'metal',
+    model: {
+      url: '/models/wall-light.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'dibyaranjanswain.42005',
+      source:
+        'https://sketchfab.com/3d-models/art-deco-wall-sconce-light-3eb947de8c9246debdef3ce43cd5ffcf',
+      triangles: 1860,
+    },
   },
 
   // ---- Decor ---------------------------------------------------------------
@@ -444,6 +667,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.55, depth: 0.55, height: 1.3 },
     shape: 'plant',
     tone: 'plant',
+    model: {
+      url: '/models/plant.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'ouadierifi',
+      source:
+        'https://sketchfab.com/3d-models/bird-of-paradise-plant-potted-indoor-plant-63355803f8ec4f4e84ebae2fb7d7265a',
+      triangles: 4000,
+    },
   },
   {
     id: 'tv',
@@ -455,6 +686,14 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'panel',
     tone: 'metal',
     note: '55 inch',
+    model: {
+      url: '/models/tv.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'HippoStance',
+      source:
+        'https://sketchfab.com/3d-models/flat-screen-television-f90d4fb91dd34b6791e8d66d00f96591',
+      triangles: 1499,
+    },
   },
   {
     id: 'painting',
@@ -465,6 +704,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 1.45,
     shape: 'panel',
     tone: 'wood',
+    model: {
+      url: '/models/painting.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Palmart Productions',
+      source:
+        'https://sketchfab.com/3d-models/framed-picture-for-halloween-ad676fd8116f42e5acd2a5f580f74998',
+      triangles: 624,
+    },
   },
   {
     id: 'mirror',
@@ -475,6 +722,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 1.1,
     shape: 'panel',
     tone: 'glass',
+    model: {
+      url: '/models/mirror.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'arch.lxt',
+      source:
+        'https://sketchfab.com/3d-models/classic-oval-wall-frame-61fd4acfd95f40efa2627a2c7ee6746f',
+      triangles: 1967,
+    },
   },
   {
     id: 'curtain',
@@ -485,6 +740,14 @@ export const CATALOGUE: CatalogueItem[] = [
     mountHeight: 0.05,
     shape: 'curtain',
     tone: 'fabric',
+    model: {
+      url: '/models/curtain.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Tesnime Ben Salah',
+      source:
+        'https://sketchfab.com/3d-models/curtains-3d-model-window-drapes-9056923c75684d9285e94f110d2c8a88',
+      triangles: 2000,
+    },
   },
 ]
 

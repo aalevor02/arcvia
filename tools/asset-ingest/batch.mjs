@@ -94,6 +94,34 @@ const SCENE_WORDS = [
 ]
 
 /**
+ * Styles that do not belong in a contemporary property visualisation.
+ *
+ * The scorer judges licence, poly count and name relevance, and by those
+ * measures an antique tufted Chesterfield is an excellent three-seater sofa.
+ * It is also completely wrong for a new-build flat, and a client shown one
+ * assumes the software is broken rather than that the search was.
+ *
+ * Penalised rather than excluded: a "rustic oak dining table" is a perfectly
+ * normal thing to want, and there is no rule that separates it from a
+ * "medieval banquet table" except degree. A penalty lets a strong candidate
+ * survive one stylistic word and kills the ones that are nothing else.
+ */
+const PERIOD_WORDS = [
+  'antique', 'vintage', 'victorian', 'baroque', 'rococo', 'medieval',
+  'gothic', 'ornate', 'classical', 'renaissance', 'colonial', 'rustic',
+  'retro', 'steampunk', 'fantasy', 'sci-fi', 'scifi', 'cartoon', 'stylised',
+  'stylized', 'lowpoly', 'low poly', 'toon', 'anime', 'game ready', 'ruined',
+  'broken', 'damaged', 'dirty', 'abandoned', 'horror', 'halloween',
+]
+
+/**
+ * Words that say "this was modelled for a room like the ones we render".
+ *
+ * A mild bonus, not a requirement. Plenty of good props are named plainly.
+ */
+const MODERN_WORDS = ['modern', 'contemporary', 'minimalist', 'scandinavian', 'nordic', 'ikea']
+
+/**
  * The score a candidate must reach to be worth ingesting at all.
  *
  * Tuned against a real run: good picks scored 62-86, junk 27-52. Anything
@@ -156,6 +184,15 @@ function scoreCandidate(model, term) {
 
   for (const word of SCENE_WORDS) {
     if (name.includes(word)) score -= 45
+  }
+
+  // Style. Enough to lose to a plainer candidate, not enough to disqualify
+  // outright — see PERIOD_WORDS.
+  for (const word of PERIOD_WORDS) {
+    if (name.includes(word)) score -= 30
+  }
+  for (const word of MODERN_WORDS) {
+    if (name.includes(word)) score += 8
   }
 
   return { model, score, faces, licence }

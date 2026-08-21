@@ -9,7 +9,7 @@ const API: string = import.meta.env.VITE_API_URL
   ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
   : `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
 
-export type RenderPreset = 'preview' | 'isometric' | 'full' | 'bake'
+export type RenderPreset = 'preview' | 'isometric' | 'full' | 'bake' | 'ai'
 
 export interface RenderUpdate {
   status: 'queued' | 'rendering' | 'done' | 'failed' | 'cancelled'
@@ -55,6 +55,12 @@ export async function submitRender(input: {
    * has no such channel and genuinely does need unwrapping.
    */
   prebakedUv?: boolean
+  /** A stored viewport capture. Only the 'ai' preset uses one. */
+  captureUrl?: string
+  /** Which photoreal treatment to apply. */
+  style?: string
+  /** Free text from the author, appended after the style. */
+  note?: string
 }): Promise<{ jobId: string; creditsRemaining: number }> {
   const response = await fetch(`${API}/render/jobs`, {
     method: 'POST',
@@ -65,6 +71,9 @@ export async function submitRender(input: {
       cameraPosition: input.camera.position,
       cameraRotation: input.camera.rotation,
       prebakedUv: input.prebakedUv ?? false,
+      captureUrl: input.captureUrl,
+      style: input.style,
+      note: input.note,
     }),
   })
 

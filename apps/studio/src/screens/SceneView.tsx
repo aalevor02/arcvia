@@ -5,7 +5,16 @@ import { suggestedCamera } from '../plan/buildGeometry'
 import { activeFloor } from '../plan/planStore'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import { exportForBake, loadAndApply } from '../plan/bake'
-import { uploadScene, updateScene, storedUrl, publishScene, siteOrigin, getScene } from '../lib/api'
+import {
+  uploadScene,
+  updateScene,
+  storedUrl,
+  publishScene,
+  siteOrigin,
+  getScene,
+  uploadCapture,
+  renderStyles,
+} from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
@@ -97,6 +106,18 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   /** Whether a code gates the published link, and the box for changing it. */
   const [gated, setGated] = useState(false)
   const [code, setCode] = useState('')
+  const [styles, setStyles] = useState<{ id: string; name: string }[]>([])
+  const [style, setStyle] = useState('daylight')
+  /** The last photoreal render, shown beside the viewport. */
+  const [aiImage, setAiImage] = useState<string | null>(null)
+
+  // Styles come from the server so there is one definition of what the
+  // renderer will accept, rather than a copy here that can drift out of step.
+  useEffect(() => {
+    void renderStyles()
+      .then(setStyles)
+      .catch(() => setStyles([]))
+  }, [])
 
   // Load the presentation the scene already has. Separate from the plan
   // because it is edited independently and far more often — a scene is lit
@@ -376,6 +397,57 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     }
   }
 
+  /**
+   * Photograph the current view.
+   *
+   * ── Why the capture is the input ────────────────────────────────────────
+   * The viewport image already encodes the camera, the layout, the openings
+   * and the furniture. Handing an image model the picture and telling it to
+   * change only the realism is the one arrangement that keeps the result
+   * *this* property — describing the room in a prompt instead lets the model
+   * invent, and a flat with an invented window is not the flat.
+   *
+   * It is also the thing an AI renderer on its own cannot do. Every capture
+   * comes from one dimensionally correct scene, so two views of the same
+   * kitchen agree; a diffusion model asked twice produces two kitchens.
+   */
+  async function handleAiRender() {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    setJob({ status: 'capturing', progress: 0 })
+    try {
+      setStatus('Capturing the view…')
+      // Full width: the capture is the structure the model has to preserve,
+      // and detail thrown away here cannot be recovered by the model.
+      const capture = viewer.snapshot({ width: 1536, type: 'image/png' })
+      const stored = await uploadCapture(capture)
+
+      const { jobId } = await submitRender({
+        sceneId,
+        preset: 'ai',
+        camera: viewer.cameraSpec(),
+        captureUrl: stored.url,
+        style,
+      })
+
+      setJob({ status: 'queued', progress: 0 })
+      const result = await pollRender(jobId, (update) => setJob({ ...update }))
+
+      if (result.status !== 'done' || !result.outputUrl) {
+        setStatus(result.error ?? `Photoreal render ${result.status}`)
+        return
+      }
+
+      setAiImage(storedUrl(result.outputUrl))
+      setStatus('Photoreal render ready.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Photoreal render failed')
+    } finally {
+      setJob(null)
+    }
+  }
+
   async function handleRender(preset: RenderPreset) {
     if (preset === 'bake') return handleBake()
 
@@ -531,6 +603,59 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           placing={placing}
           onPlacingChange={setPlacing}
         />
+
+        <section>
+          <span className="eyebrow">Photoreal</span>
+          <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+            Photographs the view you are looking at. The layout is kept exactly —
+            only the lighting and materials are made real.
+          </p>
+
+          <select
+            value={style}
+            onChange={(e) => setStyle(e.target.value)}
+            style={{ width: '100%', fontSize: 12 }}
+          >
+            {styles.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            className="btn"
+            style={{ width: '100%', marginTop: 6, justifyContent: 'space-between' }}
+            onClick={() => void handleAiRender()}
+            disabled={Boolean(job) || empty || styles.length === 0}
+            title={
+              styles.length === 0
+                ? 'No image provider is configured on the server'
+                : 'Render this view photorealistically'
+            }
+          >
+            <span style={{ textAlign: 'left' }}>
+              <strong style={{ display: 'block', fontSize: 12.5 }}>Photograph this view</strong>
+              <span className="muted" style={{ fontSize: 11 }}>
+                Seconds, not minutes
+              </span>
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--accent)' }}>
+              5cr
+            </span>
+          </button>
+
+          {aiImage && (
+            <a href={aiImage} target="_blank" rel="noreferrer" style={{ display: 'block', marginTop: 8 }}>
+              <img
+                src={aiImage}
+                alt="Photoreal render of the current view"
+                style={{ width: '100%', borderRadius: 6, display: 'block' }}
+              />
+              <span className="muted" style={{ fontSize: 11 }}>Open full size</span>
+            </a>
+          )}
+        </section>
 
         <section>
           <span className="eyebrow">Render</span>

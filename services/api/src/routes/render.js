@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth.js'
 import { spend, refund, InsufficientCredits } from '../lib/credits.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
 import { resolveUrl } from '../lib/storage.js'
+import { AI_STYLES, isStyle } from '../lib/aiRender.js'
 
 /**
  * Render jobs.
@@ -42,6 +43,17 @@ const PRESETS = {
     samples: 128,
     maxBounces: 8,
     diffuseBounces: 4,
+  },
+  // Photoreal stills from a viewport capture. Priced like a full still: it
+  // costs an API call rather than GPU-seconds, but it is the same thing to a
+  // user — one finished image of one camera.
+  ai: {
+    action: 'fullRender',
+    width: 0,
+    height: 0,
+    samples: 0,
+    maxBounces: 0,
+    diffuseBounces: 0,
   },
   bake: {
     action: 'lightmapBake',
@@ -91,6 +103,14 @@ export async function reconcileRenderJobs() {
 }
 
 export async function registerRenderRoutes(app) {
+  // The style list, served rather than duplicated in the client. One
+  // definition means a style added here appears in the editor without a
+  // matching change, and cannot drift out of step with what the renderer
+  // actually accepts.
+  app.get('/styles', async () => ({
+    styles: Object.entries(AI_STYLES).map(([id, style]) => ({ id, name: style.name })),
+  }))
+
   // ---- Submit a job ------------------------------------------------------
   app.post('/jobs', { preHandler: requireAuth }, async (request, reply) => {
     const {
@@ -113,7 +133,24 @@ export async function registerRenderRoutes(app) {
     if (scene.ownerId !== request.auth.userId) {
       return reply.status(403).send({ message: 'That scene is not yours.' })
     }
-    if (!scene.modelUrl) {
+    // An AI render works from a picture of the viewport, so it needs a
+    // capture rather than a saved model — a scene with no geometry saved can
+    // still be photographed.
+    const isAi = preset === 'ai'
+    const captureUrl = request.body?.captureUrl
+
+    if (isAi && !captureUrl) {
+      return reply
+        .status(400)
+        .send({ message: 'A photoreal render needs a captured view.' })
+    }
+    if (isAi && !isStyle(request.body?.style ?? 'daylight')) {
+      return reply.status(400).send({
+        message: `Unknown style. Use one of: ${Object.keys(AI_STYLES).join(', ')}.`,
+      })
+    }
+
+    if (!isAi && !scene.modelUrl) {
       return reply
         .status(409)
         .send({ message: 'Save the scene before rendering it.' })
@@ -122,7 +159,7 @@ export async function registerRenderRoutes(app) {
     // Resolved here rather than at the worker, because only this side knows
     // where the storage root is. Null means the stored URL points outside it,
     // which is not a render failure to be retried — it is a broken record.
-    const inputUrl = resolveUrl(scene.modelUrl)
+    const inputUrl = resolveUrl(isAi ? captureUrl : scene.modelUrl)
     if (!inputUrl) {
       return reply
         .status(409)
@@ -178,6 +215,9 @@ export async function registerRenderRoutes(app) {
         // Only claimed when the caller says so: a model uploaded from outside
         // the studio has no such channel and does need unwrapping.
         prebakedUv: preset === 'bake' && Boolean(request.body?.prebakedUv),
+        // Only meaningful for the AI preset, and harmless elsewhere.
+        style: request.body?.style ?? 'daylight',
+        note: typeof request.body?.note === 'string' ? request.body.note : undefined,
       },
       outputUrl: null,
       error: null,
