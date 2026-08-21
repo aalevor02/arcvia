@@ -34,7 +34,12 @@ export function walkthroughPage(project: Project, typeId: string): HTMLElement {
     h('div', { class: 'shell' }, h('p', { class: 'muted' }, 'Starting the viewer…')),
   )
 
-  void import('./walkthrough-live').then((module) => {
+  // The model view, not the first-person walk. The geometry is derived from 2D
+  // plans, so it is sound as massing but the upper levels have few enclosing
+  // walls — the drawings show open terraces, not rooms. Walking put the visitor
+  // outside the building within two steps. `walkthrough-live` is still here for
+  // any type that gets a properly enclosed model.
+  void import('./dollhouse-live').then((module) => {
     if (!host.isConnected) return
     releaseLive = module.disposeLive
     host.replaceWith(module.liveScene(type))

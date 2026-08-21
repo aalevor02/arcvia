@@ -488,30 +488,34 @@ export const casaAltinho: Project = {
         'The corner plot, and the largest villa on the site by a wide margin — half as much again as the next type. Two separate car parks, a 7.23 m family lounge and reception at stilt level, four bedrooms, and an 8.00 × 3.50 m pool off a 12.57 m open deck.',
       renders: ['villa-e1', 'aerial-day', 'villa-a-living'],
       /**
-       * Generated from the architect's 2D drawings - detached corner plot; perimeter fully drawn so the slab traces cleanly.
-       * Lighting is baked: black albedo + emissive, because glTF has no
-       * lightmap channel and a bake carried as base colour would be
-       * multiplied by the viewer's realtime lights and double-expose.
-       * See tools/cad-to-3d/README.md.
+       * Real PBR surfaces (CC0, Poly Haven) lit by the environment, plus CC0
+       * furniture placed against the room schedule. Deliberately NOT a baked
+       * lightmap: baking to emissive over black albedo renders any face the
+       * atlas misses as pure black, which is what filled the view with black
+       * slabs once furniture pushed the mesh past 40k polys.
        */
       walkthrough: {
         model: 'scenes/villa-e1.glb',
+        // A Cycles orbit rendered offline against a real sky HDRI. Real-time
+        // photoreal is not reachable from plan-derived geometry; this is.
+        film: 'scenes/villa-e1.mp4',
+        environment: 'scenes/sky.hdr',
         eyeHeight: 1.6,
         views: [
+          { id: 'living', name: 'Living area (second)', position: [3.92, 10.6, -8.42], rotation: [250, -2] },
+          { id: 'dining', name: 'Dining area (second)', position: [11.63, 10.6, -5.59], rotation: [57, -2] },
+          { id: 'deck', name: 'Open deck (second)', position: [12.05, 10.6, -2.42], rotation: [47, -2] },
+          { id: 'kitchen', name: 'Kitchen (second)', position: [15.64, 10.6, -10.29], rotation: [90, -2] },
+          { id: 'lounge', name: 'Family lounge (lower ground)', position: [8.0, 1.6, -5.01], rotation: [352, -2] },
+          { id: 'master', name: 'Master bedroom (first)', position: [14.77, 7.6, -4.68], rotation: [23, -2] },
           { id: 'bed1', name: 'Bedroom 1 (lower ground)', position: [15.4, 1.6, -4.68], rotation: [85, -2] },
           { id: 'bed2', name: 'Bedroom 2 (lower ground)', position: [1.98, 1.6, -9.47], rotation: [185, -2] },
-          { id: 'lounge', name: 'Family lounge (lower ground)', position: [8.0, 1.6, -5.01], rotation: [352, -2] },
           { id: 'foyer', name: 'Foyer (lower ground)', position: [10.76, 1.6, -10.77], rotation: [158, -2] },
           { id: 'passage', name: 'Passage (lower ground)', position: [9.54, 1.6, -10.73], rotation: [172, -2] },
           { id: 'entrance', name: 'Entrance (stilt)', position: [2.01, 4.6, -10.11], rotation: [305, -2] },
           { id: 'parking', name: 'Car parking (stilt)', position: [2.07, 4.6, -8.73], rotation: [320, -2] },
-          { id: 'master', name: 'Master bedroom (first)', position: [14.77, 7.6, -4.68], rotation: [23, -2] },
           { id: 'bed3', name: 'Bedroom 3 (first)', position: [1.78, 7.6, -9.47], rotation: [266, -2] },
           { id: 'bed4', name: 'Bedroom 4 (first)', position: [8.35, 7.6, -5.69], rotation: [334, -2] },
-          { id: 'living', name: 'Living area (second)', position: [3.92, 10.6, -8.42], rotation: [250, -2] },
-          { id: 'kitchen', name: 'Kitchen (second)', position: [15.64, 10.6, -10.29], rotation: [90, -2] },
-          { id: 'dining', name: 'Dining area (second)', position: [11.63, 10.6, -5.59], rotation: [57, -2] },
-          { id: 'deck', name: 'Open deck (second)', position: [12.05, 10.6, -2.42], rotation: [47, -2] },
         ],
       },
       floors: [

@@ -383,3 +383,31 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; letter-spacing: 0.01
   .walk-views { width: 190px; top: 12px; right: 12px; }
   .plot-card { width: 190px; }
 }
+
+/* A pre-rendered cinematic playing behind the walkthrough gate. Sits under the
+   gate's own scrim, so the heading stays readable over moving footage. */
+.walk-film {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+.walk-cover .walk-gate { position: relative; z-index: 1; }
+
+/* The gate's own scrim was tuned for a dark cover photograph. A daylight render
+   is far brighter, and the heading and button were washing out against it, so
+   the film gets its own gradient - darkest where the text sits. */
+.walk-cover:has(.walk-film)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    rgba(12, 16, 14, .12) 0%,
+    rgba(12, 16, 14, .52) 45%,
+    rgba(12, 16, 14, .68) 100%);
+  z-index: 0;
+  pointer-events: none;
+}
+.walk-cover:has(.walk-film) .walk-gate { text-shadow: 0 1px 14px rgba(0, 0, 0, .55); }

@@ -42,6 +42,15 @@ export interface VillaType {
 export interface WalkthroughScene {
   /** GLB with baked lightmaps applied. */
   model: string
+  /**
+   * A pre-rendered cinematic, if one exists.
+   *
+   * Photoreal is not reachable in real time from plan-derived geometry, but it
+   * is reachable offline: this is a Cycles orbit rendered against a real sky
+   * HDRI. Shown first, with the interactive model behind a button — the film
+   * sells the villa, the model lets someone interrogate it.
+   */
+  film?: string
   /** Equirectangular environment, if the scene uses one. */
   environment?: string
   eyeHeight: number
