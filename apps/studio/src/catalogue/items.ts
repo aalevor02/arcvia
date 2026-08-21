@@ -687,6 +687,17 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 2.4, depth: 1.7, height: 0.012 },
     shape: 'rug',
     tone: 'fabric',
+    // Twelve faces, and the texture is the whole object — which is the right
+    // shape for a rug and the reason the popular results were unusable: ranked
+    // by likes they are photogrammetry scans at 600,000 triangles for something
+    // that is geometrically a rectangle.
+    model: {
+      url: '/models/rug.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'ChoboiAssets',
+      source: 'https://sketchfab.com/3d-models/persian-carpet-4592468c03784f0d895876ec670de1cd',
+      triangles: 12,
+    },
   },
   {
     id: 'plant',

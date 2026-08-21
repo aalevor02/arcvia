@@ -227,7 +227,39 @@ def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=
         obj.data.update()
         dimensions = extent(obj)
 
-    scale = min(width / dimensions.x, depth / dimensions.y, height / dimensions.z)
+    # Fit uniformly to the tightest axis — but only across axes the model
+    # actually has.
+    #
+    # ── Why a zero extent has to be skipped rather than guarded against ────────
+    # A rug, a picture and a mirror are modelled as flat planes with no
+    # thickness at all, so one extent is exactly 0. Dividing the target
+    # thickness by it gives infinity, which `min` then ignores — but the far
+    # more common case is an extent that is merely *tiny*: a plane with 1e-5 of
+    # numerical thickness divides a 12 mm target into a scale factor of 0.006
+    # and the object arrives a centimetre across. Nothing errors. The GLB is
+    # valid. The rug is simply the size of a postage stamp, which reads as a
+    # loading bug rather than a scaling one.
+    #
+    # An axis the model has no size on carries no information about how big the
+    # model should be, so it takes no part in the decision. `EPSILON` is
+    # relative to the largest extent, because "flat" is a proportion and not a
+    # measurement — a 40 m site plan and a 2 cm tile are both flat at their own
+    # scale.
+    EPSILON = 1e-4
+    largest = max(dimensions.x, dimensions.y, dimensions.z)
+    fits = []
+    for target, extent_on_axis in (
+        (width, dimensions.x),
+        (depth, dimensions.y),
+        (height, dimensions.z),
+    ):
+        if extent_on_axis > largest * EPSILON:
+            fits.append(target / extent_on_axis)
+
+    if not fits:
+        raise SystemExit("The model has no measurable size on any axis.")
+
+    scale = min(fits)
     obj.scale = (scale, scale, scale)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
