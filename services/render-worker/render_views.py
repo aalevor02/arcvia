@@ -124,6 +124,77 @@ def place_camera(view: dict):
     return cam
 
 
+#: A frame this blown out, or with this few distinct tones, is not a picture of
+#: anything. Both thresholds are measured, not chosen — see `inspect_frame`.
+BLOWN_LIMIT = 0.60
+MIN_TONES = 64
+
+#: Read every Nth pixel. The statistics below are proportions, and 130k samples
+#: settle them to well under a percent, which is far finer than the thresholds
+#: care about. Reading all 921,600 costs seconds per frame on an orbit.
+SAMPLE_STRIDE = 7
+
+
+def inspect_frame(path: Path) -> dict:
+    """
+    Is this frame a picture, or a blank rectangle that rendered successfully?
+
+    ── Why this is not another near-black check ─────────────────────────────
+    Every validity test in this repository looks for BLACK, because a black
+    frame is what a broken render produced the last several times. A blank WHITE
+    frame passes all of them: it is not near-black, a PNG exists, the process
+    returned 0, and ARCVIA_OUTPUT was printed. Measured on the villa's interiors
+    at photoreal, five of fourteen came back over 70% blown and three were
+    effectively blank — one TOILET at 100%, with seven distinct grey values in
+    921,600 pixels — and nothing anywhere noticed.
+
+    Blown-ness alone is not enough either. The same view under `clay` is not
+    blown at all and still carries only 13 tones, because the camera is aimed at
+    a featureless wall. A frame can fail by being too bright or by having nothing
+    in it, and those are different faults with different owners: exposure
+    belongs to the style, aim belongs to the camera solver.
+
+    Reported, never fatal. A blown frame is still a rendered frame, and the
+    caller is better placed than this script to decide whether to keep it.
+    """
+    try:
+        img = bpy.data.images.load(str(path))
+    except Exception as exc:                      # noqa: BLE001
+        return {"error": str(exc)}
+
+    try:
+        px = img.pixels[:]
+        count = len(px) // 4
+        if not count:
+            return {"error": "no pixels"}
+
+        dark = blown = seen = 0
+        tones = set()
+        for i in range(0, count, SAMPLE_STRIDE):
+            base = i * 4
+            lin = (0.2126 * px[base] + 0.7152 * px[base + 1]
+                   + 0.0722 * px[base + 2])
+            # Blender's buffer is linear; the thresholds are stated in the sRGB
+            # values a person reads off the image.
+            srgb = (1.055 * (max(lin, 0.0) ** (1 / 2.4)) - 0.055
+                    if lin > 0.0031308 else lin * 12.92)
+            tone = max(0, min(255, int(srgb * 255 + 0.5)))
+            tones.add(tone)
+            seen += 1
+            if tone <= 8:
+                dark += 1
+            elif tone >= 250:
+                blown += 1
+
+        return {
+            "black": round(dark / seen, 4),
+            "blown": round(blown / seen, 4),
+            "tones": len(tones),
+        }
+    finally:
+        bpy.data.images.remove(img)
+
+
 def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool) -> dict | None:
     target = out_dir / f"{stem}.{view['id']}.png"
     if target.exists():
@@ -152,10 +223,21 @@ def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool) -> dict | N
         print(f"ARCVIA_ERROR: {view['id']} rendered nothing.")
         return None
 
+    stats = inspect_frame(target)
+    suspect = []
+    if stats.get("blown", 0) >= BLOWN_LIMIT:
+        suspect.append(f"{stats['blown'] * 100:.0f}% blown out")
+    if stats.get("tones", 999) < MIN_TONES:
+        suspect.append(f"only {stats['tones']} distinct tones")
+    if suspect:
+        # Not an error. The frame rendered, and something upstream — exposure on
+        # this style, or where the camera is pointing — made it carry nothing.
+        print(f"ARCVIA_SUSPECT:{view['id']} {'; '.join(suspect)}")
+
     print(f"ARCVIA_OUTPUT:{target}")
     return {
         "view": view["id"], "path": str(target), "skipped": False,
-        "passes": passes,
+        "passes": passes, "frame": stats, "suspect": suspect,
     }
 
 
