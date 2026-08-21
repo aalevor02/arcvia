@@ -281,5 +281,49 @@ const wallMeshes = (plan: Plan) =>
     String(Object.keys(activeFloor(withWall).walls).length))
 }
 
-console.log(`\n${passed} passed, ${failed} failed`)
+
+// ---- Facing ----------------------------------------------------------------
+// A chair facing a wall reads as broken far more loudly than a chair at a
+// slightly odd angle, so a floor object puts its back to the nearest wall.
+//
+// The convention under test: an object at rotation r faces plan direction
+// (-sin r, -cos r), so r = 0 faces -y. Get a sign wrong anywhere in that chain
+// and every piece of furniture in every project turns around at once, with
+// nothing else noticing.
+{
+  const floor = activeFloor(oneWall()) // a 6 m wall along y = 0
+  const facing = (r: number) => ({ x: -Math.sin(r), y: -Math.cos(r) })
+
+  const beside = resolvePlacement(floor, itemById('sofa-3')!, { x: 3, y: 0.4 })
+  const f1 = facing(beside.rotation)
+  check(
+    'a floor object by a wall turns its back to it',
+    near(f1.y, 1, 0.02) && near(f1.x, 0, 0.02),
+    `(${f1.x.toFixed(2)}, ${f1.y.toFixed(2)})`,
+  )
+
+  // The other side of the same wall must face the other way, or the rule is
+  // "always north" rather than "away from the wall".
+  const other = resolvePlacement(floor, itemById('sofa-3')!, { x: 3, y: -0.4 })
+  const f2 = facing(other.rotation)
+  check(
+    'and the far side of that wall faces the opposite way',
+    near(f2.y, -1, 0.02),
+    `(${f2.x.toFixed(2)}, ${f2.y.toFixed(2)})`,
+  )
+
+  const middle = resolvePlacement(floor, itemById('sofa-3')!, { x: 3, y: 4 })
+  check(
+    'an object with no wall near it is left square to the plan',
+    middle.rotation === 0,
+    String(middle.rotation),
+  )
+
+  // A pendant looks the same from every side; spinning it is noise.
+  const pendant = resolvePlacement(floor, itemById('pendant')!, { x: 3, y: 0.4 })
+  check('a ceiling object is not oriented', pendant.rotation === 0)
+}
+
+console.log(`
+${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

@@ -240,6 +240,95 @@ def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=
     }
 
 
+def detect_facing(obj) -> dict:
+    """
+    Work out which way the model faces, and how far to turn it.
+
+    ── Why this has to be automatic ────────────────────────────────────────────
+    A GLB records no notion of "front". One armchair is modelled facing -Y, the
+    next facing +X, and the catalogue's builders all draw their subject facing
+    local +Z. Somebody has to reconcile the two, and it cannot be a person: a
+    library of two hundred assets is two hundred judgement calls, and the whole
+    point of an ingest pipeline is that it runs without one.
+
+    ── The signal ──────────────────────────────────────────────────────────────
+    Furniture with a front nearly always has a *tall back*. A sofa's backrest, a
+    bed's headboard, a wardrobe's carcass, a bookshelf's panel, an armchair's
+    rest — in every case the side meant to go against a wall carries more height
+    than the side you approach from. So: divide the footprint into four outer
+    slabs, measure the mean height of the vertices in each, and the tallest slab
+    is the back.
+
+    It is a heuristic and it is honest about that. `confidence` is how much
+    taller the back is than the opposite side, as a fraction; a symmetric object
+    — a dining table, a rug, a plant — scores near zero, and near zero means
+    "leave it alone" rather than "spin it arbitrarily". A wrong guess on a
+    symmetric object is invisible; a wrong guess on a chair is not, and the
+    chairs are exactly the ones with a strong signal.
+    """
+    mesh = obj.data
+    count = len(mesh.vertices)
+    if count == 0:
+        return {"yaw": 0, "confidence": 0.0, "back": "none"}
+
+    coords = array.array("f", [0.0]) * (count * 3)
+    mesh.vertices.foreach_get("co", coords)
+
+    xs = coords[0::3]
+    ys = coords[1::3]
+    zs = coords[2::3]
+
+    low_x, high_x = min(xs), max(xs)
+    low_y, high_y = min(ys), max(ys)
+    low_z, high_z = min(zs), max(zs)
+
+    span_x = high_x - low_x
+    span_y = high_y - low_y
+    if span_x <= 0 or span_y <= 0 or high_z - low_z <= 0:
+        return {"yaw": 0, "confidence": 0.0, "back": "degenerate"}
+
+    # The outer quarter on each side. Wide enough to catch a backrest, narrow
+    # enough that a seat cushion in the middle does not dominate it.
+    band = 0.25
+
+    def mean_height(predicate) -> float:
+        total = 0.0
+        seen = 0
+        for i in range(count):
+            if predicate(xs[i], ys[i]):
+                total += zs[i] - low_z
+                seen += 1
+        return total / seen if seen else 0.0
+
+    sides = {
+        # Blender is Z-up here and glTF export flips to Y-up, so the model's
+        # -Y is what becomes -Z in the viewer: the direction a builder puts a
+        # backrest. Naming them by the viewer's axes avoids a second inversion
+        # later.
+        "back": mean_height(lambda x, y: y <= low_y + span_y * band),
+        "front": mean_height(lambda x, y: y >= high_y - span_y * band),
+        "left": mean_height(lambda x, y: x <= low_x + span_x * band),
+        "right": mean_height(lambda x, y: x >= high_x - span_x * band),
+    }
+
+    tallest = max(sides, key=sides.get)
+    opposite = {"back": "front", "front": "back", "left": "right", "right": "left"}[tallest]
+
+    highest = sides[tallest]
+    confidence = 0.0 if highest <= 0 else (highest - sides[opposite]) / highest
+
+    # Below this the object is effectively symmetric and any rotation is a coin
+    # toss. Leaving it at zero at least keeps it square to the plan, which is
+    # predictable and trivially correctable.
+    if confidence < 0.18:
+        return {"yaw": 0, "confidence": round(confidence, 3), "back": "ambiguous"}
+
+    # Degrees to turn the model so its tall side ends up at the back.
+    yaw = {"back": 0, "right": 90, "front": 180, "left": 270}[tallest]
+
+    return {"yaw": yaw, "confidence": round(confidence, 3), "back": tallest}
+
+
 def decimate(obj, budget: int) -> dict:
     """
     Bring the triangle count down to budget.
@@ -303,6 +392,9 @@ def main() -> int:
 
     report = {"input": args.input, "output": args.output}
     report["placement"] = orient_and_fit(obj, args.width, args.depth, args.height, args.rotate)
+    # Before decimation: the heuristic reads vertex heights, and collapsing the
+    # mesh first would blur exactly the silhouette it is measuring.
+    report["facing"] = detect_facing(obj)
     report["decimate"] = decimate(obj, args.budget)
     report["textures"] = shrink_textures(args.max_texture)
 

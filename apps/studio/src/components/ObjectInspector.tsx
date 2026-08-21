@@ -105,6 +105,35 @@ export function ObjectInspector({ object, units, onChange, onRemove }: Props) {
         />
       </label>
 
+      {/*
+        Quarter turns, next to the slider rather than instead of it.
+
+        Furniture is square to the room the overwhelming majority of the time,
+        and hitting exactly 90° on a 5°-step slider is a fiddle for the case
+        that comes up most. The slider stays for the angled sofa in the bay
+        window, which is the case it is actually good at.
+      */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        {([
+          ['⟲ 90°', -Math.PI / 2],
+          ['⟳ 90°', Math.PI / 2],
+          ['180°', Math.PI],
+        ] as const).map(([label, delta]) => (
+          <button
+            key={label}
+            className="btn btn-tiny"
+            style={{ flex: 1 }}
+            onClick={() => {
+              // Normalised, so the slider and the readout never show 450°.
+              const next = (object.rotation + delta) % (Math.PI * 2)
+              onChange({ rotation: next < 0 ? next + Math.PI * 2 : next })
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {isDoor && (
         <>
           <div className="segmented">

@@ -138,12 +138,31 @@ export function upgradeModels(
       | undefined
     if (!size) return
 
+    // The asset's own facing correction, applied to the instance rather than
+    // to the placement — it describes the model, not where the user put it, so
+    // it must survive the object being rotated.
+    const yaw = Number(child.userData.modelYaw ?? 0)
+
     pending.push(
       prototype(url).then((loaded) => {
         if (!loaded) return false
 
         const instance = loaded.clone(true)
         fit(instance, size)
+        if (yaw !== 0) {
+          // Wrapped, so the correction turns the model about its own centre
+          // *after* fitting has seated it. Rotating the fitted object directly
+          // would swing it around the group origin and slide it across the
+          // floor.
+          const holder = new THREE.Group()
+          holder.add(instance)
+          holder.rotation.y = (yaw * Math.PI) / 180
+          child.clear()
+          child.add(holder)
+          child.userData.upgraded = true
+          onSwap?.()
+          return true
+        }
 
         instance.traverse((mesh) => {
           if (!(mesh instanceof THREE.Mesh)) return

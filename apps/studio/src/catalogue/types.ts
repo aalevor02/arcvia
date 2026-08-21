@@ -94,6 +94,25 @@ export interface AssetModel {
   source: string
   /** Triangles after conditioning, so a scene's budget can be reasoned about. */
   triangles?: number
+  /**
+   * Degrees to turn the model so its front faces the same way the stand-in's
+   * front does.
+   *
+   * ── Why this cannot be derived ──────────────────────────────────────────
+   * A placed object's `rotation` says which way it should face *in the room*.
+   * It cannot say which way the *model* faces, because that is a decision the
+   * original author made and did not record: one armchair is modelled facing
+   * -Z, the next facing +X, and nothing in a GLB distinguishes the front of a
+   * chair from its back.
+   *
+   * Guessing is worse than asking. The tallest-side heuristic — a backrest is
+   * higher than a seat front — works on armchairs and fails on wardrobes,
+   * beds, and anything symmetrical, and a wrong guess is indistinguishable
+   * from a wrong rotation to whoever has to fix it.
+   *
+   * So it is one number, set once per asset, by eye. Zero is the common case.
+   */
+  yaw?: number
 }
 
 /** An instance of a catalogue item, placed on a floor. */

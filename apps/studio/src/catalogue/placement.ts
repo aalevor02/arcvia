@@ -74,13 +74,70 @@ export function nearestWall(floor: Floor, point: Vec2, within: number): WallHit 
  * dropping a door in the middle of a room would produce a door-shaped object
  * floating in space with no hole, which is worse than saying no.
  */
+/**
+ * The rotation that makes an object face a given direction in plan space.
+ *
+ * ── The convention, derived once ────────────────────────────────────────────
+ * Every builder draws its subject facing local +Z: a sofa's backrest sits at
+ * -Z, a bed's headboard at -Z, a wardrobe's doors at +Z. Geometry is placed
+ * with `group.rotation.y = -object.rotation`, and plan (x, y) maps to world
+ * (x, _, -y).
+ *
+ * Composing those, an object at rotation r faces plan direction
+ * `(-sin r, -cos r)`. Inverting gives this. At r = 0 an object faces -y, which
+ * is "south" on the plan and is why an unrotated sofa in an empty room has its
+ * back to the top of the screen.
+ */
+export function rotationFacing(direction: Vec2): number {
+  return Math.atan2(-direction.x, -direction.y)
+}
+
+/**
+ * Put the back of a floor object against the nearest wall.
+ *
+ * ── Why this is worth doing automatically ───────────────────────────────────
+ * Almost all floor furniture has a back that belongs against something: a sofa,
+ * a bed's headboard, a wardrobe, a bookshelf, a TV unit. Dropping one at
+ * rotation 0 regardless leaves it facing whichever way the builder happened to
+ * draw it, which is a wall about half the time — and a chair facing a wall
+ * reads as broken far more loudly than a chair at a slightly odd angle.
+ *
+ * Beyond `WALL_SNAP_DISTANCE` nothing is inferred. An object in the middle of
+ * a room has no wall it is "against", and guessing an orientation there is
+ * worse than leaving it square to the plan, which is at least predictable.
+ *
+ * Symmetric objects — a dining table, a rug, a coffee table — are unharmed by
+ * this, so it is not worth a per-item flag to exclude them.
+ */
+export function facingIntoRoom(floor: Floor, point: Vec2): number {
+  const hit = nearestWall(floor, point, WALL_SNAP_DISTANCE)
+  if (!hit) return 0
+
+  // From the wall towards the object: the way it should look.
+  const away = { x: point.x - hit.point.x, y: point.y - hit.point.y }
+  const length = Math.hypot(away.x, away.y)
+
+  // Dropped exactly on the centreline, so there is no "away" to compute. The
+  // wall's own direction is the best remaining guess and is at least parallel
+  // to it rather than into it.
+  if (length < 1e-6) return Math.atan2(hit.along.y, hit.along.x)
+
+  return rotationFacing({ x: away.x / length, y: away.y / length })
+}
+
 export function resolvePlacement(
   floor: Floor,
   item: CatalogueItem,
   point: Vec2,
 ): Placement {
-  if (item.placement === 'floor' || item.placement === 'ceiling') {
+  // A ceiling object has no meaningful facing — a pendant looks the same from
+  // every side — so only floor objects are oriented.
+  if (item.placement === 'ceiling') {
     return { position: point, rotation: 0 }
+  }
+
+  if (item.placement === 'floor') {
+    return { position: point, rotation: facingIntoRoom(floor, point) }
   }
 
   const hit = nearestWall(floor, point, WALL_SNAP_DISTANCE)

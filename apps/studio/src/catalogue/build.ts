@@ -334,6 +334,9 @@ export function buildObject(object: PlacedObject, floorElevation: number): THREE
   if (modelUrl) {
     group.userData.modelUrl = modelUrl
     group.userData.modelSize = size
+    // Only meaningful for a catalogue model. A per-placement `customUrl` is
+    // somebody else's file and the catalogue has no idea which way it faces.
+    group.userData.modelYaw = object.customUrl ? 0 : (item.model?.yaw ?? 0)
   }
 
   // plan (x, y) -> world (x, elevation, -y), the same mapping walls use.

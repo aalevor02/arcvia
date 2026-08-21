@@ -210,6 +210,20 @@ console.log(
 )
 console.log(`size     : ${conditioned.placement.size.join(' × ')} m` +
   (conditioned.placement.rotated ? ' (stood upright)' : ''))
+
+const facing = conditioned.facing ?? { yaw: 0, confidence: 0, back: 'unknown' }
+console.log(
+  `facing   : back is ${facing.back}, yaw ${facing.yaw}° ` +
+    `(confidence ${(facing.confidence * 100).toFixed(0)}%)`,
+)
+if (facing.back === 'ambiguous') {
+  console.warn(
+    '           too symmetric to call — left unrotated. If it faces the wrong',
+  )
+  console.warn(
+    '           way in the editor, set yaw by hand in the catalogue entry.',
+  )
+}
 console.log(`written  : ${output} (${(conditioned.bytes / 1024).toFixed(0)} KB)`)
 
 // Printed rather than written into items.ts. Editing source from a script is
@@ -226,6 +240,7 @@ console.log(
           author: info.user?.displayName ?? info.user?.username ?? 'Unknown',
           source: info.viewerUrl ?? `https://sketchfab.com/3d-models/${options.uid}`,
           triangles: conditioned.decimate.after,
+          ...(facing.yaw ? { yaw: facing.yaw } : {}),
         },
       },
       null,
