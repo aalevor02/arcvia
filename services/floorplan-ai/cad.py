@@ -375,3 +375,154 @@ def walls_from(reading: dict, chosen: list[str], min_length: float = 0.3) -> lis
             }
         )
     return out
+
+
+# ---- Furniture ----------------------------------------------------------------
+
+#: Block-name fragments that map onto catalogue items.
+#:
+#: Architects abbreviate ruthlessly and inconsistently — one real drawing uses
+#: `SI SOFA`, `3 ST SOFA`, `C TAB`, `SID TAB 1`, `D750`, `Tltw`. Alongside those
+#: sit `A$C00566C6E`, `VXCBX`, `dfgfg` and `tytyt`, which mean nothing to anyone.
+#:
+#: So this is a best guess over a messy vocabulary, not a lookup table. What
+#: makes it worth having anyway is leverage: a block is *placed* many times —
+#: 28 sofas, 88 doors — so recognising one name places dozens of objects, and
+#: the names it cannot read become a short list somebody maps once.
+_BLOCK_HINTS = [
+    # Longest and most specific first: "3 ST SOFA" must not be caught by "sofa"
+    # before it has a chance to match the three-seater.
+    (("3 st sofa", "3st sofa", "3 seat", "sofa 3"), "sofa-3"),
+    (("2 st sofa", "2 seat", "loveseat"), "sofa-2"),
+    (("si sofa", "sig sf", "single sofa", "armchair", "arm chair"), "armchair"),
+    (("sofa", "settee", "couch"), "sofa-3"),
+    (("c tab", "coffee tab", "ctable"), "coffee-table"),
+    (("sid tab", "side tab", "end tab"), "side-table"),
+    (("din tab", "dining tab", "dining table", "d table"), "dining-table-6"),
+    (("king bed", "bed king"), "bed-king"),
+    (("queen bed", "double bed", "bed 1", "bed1", "d bed"), "bed-queen"),
+    (("single bed", "s bed"), "bed-single"),
+    (("bed",), "bed-queen"),
+    (("bed side", "bedside", "night stand", "nightstand", "n tab"), "bedside"),
+    (("wardrobe", "ward", "closet", "almirah"), "wardrobe"),
+    (("book", "shelf", "shelv"), "bookshelf"),
+    (("tv unit", "tv cab", "media"), "tv-unit"),
+    (("tv", "television"), "tv"),
+    (("dress", "chest", "drawer"), "chest"),
+    (("wc", "toilet", "tltw", "closet pan", "ewc"), "wc"),
+    (("wash basin", "basin", "wb", "lavatory"), "basin"),
+    (("bath tub", "bathtub", "tub"), "bathtub"),
+    (("shower", "cubicle"), "shower"),
+    (("plant", "pot", "shrub", "tree"), "plant"),
+    (("chair", "ch "), "dining-chair"),
+    (("stove", "hob", "cook"), "hob"),
+    (("fridge", "refrig"), "fridge"),
+    (("sink",), "sink-unit"),
+    (("mirror",), "mirror"),
+    (("rug", "carpet"), "rug"),
+    (("curtain", "drape"), "curtain"),
+]
+
+#: Names that carry no meaning and should not be guessed at.
+#:
+#: AutoCAD's anonymous blocks (`A$C…`) and the keyboard-mash names that survive
+#: in every production drawing. Offering a guess for `dfgfg` would be worse than
+#: admitting ignorance, because a wrong guess gets accepted without thought.
+_MEANINGLESS = re.compile(
+    r"^a\$c[0-9a-f]+$"  # AutoCAD anonymous blocks
+    r"|^[a-z]{1,3}\d*$"  # two or three letters and a number: ewa, TC, 70
+    r"|^([a-z])\1{2,}",  # the same letter three times: a keyboard held down
+    re.I,
+)
+
+
+#: A door or window named by its width: `D750`, `W1200`, `D-900`.
+#:
+#: Worth handling before anything else because these are the most numerous
+#: blocks in any drawing by a wide margin — one real plan has 88 placements of
+#: `D750` alone, more than the next three blocks combined — and because the
+#: number is not decoration. It is the leaf width in millimetres, which is
+#: exactly the dimension the catalogue wants.
+_SIZED_OPENING = re.compile(r"^([dw])[\s\-_]?(\d{3,4})$", re.I)
+
+
+def guess_item(block: str) -> str | None:
+    """The catalogue item a block name probably refers to, or None."""
+    name = block.strip().lower()
+    if not name:
+        return None
+
+    # Ahead of the meaningless check, which would otherwise reject `D750` as
+    # "a letter and some digits" — the shape it shares with genuine noise.
+    sized = _SIZED_OPENING.match(name)
+    if sized:
+        width_mm = int(sized.group(2))
+        if 500 <= width_mm <= 3000:
+            return "door" if sized.group(1).lower() == "d" else "window"
+
+    if _MEANINGLESS.match(name):
+        return None
+
+    for fragments, item in _BLOCK_HINTS:
+        if any(fragment in name for fragment in fragments):
+            return item
+    return None
+
+
+def furniture(path: str, reading: dict, ignore_layers: list | None = None) -> dict:
+    """
+    Every block placement in the drawing, positioned and guessed at.
+
+    ── Why this is worth far more than recognising furniture in an image ───────
+    A block reference carries an exact position, rotation and scale, put there
+    by the architect. There is nothing to detect and nothing to infer: the sofa
+    is where the drawing says the sofa is. Image recognition on a floor plan is
+    guessing at a picture of the same information, badly.
+
+    The mapping is the only uncertain part, and it is uncertain in a way that
+    costs almost nothing: one name maps to many placements, so a handful of
+    decisions places hundreds of objects, and anything unmapped stays out of the
+    scene rather than becoming a wrong object.
+    """
+    doc, _ = recover.readfile(path)
+    msp = doc.modelspace()
+
+    scale = reading["scale"]
+    ox, oy = reading["_origin"]
+    skip = set(ignore_layers or [])
+
+    placements: list[dict] = []
+    blocks: dict[str, dict] = {}
+
+    for insert in msp.query("INSERT"):
+        name = str(insert.dxf.name)
+        layer = str(insert.dxf.layer)
+        if layer in skip:
+            continue
+
+        summary = blocks.setdefault(
+            name,
+            {"name": name, "count": 0, "item": guess_item(name), "layer": layer},
+        )
+        summary["count"] += 1
+
+        point = insert.dxf.insert
+        placements.append(
+            {
+                "block": name,
+                "layer": layer,
+                "position": {
+                    "x": round((point.x - ox) * scale, 4),
+                    "y": round((point.y - oy) * scale, 4),
+                },
+                # DXF rotation is degrees counter-clockwise; the plan model uses
+                # radians in the same direction, so this is a unit change only.
+                "rotation": round(math.radians(float(insert.dxf.rotation or 0.0)), 5),
+            }
+        )
+
+    return {
+        "blocks": sorted(blocks.values(), key=lambda b: -b["count"]),
+        "placements": placements,
+        "recognised": sum(1 for p in placements if blocks[p["block"]]["item"]),
+    }
