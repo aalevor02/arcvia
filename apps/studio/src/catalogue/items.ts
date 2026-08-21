@@ -177,6 +177,13 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.45, depth: 0.45, height: 0.55 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/side-table.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'Rico Cilliers',
+      source: 'https://polyhaven.com/a/side_table_01',
+      triangles: 2756,
+    },
   },
   {
     id: 'desk',
@@ -313,6 +320,13 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.32, height: 1.8 },
     shape: 'shelf',
     tone: 'wood',
+    model: {
+      url: '/models/bookshelf.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'Rico Cilliers',
+      source: 'https://polyhaven.com/a/Shelf_01',
+      triangles: 182,
+    },
   },
   {
     id: 'tv-unit',
@@ -322,6 +336,13 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.6, depth: 0.4, height: 0.5 },
     shape: 'cabinet',
     tone: 'wood',
+    model: {
+      url: '/models/tv-unit.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'Jorge Camacho',
+      source: 'https://polyhaven.com/a/chinese_console_table',
+      triangles: 6000,
+    },
   },
   {
     id: 'chest',
@@ -511,6 +532,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.9, height: 2.0 },
     shape: 'shower',
     tone: 'glass',
+    model: {
+      url: '/models/shower.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'allenbranch',
+      source:
+        'https://sketchfab.com/3d-models/dream-line-french-corner-shower-enclosure-c48c05b0877a4ebf89ca92615519640c',
+      triangles: 414,
+    },
   },
 
   // ---- Doors & windows -----------------------------------------------------

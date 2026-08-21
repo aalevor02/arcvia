@@ -50,7 +50,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=float, required=True)
     # Textures at 4K are common and pointless on a chair seen from two metres
     # away in a room lit by a baked atlas.
-    parser.add_argument("--max-texture", type=int, default=1024)
+    # 512, not 1024. These are seen from across a room, in a scene whose
+    # lighting comes from a baked atlas rather than from the texture — and every
+    # one of them is downloaded by every visitor to the published walkthrough.
+    # Raise it for a hero object somebody will stand next to.
+    parser.add_argument("--max-texture", type=int, default=512)
     # Override the up-axis guess. The guess is deliberately conservative, so
     # this is how a genuinely lying-down asset gets stood up.
     parser.add_argument("--rotate", dest="rotate", action="store_true", default=None)
@@ -407,7 +411,18 @@ def main() -> int:
         use_selection=True,
         # Textures travel inside the GLB: a catalogue asset is one file or it is
         # a file that arrives without its maps.
-        export_image_format="AUTO",
+        # WEBP, not AUTO.
+        #
+        # AUTO keeps PNG wherever a texture has alpha, and PNG is lossless —
+        # which for a photographed wood grain means enormous. A conditioned
+        # fridge came out at 8.8 MB against about 5,000 triangles: essentially
+        # all of it was texture, on a catalogue that had reached 76 MB.
+        #
+        # WEBP handles alpha, so it does not force the trade JPEG does, and at
+        # quality 80 a furniture albedo is visually identical at a fraction of
+        # the size. Universally supported by anything that can run WebGL 2.
+        export_image_format="WEBP",
+        export_image_quality=80,
         export_yup=True,
         # Nothing here animates, and skins and morphs on a static prop are
         # bytes shipped to every visitor for no reason.
