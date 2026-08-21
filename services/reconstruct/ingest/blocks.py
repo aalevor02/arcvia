@@ -26,6 +26,7 @@ None of this is inference. Every number is read off the file.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 import ezdxf
@@ -121,6 +122,101 @@ def room_labels(doc, scale: float, origin: tuple[float, float]) -> list[RoomLabe
 
         out.append(
             RoomLabel(x=(point.x - ox) * scale, y=(point.y - oy) * scale, text=text)
+        )
+
+    return out
+
+
+#: Text that names a DRAWING rather than a room: "GROUND FLOOR PLAN".
+_PLAN_TITLE = re.compile(r"\bplans?\b", re.I)
+
+
+def _char_height(entity) -> float:
+    """Text height, whichever of the two names this entity type uses."""
+    for attr in ("height", "char_height"):
+        value = getattr(entity.dxf, attr, None)
+        if value:
+            return float(value)
+    return 0.0
+
+
+@dataclass(frozen=True)
+class PlanTitle:
+    """A sheet title, and how big it was drawn."""
+
+    x: float
+    y: float
+    text: str
+    layer: str
+    char_height: float
+
+
+def plan_titles(doc, scale: float, origin: tuple[float, float]) -> list[PlanTitle]:
+    """
+    Every piece of text that names a drawing on the sheet.
+
+    ── Why this is separate from `room_labels` and must stay separate ────────
+    The drawing already says which storey each plan is. `DOWN VILLA` carries
+    'Lower Ground Floor Plan', 'Ground Floor Plan', 'First Floor Plan',
+    'Second Floor Plan', 'Mezzanine Floor Plan' and 'Roof Plan' as plain TEXT.
+    That is the answer to the hardest question in storey registration, written
+    down by the architect, for free.
+
+    `room_labels` returns all of them unchanged — they pass its length and
+    letter filters comfortably. **`cli.py` then deletes every one**, because it
+    keeps only labels where `classify_room(text) != "unknown"`, and a floor-plan
+    title is not a room kind. Nine titles on the villa, all discarded.
+
+    The obvious fix — teaching `classify_room` about floor names — is wrong and
+    was tried. `classify_room("TERRACE PLAN")` ALREADY returns `outdoor` and
+    `"OFFICE PATIO (BELOW)"` returns `study`, which is how a sheet title and a
+    void marker ended up in the villa's room list as rooms. Widening that
+    function puts more sheet furniture into the building. Level classification
+    is a different question asked of the same text, so it gets its own function.
+
+    `char_height` is kept because `room_labels` discards it and the legend test
+    needs it: titles in a text-style sample block sit ~2 character heights
+    apart, real titles ~75 apart. Measuring separation in character heights
+    rather than metres matters because the unit inference is wrong on four of
+    the seven drawings in this corpus — and distance and character height scale
+    together, so the ratio survives an error that a metre threshold would not.
+    """
+    ox, oy = origin
+    out: list[PlanTitle] = []
+
+    for entity in doc.modelspace().query("TEXT MTEXT"):
+        try:
+            raw = entity.plain_text() if entity.dxftype() == "MTEXT" else entity.dxf.text
+        except (AttributeError, ValueError):
+            continue
+
+        text = " ".join((raw or "").split())
+        # A title is a title, not a note that happens to mention a plan.
+        if not text or len(text) > 60 or not _PLAN_TITLE.search(text):
+            continue
+
+        try:
+            point = entity.dxf.insert
+        except AttributeError:
+            continue
+
+        # Layer names do NOT identify titles, and this was measured: the villa's
+        # two real plan titles sit on `A6 SANITARY WARE`, and 'SECOND FLOOR
+        # PLAN' sits on `tx`. Across the corpus a layer literally called `title`
+        # carries only a third of them. Same rule as walls — the name
+        # pre-selects and never decides.
+        out.append(
+            PlanTitle(
+                x=(point.x - ox) * scale,
+                y=(point.y - oy) * scale,
+                text=text,
+                layer=str(getattr(entity.dxf, "layer", "") or ""),
+                # TEXT calls it `height`; MTEXT calls it `char_height`. Reading
+                # only one gives 0.0 for the other, and a zero here does not
+                # raise — it makes every separation infinite in character
+                # heights, so the legend test silently passes everything.
+                char_height=_char_height(entity) * scale,
+            )
         )
 
     return out

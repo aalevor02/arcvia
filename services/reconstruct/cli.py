@@ -215,7 +215,7 @@ def reconstruct(
     from hypothesise import openings as op
     from hypothesise.pair import Face, join_corners, pair_faces, summarise
     from solve import spaces as sp
-    from solve.frames import segment_frames
+    from solve.frames import MIN_WALLS, segment_frames
     from hypothesise.perimeter import add_perimeter
     from hypothesise.perimeter import summarise as perimeter_summary
     from solve import verify as vf
@@ -257,6 +257,28 @@ def reconstruct(
     # solve/frames.py. Defaulting to the largest is a stated choice, not an
     # accident of file order.
     frames = segment_frames(all_walls)
+
+    # ── When NOTHING clears the wall floor ──────────────────────────────────
+    # This used to fall through to "reconstruct the whole sheet", and because an
+    # empty list is falsy the FRAMES block below was skipped entirely — so four
+    # separate unit plans of seven walls each fused into one 98 m building, and
+    # the operator saw output indistinguishable from a clean single-drawing file.
+    # Verify passed with 0 blocking and 0 warnings.
+    #
+    # Fusing several drawings is strictly worse than building one of them, so
+    # take the largest cluster instead. Do NOT lower MIN_WALLS to avoid this —
+    # 8 is what keeps north arrows and title blocks out.
+    framing_note = ""
+    if not frames:
+        loose = segment_frames(all_walls, min_walls=1)
+        if loose:
+            frames = loose[:1]
+            framing_note = (
+                f"no drawing on this sheet reached the {MIN_WALLS}-wall floor; "
+                f"building the largest cluster ({len(loose[0].wall_indices)} of "
+                f"{len(all_walls)} walls) and ignoring {len(loose) - 1} other(s)"
+            )
+
     if frames:
         picked = frames[min(frame_index, len(frames) - 1)]
         walls = [all_walls[i] for i in picked.wall_indices]
@@ -267,8 +289,35 @@ def reconstruct(
         xs = [c for w in walls for c in (w.ax, w.bx)] or [0]
         ys = [c for w in walls for c in (w.ay, w.by)] or [0]
         x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        framing_note = (
+            f"no frames at all; building the WHOLE sheet as one drawing "
+            f"({len(all_walls)} walls)"
+        )
 
     doc, _auditor = blk.open_dxf(str(dxf_path))
+
+    # ---- What the drawing calls each frame ---------------------------------
+    # The sheet usually says which storey each plan is, in plain TEXT, and until
+    # now this file threw every one of them away: the label filter below keeps
+    # only text that `classify_room` recognises, and a floor-plan title is not a
+    # room kind. Nine titles on the villa, all discarded — including 'Ground
+    # Floor Plan' and 'Lower Ground Floor Plan', which are the answer to the
+    # hardest question in storey registration.
+    #
+    # ── Why the title and not the position ──────────────────────────────────
+    # Measured on the villa: the frame HIGHER on the sheet is titled 'Lower
+    # Ground Floor Plan' and the frame LOWER on the sheet is 'Ground Floor
+    # Plan'. Sheet position is INVERTED against storey order on that drawing.
+    # Ordering storeys by where they sit on the paper puts the lawn upstairs.
+    sheet_titles = _real_plan_titles(blk.plan_titles(doc, scale, (ox, oy)))
+    for frame in frames:
+        fx0, fy0, fx1, fy1 = frame.bbox
+        # Strict containment, no padding. A title sitting just outside one
+        # frame is usually just inside the next one along, and a generous
+        # tolerance gives two frames the same title without erroring.
+        named = [t for t in sheet_titles if fx0 <= t.x <= fx1 and fy0 <= t.y <= fy1]
+        if named:
+            frame.title = named[0].text
 
     def _labels_in(a, b, c, d):
         return [
@@ -412,6 +461,22 @@ def reconstruct(
         "faces": len(faces),
         "frames": [f.as_dict() for f in frames],
         "frameUsed": picked.as_dict() if picked else None,
+        # ── How much linework never reached a frame ─────────────────────────
+        # Walls-in versus walls-out was not merely unreported, it was
+        # arithmetically unrecoverable: nothing sat between `faces` and the
+        # per-frame counts, so two sheets with identical face counts and
+        # byte-identical frame blocks could have lost different amounts. On the
+        # real villa, 216 walls in, 176 assigned, 40 unframed — 18.5% — with no
+        # number anywhere that moved.
+        #
+        # It is usually correct to drop them (title blocks, north arrows, stray
+        # callouts). The dangerous case is a MISFIRED drop — a guard house that
+        # pairs to 5 walls, or a layer choice that fragments a partitions-only
+        # plan — which produces a bill of quantities for less building than the
+        # client drew. This is the number that moves when that happens.
+        "wallsTotal": len(all_walls),
+        "wallsUnframed": len(all_walls) - sum(len(f.wall_indices) for f in frames),
+        "framingNote": framing_note or None,
         "walls": wall_stats,
         "rooms": room_stats,
         "openings": opening_stats,
@@ -461,6 +526,19 @@ def _print_build(model: dict) -> None:
         for f in model["frames"][:6]:
             mark = "->" if f["index"] == used else "  "
             print(f"      {mark} frame {f['index']}: {f['walls']:>4} walls, span {f['span']} m")
+
+    # Printed whatever happened, INCLUDING when there are no frames at all —
+    # `if model["frames"]` skipped this block entirely on an empty list, so a
+    # sheet whose drawings all fell below the wall floor produced output
+    # indistinguishable from a clean single-drawing file.
+    if model.get("framingNote"):
+        print(f"       ! {model['framingNote']}")
+    unframed = model.get("wallsUnframed") or 0
+    if unframed:
+        total = model.get("wallsTotal") or 0
+        share = unframed / total if total else 0
+        mark = " !" if share > 0.25 else "  "
+        print(f"      {mark} {unframed} of {total} walls ({share:.0%}) reached no frame")
 
     print(f"\nWALLS    {w['total']}  ({w['paired']} paired, {w['unpaired']} unpaired)")
     print(f"         total length {w['totalLength']} m")
@@ -732,6 +810,170 @@ def _print_report(report: dict) -> None:
             print(f"  {kind:<14} {n:>5}")
 
 
+#: Two plan titles closer together than this — measured in CHARACTER HEIGHTS of
+#: the title's own text — belong to a text-style sample block, not to drawings.
+#:
+#: Measured on the villa: the two real titles sit 78.2 and 73.3 character heights
+#: from their nearest neighbour; the five legend entries sit 2.13 to 2.24 apart.
+#: A factor of 33, so 8.0 lands in the middle of a range where nothing changes.
+#:
+#: **Character heights and not metres**, because the unit inference is wrong on
+#: four of the seven drawings in this corpus. Distance and character height
+#: scale together, so the ratio survives a unit error that a metre threshold
+#: would invert.
+LEGEND_LINK_CHARHEIGHTS = 8.0
+
+
+def _real_plan_titles(titles: list) -> list:
+    """Drop titles that are really entries in a legend or a style sample."""
+    import math
+
+    kept = []
+    for title in titles:
+        if not title.char_height:
+            continue
+        others = [t for t in titles if t is not title]
+        if not others:
+            kept.append(title)
+            continue
+        nearest = min(math.hypot(title.x - t.x, title.y - t.y) for t in others)
+        if nearest / title.char_height >= LEGEND_LINK_CHARHEIGHTS:
+            kept.append(title)
+    return kept
+
+
+#: The rate library, relative to the repo root.
+DEFAULT_RATES = Path(__file__).resolve().parents[2] / "data" / "rates" / "hyderabad-2026.csv"
+
+#: Mirrored from `quantify.rates` rather than imported, so this CLI still starts
+#: when the rate library is absent — `survey` and `reconstruct` do not need it.
+FRESH_DAYS_HINT = 7
+STALE_DAYS_HINT = 90
+
+
+def costing_report(model_path: str, rates_path: str, height: float | None = None,
+                   band: str = "base", masonry: str = "brick") -> dict:
+    """Price a reconstructed model against the rate library."""
+    from quantify import boq
+    from quantify.rates import RateLibrary
+
+    model = json.loads(Path(model_path).read_text(encoding="utf-8"))
+    library = RateLibrary.load(rates_path)
+
+    # The model records the height its walls were built to. Using anything else
+    # silently prices a different building from the one in the GLB.
+    if height is None:
+        height = float(model.get("wallHeight") or DEFAULT_WALL_HEIGHT)
+
+    costing = boq.build(model, library, height=height, band=band, masonry=masonry)
+    report = costing.as_dict()
+    report["model"] = model_path
+    report["rates"] = str(rates_path)
+    report["height"] = height
+    return report
+
+
+def _print_costing(report: dict) -> None:
+    print()
+    print(f"BOQ      {report['model']}")
+    print(f"         band {report['band']}, walls at {report['height']:.2f} m")
+    print()
+
+    for section, amount in report["bySection"].items():
+        print(f"  {section:<14} {amount:>16,.2f}")
+    print(f"  {'':<14} {'-' * 16}")
+    print(f"  {'TOTAL':<14} {report['total']:>16,.2f}  {report['currency']}")
+
+    if report["unpriced"]:
+        # Never a footnote. A BOQ that quietly omits what it could not price is
+        # a BOQ that is too cheap, and the omission is invisible precisely where
+        # it matters most.
+        print()
+        print(f"UNPRICED {len(report['unpriced'])} line(s) — NOT in the total above")
+        for line in report["unpriced"]:
+            print(f"  {line['description']:<38} {line['quantity']:>10,.2f} {line['unit']}")
+            print(f"      {line['note'] or line['rule']}")
+
+    age = report.get("oldestRateDays")
+    print()
+    if age is None:
+        print("RATES    undated — this total cannot be said to be current")
+    elif age > STALE_DAYS_HINT:
+        print(f"RATES    !! oldest rate is {age} days old. This is a historical "
+              f"note, not a quotation.")
+    elif age > FRESH_DAYS_HINT:
+        print(f"RATES    oldest rate {age} days old — past the weekly refresh. "
+              f"Run `rates --refresh` before quoting.")
+    else:
+        print(f"RATES    oldest rate {age} days old")
+    print()
+
+
+def rates_report(rates_path: str, do_refresh: bool = False, older_than: int = 7,
+                 hosts: set[str] | None = None, write_back: bool = False) -> dict:
+    """Report the library's freshness, and optionally re-read its sources."""
+    from quantify import refresh as refresher
+    from quantify.rates import RateLibrary
+
+    library = RateLibrary.load(rates_path)
+    report = {"source": str(rates_path), "before": library.freshness()}
+
+    if do_refresh:
+        result = refresher.refresh(library, only_older_than=older_than, limit_hosts=hosts)
+        report["refresh"] = result.as_dict()
+        report["after"] = library.freshness()
+
+        # Writing is opt-in even after a successful fetch. A refresh that
+        # rewrites the library by default makes `--refresh` unrunnable as a
+        # dry run, and a dry run is exactly what you want the first time a
+        # source page changes layout.
+        if write_back:
+            refresher.write_csv(library, str(rates_path))
+            report["written"] = str(rates_path)
+
+    return report
+
+
+def _print_rates(report: dict) -> None:
+    before = report["before"]
+    print()
+    print(f"RATES    {report['source']}")
+    print(f"         {before['rates']} rates, {before['dated']} dated, "
+          f"{before['undated']} undated")
+    print(f"         oldest {before['oldestDays']} days, newest {before['newestDays']} days")
+    print(f"         {before['refreshable']} refreshable, "
+          f"{before['vendorQuoteRequired']} need a vendor quote")
+
+    if "refresh" not in report:
+        print()
+        print("         Report only. Add --refresh to re-read the sources.")
+        print()
+        return
+
+    result = report["refresh"]
+    print()
+    print(f"REFRESH  {result['checkedAt']}")
+    print(f"         {result['updated']} updated, "
+          f"{result['unreachable']} unreachable, "
+          f"{result['untrusted']} read but not trusted")
+
+    # All three are printed, always. The dangerous refresh is the one that half
+    # succeeds and reports only the half that worked.
+    for line in result["detail"]["updated"][:10]:
+        print(f"  ok    {line['id']:<12} {line['from']} -> {line['to']} "
+              f"({line['move']:+.1%})  page dated {line['pageDate'] or 'none'}")
+    for line in result["detail"]["unreachable"][:10]:
+        print(f"  DOWN  {line['id']:<12} {line['reason']}")
+    for line in result["detail"]["untrusted"][:10]:
+        print(f"  ??    {line['id']:<12} {line['reason']}")
+
+    if report.get("written"):
+        print(f"\n         wrote {report['written']}")
+    else:
+        print("\n         Nothing written. Add --write to save.")
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="reconstruct")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -784,6 +1026,31 @@ def main() -> int:
     C.add_argument("--model", required=True)
     C.add_argument("--json", dest="json_out", default=None)
 
+    Q = sub.add_parser("costing", help="A priced bill of quantities from a model.")
+    Q.add_argument("--model", required=True, help="A building.json from reconstruct.")
+    Q.add_argument("--rates", default=str(DEFAULT_RATES))
+    Q.add_argument("--height", type=float, default=None,
+                   help="Wall height. Defaults to the height the model was built to.")
+    Q.add_argument("--band", default="base", choices=["low", "base", "high"])
+    Q.add_argument("--masonry", default="brick", choices=["brick", "aac"])
+    Q.add_argument("--json", dest="json_out", default=None)
+
+    T = sub.add_parser("rates", help="Rate library freshness, and the weekly refresh.")
+    T.add_argument("--rates", default=str(DEFAULT_RATES))
+    # Refresh and write are separate flags on purpose. `--refresh` alone is a dry
+    # run that reaches the network and tells you what it WOULD change, which is
+    # what you want the first time a source page changes layout. Nothing is
+    # written to the library without --write.
+    T.add_argument("--refresh", action="store_true",
+                   help="Re-read the source pages. Reports only; use --write to save.")
+    T.add_argument("--write", action="store_true",
+                   help="Write the refreshed rates back to the CSV.")
+    T.add_argument("--older-than", type=int, default=7,
+                   help="Only re-fetch rates older than this many days.")
+    T.add_argument("--hosts", default=None,
+                   help="Comma-separated host substrings, to refresh one source.")
+    T.add_argument("--json", dest="json_out", default=None)
+
     ns = parser.parse_args()
 
     if ns.command == "raster":
@@ -828,6 +1095,45 @@ def main() -> int:
         print(f"         {model['glb']['triangles']:,} triangles")
         print()
         return
+
+    if ns.command == "costing":
+        report = costing_report(ns.model, ns.rates, height=ns.height,
+                                band=ns.band, masonry=ns.masonry)
+        _print_costing(report)
+        if ns.json_out:
+            Path(ns.json_out).parent.mkdir(parents=True, exist_ok=True)
+            Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(f"wrote {ns.json_out}\n")
+        return 0
+
+    if ns.command == "rates":
+        if ns.write and not ns.refresh:
+            # --write on its own would rewrite the library from itself: a no-op
+            # that rewrites every row and touches the file's mtime, which looks
+            # exactly like a successful refresh in a directory listing.
+            print("--write does nothing without --refresh.")
+            return 2
+
+        report = rates_report(
+            ns.rates,
+            do_refresh=ns.refresh,
+            older_than=ns.older_than,
+            hosts={h.strip() for h in ns.hosts.split(",")} if ns.hosts else None,
+            write_back=ns.write,
+        )
+        _print_rates(report)
+        if ns.json_out:
+            Path(ns.json_out).parent.mkdir(parents=True, exist_ok=True)
+            Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(f"wrote {ns.json_out}\n")
+
+        # A refresh that reached nothing is a failed run, not a quiet success —
+        # it must be visible to whatever runs this on a timer.
+        if ns.refresh:
+            result = report["refresh"]
+            if result["updated"] == 0 and (result["unreachable"] or result["untrusted"]):
+                return 1
+        return 0
 
     if ns.command == "clearance":
         report = clearance_report(ns.model)

@@ -175,12 +175,30 @@ Verify still judges the graph, or it would pass walls that enclose nothing.
   505.4), VERIFY PASS. `frames[0]` is unchanged on all six other real DXFs.
 
   **2. `add_perimeter` does double-count, and it is the larger defect.**
-  `hypothesise/perimeter.py:82-83, 109-124` closes on wall *centrelines* and
-  emits the boundary polygon verbatim, so wherever two drawn walls sit within
-  2R the eroded boundary lands on their centrelines and each is re-emitted as a
-  coincident wall. 82.4% of the derived layer's 341.4 m lies inside the existing
-  masonry footprint. `CLOSE_RADIUS` is the dominant lever: R=0.75 gives 212.87 m
-  of derived run, R=0.50 gives 31.07 m.
+  **FIXED in `ec39fc1`.** `add_perimeter` derives the envelope by closing on
+  wall centrelines and emitting the boundary, and most of that ring lands on
+  top of walls that already exist — 341.4 m derived on the villa, 310.8 m of it
+  within a wall thickness of a real wall. Coincident walls render on top of each
+  other, so nothing about the model ever looked wrong, and half the masonry in
+  the bill was for wall that gets built once.
+
+  The fix marks the overlap rather than removing it: walls carry a `duplicate`
+  length, the summary carries `totalLength` / `billableLength` /
+  `duplicateLength`, and `boq.py` charges on billable. Villa: 459.09 m built,
+  **305.15 m billable**, 153.94 m duplicate.
+
+  **DO NOT "fix" this by tuning `CLOSE_RADIUS`.** It looks like the obvious
+  lever and it destroys the model. On a drawing whose exterior is unpaired
+  single lines, **that ring IS the outer boundary, not a gap-filler** — at
+  R=0.50 the duplication does collapse (12.8 m) and the building collapses with
+  it: 23 rooms become 9, with not one room over 15 m². Any sweep of this
+  constant needs a *closure* column beside the duplication column, or it reads
+  as a clean win.
+
+  The measurement that settled it: across the radius sweep, **billable length
+  holds at 290–305 m (2.5% spread) while total swings 58%**. That is the
+  signature of a real quantity being recovered rather than a constant being
+  tuned, and it is now an assertion in `test_build.py`.
 
   **Note why the ratio hid this.** The storey merge doubled the wall run *and*
   the floor area, so it never moved m-of-wall-per-m². After fixing it the ratio

@@ -182,6 +182,121 @@ ok("a cut divides the linework and does not drop any",
    sorted(i for f in pieces for i in f.wall_indices) == list(range(len(two_storeys))),
    f"{sum(len(f.wall_indices) for f in pieces)} of {len(two_storeys)}")
 
+# The two sides of one cut must be TELLABLE APART.
+#
+# The first version of `_split` handed both children the same label and let a
+# second cut overwrite the first, so a 2x2 sheet produced four frames that all
+# described themselves identically and none of which could say where it sat.
+# Storey registration reads this to know that two frames came from one cut and
+# which side each was on, so it has to survive nesting.
+ok("the two sides of a cut are distinguishable",
+   {f.cuts[-1]["side"] for f in pieces} == {"low", "high"},
+   str([f.cuts for f in pieces]))
+
+grid = join_corners(pair_faces(
+    room_faces() + room_faces(W + 4, 0)
+    + room_faces(0, _offset_for(MIN_CHANNEL * 2))
+    + room_faces(W + 4, _offset_for(MIN_CHANNEL * 2))
+))
+quads = segment_frames(grid, min_walls=3)
+ok("a 2x2 sheet gives four frames", len(quads) == 4, str(len(quads)))
+ok("and each carries its FULL ancestry, not just the last cut",
+   all(len(f.cuts) == 2 for f in quads), str([len(f.cuts) for f in quads]))
+ok("so all four are uniquely identified by where they sat",
+   len({tuple((c["axis"], c["side"]) for c in f.cuts) for f in quads}) == 4,
+   str([f.origin for f in quads]))
+
+
+print("\n-- frames: at PRODUCTION defaults --")
+# Everything above passes min_walls=3. Production is MIN_WALLS=8, and at that
+# setting MIN_SIDE_EXTENT and MAX_SPLIT_DEPTH had no coverage at all — all three
+# defects below were found by an independent adversarial pass, not by this file.
+
+
+def plan_at(x0, y0, x1, y1, n=4):
+    """A rectangular outline as 4n separate segments, so it clears MIN_WALLS."""
+    sx, sy = (x1 - x0) / n, (y1 - y0) / n
+    out = []
+    for k in range(n):
+        out += [
+            Face(x0 + k * sx, y0, x0 + (k + 1) * sx, y0, "W"),
+            Face(x0 + k * sx, y1, x0 + (k + 1) * sx, y1, "W"),
+            Face(x0, y0 + k * sy, x0, y0 + (k + 1) * sy, "W"),
+            Face(x1, y0 + k * sy, x1, y0 + (k + 1) * sy, "W"),
+        ]
+    return out
+
+
+# ── One line lying inside the gutter used to suppress the cut entirely ──────
+# Measured on the real villa: 2.38 m of line at x=100, wholly inside the 2.48 m
+# channel between the two storeys and touching neither plan, put both storeys
+# back on one slab — the 505 m2 / 901 m building that does not exist, reinstated
+# by 2.4 m of linework.
+#
+# And the tell you would reach for does not exist: that frame's origin said
+# "cut at x=... low side", NOT "component". It WAS cut, just not on the axis
+# that mattered. A guard keyed on origin == "component" cannot see this.
+two_plans = plan_at(0, 0, 20, 15) + plan_at(0, 17.5, 20, 32.5)
+ok("two plans 2.5 m apart split at production defaults",
+   len(segment_frames(two_plans)) == 2, str(len(segment_frames(two_plans))))
+
+with_orphan = two_plans + [Face(10, 15.06, 10, 17.44, "W")]
+split = segment_frames(with_orphan)
+ok("and a stray line inside the channel does not suppress the cut",
+   len(split) == 2, f"{len(split)} frames")
+ok("with the stray line still accounted for",
+   sum(len(f.wall_indices) for f in split) == len(with_orphan),
+   f"{sum(len(f.wall_indices) for f in split)} of {len(with_orphan)}")
+
+# The support count is what keeps that safe: a real small drawing sitting
+# between two real gutters is kept, not eaten as noise.
+ok("a genuine small drawing between two gutters survives",
+   len(segment_frames(plan_at(0, 0, 20, 15) + plan_at(0, 20, 8, 28)
+                      + plan_at(0, 34, 20, 49))) == 3)
+
+# ── A neighbour's size must not decide whether a building stays whole ───────
+# MIN_SIDE_EXTENT was a FRACTION of the parent, so a 200 x 150 m site plan drawn
+# beside a 20 x 25 m villa swallowed it into one 48-wall frame — and reported
+# its origin as "component", i.e. "there was nothing to cut".
+beside = plan_at(0, 0, 200, 150) + plan_at(203, 0, 223, 25)
+ok("a villa beside a large site plan is still its own frame",
+   len(segment_frames(beside)) == 2,
+   str([round(f.span, 1) for f in segment_frames(beside)]))
+
+# The guard that replaced still has to refuse an actual sliver.
+ticks = [Face(34, 10 + k * 0.05, 34, 10.05 + k * 0.05, "W") for k in range(12)]
+ok("but a 0.6 m strip of dimension ticks is still refused",
+   len(segment_frames(plan_at(0, 0, 30, 20) + ticks)) == 1)
+
+# ── The depth cap truncated, and truncation looked exactly like completion ──
+# `_split` takes the WIDEST channel each level, which is greedy and unrelated to
+# balance, so depth needed is data-dependent up to n-1 — not ceil(log2 n). At
+# the old cap of 4, six plans in a row gave FIVE frames with frames[0] holding
+# two buildings, and nothing in the output said the recursion had run out.
+for count in (5, 6, 8, 10):
+    row = []
+    for k in range(count):
+        row += plan_at(k * 25.0, 0, k * 25.0 + 20, 15)
+    ok(f"{count} plans in a row give {count} frames",
+       len(segment_frames(row)) == count, str(len(segment_frames(row))))
+
+big_grid = []
+for r in range(4):
+    for c in range(4):
+        big_grid += plan_at(c * 25.0, r * 25.0, c * 25.0 + 20, r * 25.0 + 20)
+sixteen = segment_frames(big_grid)
+ok("a 4x4 grid gives 16 frames, not 11", len(sixteen) == 16, str(len(sixteen)))
+# 6 levels deep, not the 4 that ceil(log2 16) suggests — which is exactly why
+# the old cap silently truncated this case.
+ok("and needs more than log2(n) levels to get there",
+   max(len(f.cuts) for f in sixteen) > 4,
+   str(sorted({len(f.cuts) for f in sixteen})))
+
+ok("a single plan is still never cut at production defaults",
+   len(segment_frames(plan_at(0, 0, 20, 15))) == 1)
+ok("and still reports that it was not cut",
+   segment_frames(plan_at(0, 0, 20, 15))[0].origin == "component")
+
 
 print("\n-- openings --")
 south = min(walls, key=lambda w: (w.ay + w.by) / 2)
