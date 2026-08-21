@@ -159,7 +159,13 @@ export function villaPage(project: Project, typeId: string, highlightUnit?: stri
             h(
               'div',
               { style: 'margin-top:30px;display:flex;gap:12px;flex-wrap:wrap' },
-              h('a', { class: 'btn solid', href: `#/walkthrough/${type.id}` }, '3D walkthrough'),
+              // Called a model, not a walkthrough. It is an accurate massing model
+              // generated from the drawings - floor plates, envelope, columns,
+              // openings - presented as an orbit with a rendered film. Calling it a
+              // walkthrough sets an expectation of walking through furnished rooms
+              // that the geometry cannot meet, and an honest label reads as finished
+              // where an overclaimed one reads as broken.
+              h('a', { class: 'btn solid', href: `#/walkthrough/${type.id}` }, 'View the 3D model'),
               h('a', { class: 'btn', href: '#/plan' }, 'Master plan'),
             ),
           ),

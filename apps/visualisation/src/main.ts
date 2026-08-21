@@ -283,7 +283,7 @@ async function route(): Promise<void> {
 function titleFor(parts: string[]): string {
   if (parts[0] === 'villa' || parts[0] === 'walkthrough') {
     const type = project.villaTypes.find((t) => t.id === parts[1])
-    const prefix = parts[0] === 'walkthrough' ? 'Walkthrough · ' : ''
+    const prefix = parts[0] === 'walkthrough' ? '3D model · ' : ''
     return prefix + (type?.name ?? 'Villa')
   }
   const item = NAV.find((n) => n.href === `#/${parts[0]}`)
