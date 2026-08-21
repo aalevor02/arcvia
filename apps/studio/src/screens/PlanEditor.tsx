@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PlanCanvas, type Selection, type Tool } from '../plan/PlanCanvas'
+import {
+  PlanCanvas,
+  type Selection,
+  type Tool,
+  type ViewState,
+} from '../plan/PlanCanvas'
 import {
   activeFloor,
   addFloor,
@@ -21,6 +26,7 @@ import {
   setUnderlay,
   placeUnderlay,
   calibrateUnderlay,
+  rescaleUnderlay,
   undo,
   updateAllWalls,
   type History,
@@ -30,11 +36,18 @@ import { WALL_DEFAULTS, type Plan, type Underlay, type Vec2 } from '../plan/type
 import { formatArea, formatLength, parseLength, type UnitSystem } from '../lib/format'
 import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
 import { assessDetection } from '../plan/detectionQuality'
-import { convertDetections, type ProposedWall } from '../plan/detections'
+import { proposeFurniture, type Proposal } from '../plan/furnish'
+import {
+  convertDetections,
+  type DetectedRoom,
+  type DetectedScale,
+  type ProposedWall,
+} from '../plan/detections'
 import SceneView from './SceneView'
 import { UnderlayPanel } from '../components/UnderlayPanel'
 import { CalibrateDialog } from '../components/CalibrateDialog'
 import { ProposalReview } from '../components/ProposalReview'
+import { FurnitureReview } from '../components/FurnitureReview'
 import { CataloguePanel } from '../components/CataloguePanel'
 import { ObjectInspector } from '../components/ObjectInspector'
 import type { PlacedObject } from '../catalogue/types'
@@ -65,8 +78,18 @@ const TOOLS: { id: Tool; label: string; icon: string; key: string }[] = [
 ]
 
 export default function PlanEditor({ sceneId, start, onBack }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const viewerRef = useRef<PlanCanvas | null>(null)
+  /** Pan and zoom, held across the canvas being torn down and rebuilt. */
+  const viewRef = useRef<ViewState | null>(null)
+  /**
+   * The current tool and unit system, readable from the canvas callback.
+   *
+   * The callback ref is created once, so anything it reads from the render
+   * scope is frozen at first render. These keep it honest.
+   */
+  const toolRef = useRef<Tool>('select')
+  const unitsRef = useRef<UnitSystem>('imperial')
 
   const [scene, setScene] = useState<Scene | null>(null)
   const [history, setHistory] = useState<History>(() => initialHistory(emptyPlan()))
@@ -85,6 +108,23 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const [calibration, setCalibration] = useState<{ from: Vec2; to: Vec2 } | null>(null)
   /** Detector output awaiting acceptance. Never written into the plan directly. */
   const [proposal, setProposal] = useState<ProposedWall[] | null>(null)
+  // What the reader made of the drawing beyond its walls: the rooms it closed,
+  // their names, and the scale it read off the printed dimensions. Kept beside
+  // the proposal because it is reviewed with it and discarded with it.
+  /**
+   * Furniture read off the drawing, waiting to be accepted.
+   *
+   * Separate from the wall proposal because the two are accepted at different
+   * moments: walls first, since everything else depends on them, and furniture
+   * once the plan itself looks right.
+   */
+  const [furniture, setFurniture] = useState<Proposal[] | null>(null)
+
+  const [reading, setReading] = useState<{
+    rooms: DetectedRoom[]
+    scale: DetectedScale | null
+    scaleApplied: boolean
+  } | null>(null)
   const [detecting, setDetecting] = useState(false)
   /** Catalogue item armed for placing. */
   const [placing, setPlacing] = useState<string | null>(null)
@@ -132,10 +172,38 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   }, [])
 
   // ---- Canvas lifecycle ----------------------------------------------------
-  useEffect(() => {
-    if (!canvasRef.current) return
+  /**
+   * Bind the renderer to whichever canvas element is currently on screen.
+   *
+   * ── Why a callback ref and not a mount-once effect ──────────────────────────
+   * This was `useEffect(..., [])` with a comment saying the canvas is created
+   * once and kept in sync afterwards. That was true until the 3D view arrived.
+   * The 2D editor — and the `<canvas>` inside it — unmounts while 3D is shown,
+   * so coming back React mounts a *brand new* element while the renderer still
+   * holds the old, detached one. Everything kept working except the part you
+   * could see: walls updated, rooms recomputed, the panel showed the right area,
+   * and the canvas sat blank, because every frame was being drawn into an
+   * element no longer in the document.
+   *
+   * A callback ref cannot drift like that. React calls it with the element when
+   * one attaches and with null when it goes, so the renderer is rebuilt exactly
+   * when the thing it draws into is replaced — for this remount and any future
+   * one.
+   */
+  const attachCanvas = useCallback((element: HTMLCanvasElement | null) => {
+    if (!element) {
+      // Carry the framing over to the next canvas. Losing your zoom every time
+      // you glance at the 3D view is a small thing that happens constantly.
+      viewRef.current = viewerRef.current?.getView() ?? viewRef.current
+      viewerRef.current?.dispose()
+      viewerRef.current = null
+      canvasRef.current = null
+      return
+    }
 
-    const canvas = new PlanCanvas(canvasRef.current, planRef.current, {
+    canvasRef.current = element
+
+    const canvas = new PlanCanvas(element, planRef.current, {
       onDrawWall: (from, to) =>
         apply((p) =>
           addWall(p, from, to, {
@@ -162,23 +230,26 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     })
 
     viewerRef.current = canvas
-    canvas.setTool(tool)
-    canvas.setUnits(units)
-
-    // StrictMode mounts effects twice in development; without this teardown the
-    // first canvas keeps its listeners and rAF loop alive and you end up
-    // debugging a renderer that is not the one on screen.
-    return () => {
-      canvas.dispose()
-      viewerRef.current = null
-    }
-    // Deliberately mount-once: the canvas is kept in sync by the effects below.
+    canvas.setPlan(planRef.current)
+    canvas.setTool(toolRef.current)
+    canvas.setUnits(unitsRef.current)
+    if (viewRef.current) canvas.setView(viewRef.current)
+    // Read through refs, not through the values captured when this callback was
+    // created: a stale closure here would silently reset the tool and units to
+    // whatever they were on first render, which is the same class of bug as the
+    // one above and just as quiet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => viewerRef.current?.setPlan(plan), [plan])
-  useEffect(() => viewerRef.current?.setTool(tool), [tool])
-  useEffect(() => viewerRef.current?.setUnits(units), [units])
+  useEffect(() => {
+    toolRef.current = tool
+    viewerRef.current?.setTool(tool)
+  }, [tool])
+  useEffect(() => {
+    unitsRef.current = units
+    viewerRef.current?.setUnits(units)
+  }, [units])
   useEffect(() => viewerRef.current?.setSelection(selection), [selection])
   useEffect(() => viewerRef.current?.setProposal(proposal ?? []), [proposal])
   useEffect(() => {
@@ -258,7 +329,39 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     setError(null)
     try {
       const result = await detectFloorplan(underlay.url)
-      const walls = convertDetections(result, underlay)
+
+      // The drawing usually states its own size. Architects print a room's
+      // dimensions inside it for a reader who cannot measure the paper, and the
+      // reader now reports the scale those imply — so the calibration step that
+      // used to come first can simply not be needed.
+      //
+      // Applied only to an underlay nobody has calibrated. Someone who measured
+      // against a dimension they trust has made a judgement, and overriding it
+      // with a number read by OCR would be the software second-guessing the one
+      // person who knows the building.
+      let traced = underlay
+      let scaleApplied = false
+      const printed = result.scale
+      if (printed && !underlay.calibrated && result.width > 0) {
+        const metresPerPixel = printed.metres_per_unit / result.width
+        traced = { ...underlay, scale: metresPerPixel, calibrated: true }
+        apply((current) => rescaleUnderlay(current, metresPerPixel))
+        scaleApplied = true
+      }
+
+      const walls = convertDetections(result, traced)
+      setReading({
+        rooms: result.rooms ?? [],
+        scale: printed ?? null,
+        scaleApplied,
+      })
+
+      // Furniture comes out of the same read. The detector had to decide which
+      // outlines were fittings in order to keep them out of the walls, so the
+      // work is already done — making the user run a second pass for it would
+      // be charging twice for one answer.
+      const pieces = proposeFurniture(result, traced)
+      setFurniture(pieces.length > 0 ? pieces : null)
 
       // Judge the result before offering it.
       //
@@ -316,6 +419,24 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       ),
     )
     setProposal(null)
+  }
+
+  /** Place the furniture the drawing showed, as one undoable step. */
+  function acceptFurniture() {
+    if (!furniture) return
+    apply((current) =>
+      furniture.reduce(
+        (next, piece) =>
+          addObject(next, {
+            item: piece.item,
+            position: piece.position,
+            rotation: piece.rotation,
+            size: piece.size,
+          }),
+        current,
+      ),
+    )
+    setFurniture(null)
   }
 
   // ---- Derived -------------------------------------------------------------
@@ -511,6 +632,17 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             onDetect={runDetection}
           />
 
+          {furniture && (
+            <section>
+              <span className="eyebrow">Furniture in the drawing</span>
+              <FurnitureReview
+                furniture={furniture}
+                onAccept={acceptFurniture}
+                onDiscard={() => setFurniture(null)}
+              />
+            </section>
+          )}
+
           {proposal && (
             <section>
               <span className="eyebrow">Proposed walls</span>
@@ -518,7 +650,13 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                 proposal={proposal}
                 units={units}
                 onAccept={acceptProposal}
-                onDiscard={() => setProposal(null)}
+                rooms={reading?.rooms ?? []}
+                scale={reading?.scale ?? null}
+                scaleApplied={reading?.scaleApplied ?? false}
+                onDiscard={() => {
+                  setProposal(null)
+                  setReading(null)
+                }}
               />
             </section>
           )}
@@ -546,7 +684,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 
         {/* ---- Canvas ---------------------------------------------------- */}
         <div className="stage">
-          <canvas ref={canvasRef} />
+          <canvas ref={attachCanvas} />
           <p className="hint">{hint}</p>
           <div className="stage-actions">
             <button className="btn" onClick={() => viewerRef.current?.zoomToFit()}>
