@@ -29,6 +29,7 @@ import { detectRooms, displayName, totalArea } from '../plan/rooms'
 import { WALL_DEFAULTS, type Plan, type Underlay, type Vec2 } from '../plan/types'
 import { formatArea, formatLength, parseLength, type UnitSystem } from '../lib/format'
 import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
+import { assessDetection } from '../plan/detectionQuality'
 import { convertDetections, type ProposedWall } from '../plan/detections'
 import SceneView from './SceneView'
 import { UnderlayPanel } from '../components/UnderlayPanel'
@@ -259,11 +260,39 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       const result = await detectFloorplan(underlay.url)
       const walls = convertDetections(result, underlay)
 
-      if (walls.length === 0) {
-        setError('Nothing recognisable was found in that drawing.')
-      } else {
-        setProposal(walls)
+      // Judge the result before offering it.
+      //
+      // Counting walls is not a quality check — the reader finds lines in
+      // anything, and a styled brochure yields hundreds of them, none of which
+      // is a wall. What separates a real plan is that its walls *enclose*
+      // something, so the rooms those walls would produce are the measure.
+      // Predicted by running the *actual* accept logic on a throwaway plan,
+      // not by an approximation of it. `addWall` snaps coincident endpoints
+      // together, and that snapping is precisely what decides whether a
+      // detection closes any rooms — a prediction that skipped it would report
+      // zero rooms for a perfectly good import.
+      const rooms = detectRooms(
+        activeFloor(
+          walls.reduce(
+            (draft, w) =>
+              addWall(draft, w.a, w.b, {
+                thickness: w.thickness,
+                height: WALL_DEFAULTS.interior.height,
+                snapRadius: 0.15,
+              }),
+            emptyPlan(),
+          ),
+        ),
+      ).length
+
+      const verdict = assessDetection(walls, rooms)
+      if (!verdict.ok) {
+        setError(`${verdict.reason} ${verdict.detail}`)
       }
+      // Shown either way. A poor detection is still a starting point somebody
+      // may want to correct by hand, and throwing it away would make that
+      // impossible — but it is no longer offered silently as if it worked.
+      if (walls.length > 0) setProposal(walls)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The floor-plan reader failed.')
     } finally {
