@@ -380,7 +380,7 @@ MODEL = {
 full = RateLibrary([
     make_rate("B", "Red Clay Brick", "Table moulded", "Masonry", base=9.0, unit="piece"),
     make_rate("C", "OPC Cement", "43 Grade", "Cement", base=383.0, unit="bag"),
-    make_rate("S", "M Sand", "Washed", "Sand, Aggregate & Earth", base=55.0, unit="m³"),
+    make_rate("S", "M-Sand", "Manufactured", "Sand, Aggregate & Earth", base=55.0, unit="m³"),
     make_rate("T", "Vitrified Tile", "600x600", "Flooring", base=85.0, unit="sq ft"),
     make_rate("K", "Kota Stone", "Honed", "Flooring", base=60.0, unit="sq ft"),
     make_rate("E", "Interior Emulsion", "Premium", "Paint", base=310.0, unit="litre"),
@@ -456,6 +456,70 @@ empty = boq.build({"elements": {"walls": [], "spaces": [], "openings": []}}, ful
 ok("an empty model produces no total rather than a crash",
    empty.total == 0.0, str(empty.total))
 
+
+print("\n-- boq: a quantity is never priced against a unit it was not measured in --")
+# THE REGRESSION, and the reason this suite did not catch it for a whole day.
+#
+# The fixture above prices M Sand per m³ — the unit a mortar ratio happens to
+# produce — so quantity and rate agreed by accident, and the assertion "the sand
+# line exists and is priced" passed. The real Hyderabad library sells sand by the
+# TONNE, because that is what a lorry weighs. On the real library the bill
+# multiplied a volume by a per-tonne price and printed the product as rupees.
+#
+# Both numbers were individually correct: a correct volume and a correct price.
+# Neither carried what it was measured in. That is the whole failure, and it is
+# the same shape as every other one found today — a measurement that was correct
+# and insufficient, caught only by an independent second measurement.
+by_weight = RateLibrary([
+    make_rate("B", "Red Clay Brick", "Table moulded", "Masonry", base=9.0, unit="piece"),
+    make_rate("C", "OPC Cement", "43 Grade", "Cement", base=383.0, unit="bag"),
+    make_rate("S", "M-Sand", "Manufactured", "Sand, Aggregate & Earth", base=1400.0, unit="tonne"),
+    make_rate("P", "P-Sand", "Plastering", "Sand, Aggregate & Earth", base=1600.0, unit="tonne"),
+])
+weighed = boq.build(MODEL, by_weight, height=3.0).as_dict(TODAY)
+mortar_sand = [ln for ln in weighed["lines"] if ln["description"] == "Sand for mortar"]
+ok("a m³ quantity against a per-tonne rate still produces a priced line",
+   len(mortar_sand) == 1, str([ln["description"] for ln in weighed["unpriced"]]))
+
+if mortar_sand:
+    line = mortar_sand[0]
+    # 1.60 t/m³. Priced raw the amount would be 1/1.6 of this, and nothing
+    # anywhere would have said so.
+    raw = line["quantity"] * 1400.0
+    expected = raw * boq.BULK_DENSITY_T_PER_M3["sand"]
+    # Relative, because `quantity` is rounded for the report and the amount is
+    # not. An absolute tolerance here fails on rounding and says "wrong price",
+    # which is exactly the kind of noise that gets a real assertion deleted.
+    ok("and it is priced on the converted weight, not the raw volume",
+       abs(line["amount"] - expected) / expected < 0.001,
+       f"{line['amount']:.2f} vs {expected:.2f}")
+    ok("which is the density above the price the raw volume would have carried",
+       line["amount"] > raw * 1.5, f"{line['amount']:.2f} vs raw {raw:.2f}")
+    ok("the conversion is written into the line's own rule, not hidden",
+       "t/m3" in line["rule"], line["rule"])
+
+# Plaster takes sand as well as cement, and for a day it took only cement. A
+# missing line is indistinguishable from a line that costs nothing.
+plaster_sand = [ln for ln in weighed["lines"] if ln["description"] == "Sand for plaster"]
+ok("plaster is billed its sand, not only its cement", len(plaster_sand) == 1)
+
+# The structural assertion, which is the one that actually holds the fix: no
+# priced line anywhere may carry a unit its rate does not, unsupported. This
+# fails on a NEW line added in the wrong unit, which is how the next instance of
+# this defect would arrive.
+for report in (result, weighed):
+    for ln in report["lines"]:
+        if ln["unit"] != ln["rateUnit"]:
+            ok(f"{ln['description']}: unit differs from rate unit, so the line shows its conversion",
+               "->" in ln["rule"], ln["rule"])
+
+# And the refusal. A unit with no defined conversion must not be guessed at.
+odd = RateLibrary([make_rate("C", "OPC Cement", "43 Grade", "Cement", base=383.0, unit="quintal")])
+guessed = boq.build(MODEL, odd, height=3.0).as_dict(TODAY)
+unreconciled = [ln for ln in guessed["unpriced"] if "no conversion" in ln["note"]]
+ok("an unconvertible unit goes to `unpriced` rather than being priced anyway",
+   len(unreconciled) >= 1,
+   str([ln["note"] for ln in guessed["unpriced"]][:2]))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

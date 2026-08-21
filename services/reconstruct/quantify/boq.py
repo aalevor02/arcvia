@@ -84,6 +84,37 @@ PLASTER_THICKNESS = 0.012
 #: note on the shape, and this is a stamp that travels on the bill.
 WALL_RUN_BAND = (0.6, 1.6)
 
+#: Bulk densities, tonnes per cubic metre, for converting a measured volume into
+#: a rate quoted by weight.
+#:
+#: ── Why this exists at all ──────────────────────────────────────────────────
+#: Sand is quantified in m3 because that is what a mortar ratio gives you, and
+#: sold in tonnes because that is what a lorry weighs. The bill was multiplying
+#: a volume by a per-tonne rate and reporting the result as money — an error of
+#: the density, about 1.6x, in the direction of undercharging.
+#:
+#: Nothing detected it because both numbers were individually right. The
+#: quantity was a correct volume, the rate was a correct price, and neither
+#: knew what the other was measured in.
+BULK_DENSITY_T_PER_M3 = {
+    "sand": 1.60,
+    "aggregate": 1.50,
+    "stone": 1.60,
+    "earth": 1.55,
+}
+
+#: Conversions between the units this bill produces and the units rates are
+#: quoted in. Keyed (from, to).
+UNIT_CONVERSIONS: dict[tuple[str, str], float] = {
+    ("m²", "sq ft"): 10.7639,
+    ("sq ft", "m²"): 1 / 10.7639,
+    ("m", "rmt"): 1.0,
+    ("rmt", "m"): 1.0,
+    ("metre", "rmt"): 1.0,
+    ("m³", "cft"): 35.3147,
+    ("cft", "m³"): 1 / 35.3147,
+}
+
 
 
 @dataclass
@@ -193,6 +224,40 @@ class Costing:
                 "Check `oldestRateDays` before quoting.",
             ],
         }
+
+
+def _reconcile(
+    quantity: float, unit: str, rate_unit: str, terms: tuple[str, ...]
+) -> tuple[float | None, str]:
+    """
+    The quantity expressed in the rate's unit, or None if it cannot be.
+
+    Returns the converted quantity and a note describing the conversion, so the
+    line's own rule records it. A conversion that happens invisibly is only
+    marginally better than the mismatch it replaced — a quantity surveyor
+    checking a bill needs to see that 29.8 m3 became 47.7 t and why.
+    """
+    if not rate_unit or unit == rate_unit:
+        return quantity, ""
+
+    factor = UNIT_CONVERSIONS.get((unit, rate_unit))
+    if factor:
+        return quantity * factor, f"{quantity:.2f} {unit} -> {rate_unit} x{factor:.4f}"
+
+    # Volume to weight, which needs to know what the material is. Taken from the
+    # search terms rather than a parameter: the caller already said "m-sand", and
+    # asking it to say "sand" again is a second place for the two to disagree.
+    if unit in ("m³", "m3") and rate_unit == "tonne":
+        haystack = " ".join(terms).lower()
+        for material, density in BULK_DENSITY_T_PER_M3.items():
+            if material in haystack:
+                return (
+                    quantity * density,
+                    f"{quantity:.2f} m3 -> {quantity * density:.2f} t "
+                    f"at {density} t/m3",
+                )
+
+    return None, ""
 
 
 def _wall_volumes(model: dict, height: float) -> tuple[float, float, float]:
@@ -314,12 +379,45 @@ def build(
     def add(section, description, quantity, unit, rule, *terms, tier=None, note=""):
         rate = library.find(*terms, tier=tier)
         line = Line(section, description, quantity, unit, rate, rule, note=note)
-        if rate and quantity > 0:
-            line.amount = rate.cost(quantity, band)
-            costing.lines.append(line)
-        else:
-            line.note = note or ("no rate matched" if not rate else "zero quantity")
+
+        if not rate:
+            line.note = note or "no rate matched"
             costing.unpriced.append(line)
+            return line
+        if quantity <= 0:
+            line.note = note or "zero quantity"
+            costing.unpriced.append(line)
+            return line
+
+        # The quantity and the rate must be in the same unit, and until now
+        # nothing checked.
+        #
+        # ── The silent multiplication this closes ───────────────────────────
+        # Mortar sand was quantified in m3, because that is what a mix ratio
+        # gives you, and priced against a rate quoted per tonne, because that is
+        # how sand is sold. The bill multiplied the two and printed the result
+        # as rupees. Both numbers were individually correct — a correct volume
+        # and a correct price — and neither carried what it was measured in, so
+        # the product was wrong by the density and looked like money.
+        #
+        # Converting where a conversion exists and REFUSING where one does not
+        # is the point. A line that cannot be reconciled goes to `unpriced`,
+        # which the report prints, rather than being quietly priced in the wrong
+        # unit — the difference between a bill that is short and a bill that
+        # says it is incomplete.
+        priced_quantity, conversion = _reconcile(quantity, unit, rate.unit, terms)
+        if priced_quantity is None:
+            line.note = (
+                f"quantity is in {unit} but the rate is per {rate.unit}, "
+                "and no conversion is defined"
+            )
+            costing.unpriced.append(line)
+            return line
+
+        line.amount = rate.cost(priced_quantity, band)
+        if conversion:
+            line.rule = f"{line.rule}; {conversion}"
+        costing.lines.append(line)
         return line
 
     volume, face_area, run = _wall_volumes(model, height)
@@ -435,6 +533,16 @@ def build(
         f"face area {face_area:.1f} m2 x {PLASTER_THICKNESS * 1000:.0f} mm "
         f"x {CEMENT_BAGS_PER_M3_MORTAR} bags/m3",
         "opc cement", "43",
+    )
+    # Plaster needs sand as well as cement, and the bill priced only the cement.
+    # A 1:6 plaster mix is 6 parts sand to 1 of cement by volume; omitting it
+    # made every plastered wall cheaper than it can be built, silently, because
+    # a missing line looks exactly like a line that costs nothing.
+    add(
+        "Finishes", "Sand for plaster",
+        plaster_volume * SAND_M3_PER_M3_MORTAR, "m³",
+        f"plaster {plaster_volume:.2f} m3 x {SAND_M3_PER_M3_MORTAR} m3/m3",
+        "p-sand",
     )
     add(
         "Finishes", "Interior emulsion, two coats",
