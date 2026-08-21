@@ -51,6 +51,10 @@ def parse_args() -> argparse.Namespace:
     # Textures at 4K are common and pointless on a chair seen from two metres
     # away in a room lit by a baked atlas.
     parser.add_argument("--max-texture", type=int, default=1024)
+    # Override the up-axis guess. The guess is deliberately conservative, so
+    # this is how a genuinely lying-down asset gets stood up.
+    parser.add_argument("--rotate", dest="rotate", action="store_true", default=None)
+    parser.add_argument("--no-rotate", dest="rotate", action="store_false")
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1 :])
 
 
@@ -141,7 +145,7 @@ def extent(obj) -> mathutils.Vector:
     return mathutils.Vector((highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2]))
 
 
-def orient_and_fit(obj, width: float, depth: float, height: float) -> dict:
+def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=None) -> dict:
     """
     Scale to the catalogue's dimensions and sit the model on its origin.
 
@@ -179,7 +183,31 @@ def orient_and_fit(obj, width: float, depth: float, height: float) -> dict:
     # Y-up assets have their depth and height exchanged.
     lying = shape_of(dimensions.x, dimensions.z, dimensions.y)
 
-    swapped = distance(lying, target) < distance(upright, target)
+    # Rotate only when lying-down is *clearly* the better reading.
+    #
+    # The importer already converts glTF's Y-up to Blender's Z-up, so a
+    # well-formed asset arrives upright and this should do nothing. Rotation
+    # exists for the malformed ones — a wardrobe exported on its back, where the
+    # signal is unmistakable.
+    #
+    # The margin is what makes that safe. An armchair is 0.85 x 0.85 x 0.82:
+    # near enough cubic that both orientations score within a hair of each
+    # other, the comparison becomes noise, and a bare `<` will cheerfully lay a
+    # perfectly good chair on its face. Which is exactly what it did.
+    #
+    # So: only rotate when lying-down explains the proportions substantially
+    # better. When in doubt, trust the importer and leave it alone — a model
+    # that needed rotating and did not get it is obvious and fixable with
+    # --rotate; one that was rotated when it should not have been looks like a
+    # broken asset.
+    ROTATE_MARGIN = 0.6
+    swapped = distance(lying, target) < distance(upright, target) * ROTATE_MARGIN
+
+    if force_rotate is True:
+        swapped = True
+    elif force_rotate is False:
+        swapped = False
+
     if swapped:
         # The mesh data is transformed directly rather than by setting
         # `rotation_euler` and applying it.
@@ -274,7 +302,7 @@ def main() -> int:
         return 1
 
     report = {"input": args.input, "output": args.output}
-    report["placement"] = orient_and_fit(obj, args.width, args.depth, args.height)
+    report["placement"] = orient_and_fit(obj, args.width, args.depth, args.height, args.rotate)
     report["decimate"] = decimate(obj, args.budget)
     report["textures"] = shrink_textures(args.max_texture)
 
@@ -294,7 +322,16 @@ def main() -> int:
         export_animations=False,
         export_skins=False,
         export_morph=False,
-        export_draco_mesh_compression_enable=True,
+        # No Draco.
+        #
+        # It compresses *geometry*, and by this point the geometry is a few
+        # thousand triangles — a rounding error next to the embedded textures,
+        # which are what actually make these files big. What it does cost is a
+        # hard dependency: a Draco GLB will not parse without the decoder, and a
+        # loader that lacks it fails silently and leaves the stand-in in place
+        # with no error anywhere. That is exactly what happened the first time
+        # this pipeline produced a real asset.
+        export_draco_mesh_compression_enable=False,
     )
 
     report["bytes"] = Path(args.output).stat().st_size

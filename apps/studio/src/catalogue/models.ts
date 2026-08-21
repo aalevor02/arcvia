@@ -64,7 +64,14 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
       url,
       (gltf) => resolve(gltf.scene),
       undefined,
-      () => resolve(null),
+      (error) => {
+        // Null so the caller keeps the stand-in — a room with plain furniture
+        // beats a room with a hole in it. But say so: a silent null here means
+        // a broken asset looks identical to one nobody placed, and the first
+        // real asset this pipeline produced failed exactly this way.
+        console.warn(`Arcvia: could not load ${url}`, error)
+        resolve(null)
+      },
     )
   })
 

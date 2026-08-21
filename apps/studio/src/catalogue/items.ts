@@ -55,6 +55,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.85, depth: 0.85, height: 0.82 },
     shape: 'sofa',
     tone: 'fabric',
+    model: {
+      url: '/models/armchair.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'OLEKSO',
+      source:
+        'https://sketchfab.com/3d-models/macys-modern-accent-armchair-29201f422b9c417cb86225a16b0efad9',
+      triangles: 3998,
+    },
   },
   {
     id: 'dining-chair',
