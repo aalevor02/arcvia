@@ -21,6 +21,18 @@ left to a preset:
 from __future__ import annotations
 
 #: id -> (view transform, world kind, material kind, freestyle, look)
+#:
+#: `raw` is NOT a picture and is not meant to be legible on its own. Flat world
+#: plus emission materials means every surface returns its own colour regardless
+#: of light or facing, so an isometric comes back near-uniform white — mean 253,
+#: standard deviation under 2, no structure. That is the intended output: it is
+#: the base layer the `--aov` conditioning passes are keyed against, where the
+#: point is precisely that shading contributes nothing.
+#:
+#: Recorded here because two people have now had to work it out from the outside
+#: and both reasonably suspected it was broken. Emission ignoring facing is also
+#: why `raw` cannot be used to diagnose geometry: it renders an inside-out box
+#: and a correct one identically, which cost a day earlier in this project.
 STYLE_TABLE = {
     "photoreal": ("AgX", "sky", "keep", False, "Medium High Contrast"),
     "cgi": ("Standard", "studio", "keep", False, "None"),
