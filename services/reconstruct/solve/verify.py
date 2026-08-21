@@ -54,6 +54,27 @@ WALL_RUN_BAND = (0.6, 1.6)
 #: Walls the engine derived rather than read off the drawing.
 DERIVED_PERIMETER = "<derived:perimeter>"
 
+#: Below this, a plan with several rooms is being read at the wrong unit.
+#:
+#: Measured across the drawings here, largest room against the unit chosen:
+#:
+#:     58.1 m2   DOWN VILLA            unit measured from wall thickness
+#:     70.3 m2   REDDY - SITE PLAN     unit measured from wall thickness
+#:     82.7 m2   SITE PLAN FOR 3D      unit measured from wall thickness
+#:      6.9 m2   LATEST DRAWINGS       unit taken from the header, cm  <- wrong
+#:
+#: The gap is an order of magnitude, so 10 m2 is not a fine judgement. A living
+#: room, a bedroom or a garage clears it in any dwelling; nothing does in a plan
+#: read a hundred times too small.
+MIN_LARGEST_ROOM = 10.0
+
+#: One tiny room is a legitimate model — a single toilet, a plant enclosure, a
+#: guard hut. Several tiny rooms and nothing else is a scale error. Four is
+#: where a plan stops being plausibly one small structure, and it is what keeps
+#: this off SITE PLAN WITH GARDEN LEVELS, which solves 2 rooms and is too thin
+#: a model to judge either way.
+MIN_ROOMS_TO_JUDGE_SCALE = 4
+
 #: How much of the solved indoor floor a derived envelope must contain before
 #: it is worth calling an envelope.
 #:
@@ -223,6 +244,29 @@ def check(
                 "room-size", "warning",
                 f"Largest room is {biggest:.1f} m2. A room that big is usually "
                 "several rooms whose dividing walls were not detected.",
+                round(biggest, 1),
+            ))
+        elif len(spaces) >= MIN_ROOMS_TO_JUDGE_SCALE and biggest < MIN_LARGEST_ROOM:
+            # The mirror of the check above, and it catches something the rest
+            # of this file cannot see. A wrong unit shrinks the plan LINEARLY
+            # but the rooms QUADRATICALLY, so a drawing read at centimetres
+            # arrives looking entirely reasonable — 12.35 m across, 11 rooms,
+            # 0.074 m walls, every existing check passing — while its largest
+            # room is 6.87 m2 and its average is 4.98.
+            #
+            # Span cannot catch that: 12.35 m is an ordinary small building.
+            # Thickness cannot either: 0.074 m sits inside PLAUSIBLE_THICKNESS,
+            # as does the 0.092 m the same drawing yields if read as inches.
+            # Area is the only one of the three where a factor of 100 becomes a
+            # factor of 10,000, which is why this is worth a separate check
+            # rather than a wider band on either of the others.
+            v.checks.append(Check(
+                "room-size", "warning",
+                f"{len(spaces)} rooms and the largest is only {biggest:.1f} m2. "
+                "A building with this many rooms has at least one bigger than "
+                f"{MIN_LARGEST_ROOM:.0f} m2, so the drawing is probably being "
+                "read at the wrong unit — every area and quantity below is then "
+                "wrong by the square of that factor.",
                 round(biggest, 1),
             ))
 
