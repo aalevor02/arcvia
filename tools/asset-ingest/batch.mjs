@@ -306,8 +306,12 @@ for (const { id, best } of chosen) {
       { maxBuffer: 32 * 1024 * 1024, env: process.env },
     )
 
-    const block = stdout.slice(stdout.indexOf('{\n  "model"'))
-    entries.push({ id, json: JSON.parse(block) })
+    // The machine-readable line, not the indented block below it. Scraping
+    // pretty-print worked until the indentation changed, at which point every
+    // one of 32 successful ingests was reported as a failure.
+    const line = stdout.split('\n').find((l) => l.startsWith('ARCVIA_ENTRY:'))
+    if (!line) throw new Error('ingest produced no entry line')
+    entries.push({ id, json: JSON.parse(line.slice('ARCVIA_ENTRY:'.length)) })
 
     const facing = stdout.match(/facing\s+: (.+)/)?.[1] ?? ''
     console.log(`ok — ${facing}`)

@@ -226,6 +226,25 @@ if (facing.back === 'ambiguous') {
 }
 console.log(`written  : ${output} (${(conditioned.bytes / 1024).toFixed(0)} KB)`)
 
+// One line, unindented, for anything driving this in bulk.
+//
+// Separate from the pretty block below on purpose: that one is indented for a
+// human to paste, and scraping indented pretty-print out of a stream is
+// exactly the kind of parsing that works until the indentation changes. Which
+// it did — the batch runner reported all 32 items as failures while every one
+// of them had succeeded.
+const catalogueEntry = {
+  model: {
+    url: `/models/${options.item}.glb`,
+    licence: licence.name,
+    author: info.user?.displayName ?? info.user?.username ?? 'Unknown',
+    source: info.viewerUrl ?? `https://sketchfab.com/3d-models/${options.uid}`,
+    triangles: conditioned.decimate.after,
+    ...(facing.yaw ? { yaw: facing.yaw } : {}),
+  },
+}
+console.log('ARCVIA_ENTRY:' + JSON.stringify(catalogueEntry))
+
 // Printed rather than written into items.ts. Editing source from a script is
 // how a catalogue file ends up unreviewable — this is a paste that a person
 // sees, next to the licence they are agreeing to on the product's behalf.
