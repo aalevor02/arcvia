@@ -221,4 +221,27 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Blender exits 0 after an unhandled Python traceback, so a frame that
+    # crashed is indistinguishable from one that rendered if the caller checks
+    # the return code. Measured: the `cad` style raised AttributeError, wrote no
+    # PNG, and exited 0.
+    #
+    # That is worse than a plain failure because it disagrees with the resume
+    # logic. Resuming skips a view when its PNG exists, so a crashed frame is
+    # correctly retried — but a queue that recorded it as succeeded on rc == 0
+    # never asks for it again. The two halves reach opposite conclusions about
+    # the same frame and neither is obviously wrong from the outside.
+    #
+    # The stdout contract stays the source of truth — require ARCVIA_DONE:n/n
+    # and compare n against the expected count. This just stops the exit code
+    # from actively lying.
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as exc:          # noqa: BLE001 — deliberate catch-all
+        import traceback
+
+        traceback.print_exc()
+        print(f"ARCVIA_ERROR:{type(exc).__name__}: {exc}")
+        sys.exit(1)

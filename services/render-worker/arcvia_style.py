@@ -133,10 +133,28 @@ def _freestyle(bpy, sketch: bool):
     if not settings.linesets:
         settings.linesets.new("arcvia")
     lineset = settings.linesets[0]
+
+    # A lineset created by `linesets.new()` comes with a linestyle attached, but
+    # the one the empty scene already carries does not — and because of the
+    # guard above, that is the one we get. So `lineset.linestyle` is None
+    # exactly when the branch is skipped, which is always, and the next line to
+    # touch `.color` dies.
+    if lineset.linestyle is None:
+        lineset.linestyle = bpy.data.linestyles.new("arcvia")
     lineset.select_silhouette = True
     lineset.select_border = True
     lineset.select_crease = True
-    lineset.crease_angle = 1.4
+
+    # Blender 5 moved the crease angle from the lineset to the view layer's
+    # freestyle settings, so `lineset.crease_angle = 1.4` raises AttributeError
+    # and takes the whole render with it — the `cad` and `sketch` styles could
+    # not draw a frame at all.
+    #
+    # Set on `settings`, not dropped: the default is 2.346 rad (134 degrees) and
+    # we want 1.4 (80 degrees). That is the difference between creasing only at
+    # sharp folds and creasing at every ordinary wall corner, which is most of
+    # what makes the output read as a drawing rather than a silhouette.
+    settings.crease_angle = 1.4
 
     style = lineset.linestyle
     style.color = (0.10, 0.11, 0.14)
