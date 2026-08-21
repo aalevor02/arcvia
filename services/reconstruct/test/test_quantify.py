@@ -636,5 +636,89 @@ with tempfile.TemporaryDirectory() as tmp:
     ok("and preserves free-text the dataclass does not model",
        written["Notes"] == "keep this note", repr(written["Notes"]))
 
+print("\n-- boq: a defaulted thickness is not a measurement and must not become money --")
+# WHAT A DAY OF INVESTIGATION ACTUALLY SETTLED.
+#
+# `pair.py` assigns 0.115 m when it cannot find a wall's second face. Multiplying
+# that by a length, a height and a rate produced a rupee figure indistinguishable
+# from one derived from a measurement — and on the villa it was 42% of the run.
+#
+# Three sessions and seven agents spent a day on whether those metres should be
+# billed thicker or not at all. Of 127.87 m: ~52 m is a drawing sheet border and
+# a swimming pool rim, ~40 m is confirmed masonry by the drawing's own hatch, and
+# 36 m is still unknown after six independent discriminators were measured and
+# all six failed. The question is not answerable from the drawing, so the bill
+# stops answering it.
+MEASURED = {"a": {"x": 0.0, "y": 0.0}, "b": {"x": 10.0, "y": 0.0},
+            "thickness": 0.23, "paired": True, "confidence": 1.0}
+DEFAULTED = {"a": {"x": 0.0, "y": 2.0}, "b": {"x": 10.0, "y": 2.0},
+             "thickness": 0.115, "paired": False, "confidence": 0.4}
+# The discriminator has to be BOTH, and this is the wall that proves it: a real,
+# measured 115 mm partition. Excluding on thickness alone would throw it away.
+REAL_115 = {"a": {"x": 0.0, "y": 4.0}, "b": {"x": 10.0, "y": 4.0},
+            "thickness": 0.115, "paired": True, "confidence": 1.0}
+# Nine of these were in the villa: shadow gaps and cornice profiles that paired
+# cleanly at 45-95 mm. High confidence readings of something that is not a wall.
+CORNICE = {"a": {"x": 0.0, "y": 6.0}, "b": {"x": 10.0, "y": 6.0},
+           "thickness": 0.066, "paired": True, "confidence": 1.0}
+
+SPACE = [{"name": "R", "kind": "bedroom", "area": 40.0,
+          "loop": [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]}]
+
+
+def take_of(walls):
+    return boq._wall_volumes({"elements": {"walls": walls, "openings": []}}, 2.7)
+
+
+ok("a measured wall is priced",
+   take_of([MEASURED]).run == 10.0 and take_of([MEASURED]).unmeasured_run == 0.0)
+ok("a DEFAULTED wall leaves the money and is reported in metres",
+   take_of([DEFAULTED]).run == 0.0
+   and take_of([DEFAULTED]).unmeasured_run == 10.0
+   and take_of([DEFAULTED]).volume == 0.0,
+   f"run {take_of([DEFAULTED]).run}, unmeasured {take_of([DEFAULTED]).unmeasured_run}")
+ok("a REAL 115 mm partition is still priced — the test is confidence AND thickness",
+   take_of([REAL_115]).run == 10.0 and take_of([REAL_115]).unmeasured_run == 0.0,
+   f"run {take_of([REAL_115]).run}")
+ok("neither half of the test works alone",
+   boq._unmeasured(DEFAULTED) and not boq._unmeasured(REAL_115))
+ok("a 66 mm cornice is excluded as unbuildable, and counted",
+   take_of([CORNICE]).run == 0.0 and take_of([CORNICE]).unbuildable_run == 10.0)
+ok("a defaulted wall contributes NO face area, so no plaster or paint follows",
+   take_of([DEFAULTED]).face_area == 0.0)
+ok("total run still accounts for every metre, priced or not",
+   abs(take_of([MEASURED, DEFAULTED, CORNICE]).total_run - 30.0) < 1e-9,
+   str(take_of([MEASURED, DEFAULTED, CORNICE]).total_run))
+
+print("\n-- boq: the stamp is the deliverable, not the total --")
+mixed = {"elements": {"walls": [MEASURED, DEFAULTED], "openings": [], "spaces": SPACE}}
+report = boq.build(mixed, full, height=2.7).as_dict(TODAY)
+ok("half the run unmeasured trips the stamp", report["provisional"])
+ok("and the reason states the metres and the share",
+   "no measured thickness" in " ".join(report["provisionalReasons"])
+   and "50%" in " ".join(report["provisionalReasons"]),
+   str(report["provisionalReasons"])[:90])
+ok("the unmeasured run reaches the report as a number",
+   report["unmeasuredRun"] == 10.0, str(report["unmeasuredRun"]))
+
+clean = {"elements": {"walls": [MEASURED], "openings": [], "spaces": SPACE}}
+quiet = boq.build(clean, full, height=2.7).as_dict(TODAY)
+ok("a fully measured model is NOT stamped for this",
+   "no measured thickness" not in " ".join(quiet["provisionalReasons"]),
+   str(quiet["provisionalReasons"])[:70])
+
+# EVERY reason, not just the first. The villa is simultaneously one storey of
+# eight AND 42% unmeasured; with a single `or`-assigned string a reader saw only
+# the first, fixed it, re-ran, and met a second problem that had been there all
+# along — which reads like a new fault and is not.
+both = dict(mixed)
+both["frames"] = [{"origin": [0, 0]}] * 8
+both["frameUsed"] = {"index": 0}
+multi = boq.build(both, full, height=2.7).as_dict(TODAY)
+ok("two independent causes produce TWO reasons, not one",
+   len(multi["provisionalReasons"]) >= 2, str(len(multi["provisionalReasons"])))
+ok("and the single-string headline still works for existing readers",
+   multi["provisionalReason"] == multi["provisionalReasons"][0])
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

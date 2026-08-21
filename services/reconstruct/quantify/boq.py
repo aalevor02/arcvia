@@ -171,6 +171,30 @@ class Costing:
     provisional: bool = False
     provisional_reason: str = ""
 
+    #: EVERY reason, not just the first.
+    #:
+    #: ── What a single reason string was hiding ──────────────────────────────
+    #: `provisional_reason` is set with `or`, so the first cause to fire wins and
+    #: the rest never reach the surface. That was fine with two causes and is not
+    #: with five: the villa is simultaneously one storey of eight AND has 42% of
+    #: its wall run unmeasured, and a reader was shown only the first. Fixing one
+    #: and re-running would then reveal a second problem that had been there all
+    #: along, which reads like a new fault and is not.
+    #:
+    #: The single string stays as the headline so nothing downstream breaks, and
+    #: every cause is listed here. Same principle as `unpriced` and
+    #: `undetermined`: a thing that was found must not be invisible because
+    #: something else was found first.
+    provisional_reasons: list[str] = field(default_factory=list)
+
+    #: Metres of wall whose thickness was DEFAULTED, not measured. Priced at
+    #: nothing and reported in metres — see `_wall_volumes`.
+    unmeasured_run: float = 0.0
+
+    #: Metres excluded as too thin to be built at all. Reported so the exclusion
+    #: is visible rather than being a quiet subtraction.
+    unbuildable_run: float = 0.0
+
     #: Metres of wall per m2 of floor. Reported whether or not it is in band,
     #: because a reader checking a bill wants the number, not only the verdict.
     #: None when there was no enclosed floor area to divide by. NOT 0.0 — that
@@ -206,7 +230,10 @@ class Costing:
             # number becomes an instruction to a supplier.
             "provisional": self.provisional,
             "provisionalReason": self.provisional_reason,
+            "provisionalReasons": self.provisional_reasons,
             "wallRunPerArea": self.wall_run_per_area,
+            "unmeasuredRun": self.unmeasured_run,
+            "unbuildableRun": self.unbuildable_run,
             "total": round(self.total, 2),
             "currency": "INR",
             "bySection": {k: round(v, 2) for k, v in sorted(by_section.items())},
@@ -226,6 +253,21 @@ class Costing:
                 "Check `oldestRateDays` before quoting.",
             ],
         }
+
+
+def _flag(costing: "Costing", reason: str) -> None:
+    """
+    Mark the bill provisional and RECORD the reason alongside any others.
+
+    Every caller used `costing.provisional_reason = costing.provisional_reason or
+    (...)`, which keeps the first cause and silently discards the rest. With five
+    causes that is a bill reporting a fifth of what is wrong with it.
+    """
+    costing.provisional = True
+    if reason not in costing.provisional_reasons:
+        costing.provisional_reasons.append(reason)
+    if not costing.provisional_reason:
+        costing.provisional_reason = reason
 
 
 def _reconcile(
@@ -262,14 +304,102 @@ def _reconcile(
     return None, ""
 
 
-def _wall_volumes(model: dict, height: float) -> tuple[float, float, float]:
-    """Masonry volume, wall face area, and total run — net of openings."""
+#: The thickness `hypothesise/pair.py` assigns when it could NOT measure one,
+#: and the confidence it stamps alongside. A wall carrying both was never
+#: measured; it was defaulted.
+#:
+#: ── Why both, and never either alone ────────────────────────────────────────
+#: Measured on the villa, the two populations are cleanly separable and only
+#: jointly:
+#:
+#:     thickness 0.1150  confidence 0.40  paired False   35 walls   defaulted
+#:     thickness 0.1150  confidence 1.00  paired True     8 walls   really 115 mm
+#:
+#: Excluding on thickness alone throws away eight genuinely measured 115 mm
+#: partitions. Excluding on the `paired` flag alone is worse: it is a statement
+#: about how the reading went, not about whether the number is real, and 40 m of
+#: unpaired run has since been confirmed as masonry face by the drawing's own
+#: hatch. The pair is the evidence; either half on its own is a proxy.
+UNMEASURED_THICKNESS = 0.115
+UNMEASURED_CONFIDENCE = 0.5
+
+#: Below this, in metres, nothing is built. 100 mm is the thinnest stud
+#: partition, and `ingest/raster.py` already reasons from the same figure.
+#:
+#: What this excludes, measured: nine paired segments between 45 mm and 95 mm,
+#: 12.13 m and 2.235 m3, worth INR 22,960. One is a 6.53 m member at 66 mm on
+#: A5 FALSE CEILING — a shadow gap or cornice profile that paired cleanly and
+#: became a wall. They carry confidence 1.0, so they are not low-confidence
+#: readings; they are high-confidence readings of something that is not a wall.
+MIN_BUILDABLE_THICKNESS = 0.10
+
+#: Share of total wall run that may carry a defaulted thickness before the bill
+#: is stamped provisional for it. See where it is applied for why 5%.
+UNMEASURED_RUN_TRIP = 0.05
+
+
+@dataclass
+class WallTake:
+    """What the wall graph yields, split by what can be justified."""
+
+    #: Priced. Thickness measured off two faces and thick enough to build.
+    volume: float = 0.0
+    face_area: float = 0.0
+    run: float = 0.0
+
+    #: Reported in METRES and priced at zero — see `_wall_volumes`.
+    unmeasured_run: float = 0.0
+    #: Excluded as unbuildable, reported so the exclusion is visible.
+    unbuildable_run: float = 0.0
+    unbuildable_volume: float = 0.0
+
+    @property
+    def total_run(self) -> float:
+        return self.run + self.unmeasured_run + self.unbuildable_run
+
+
+def _unmeasured(wall: dict) -> bool:
+    """Was this wall's thickness defaulted rather than measured?"""
+    thickness = float(wall.get("thickness", 0.23))
+    confidence = float(wall.get("confidence", 1.0))
+    return (
+        abs(thickness - UNMEASURED_THICKNESS) < 1e-6
+        and confidence <= UNMEASURED_CONFIDENCE
+    )
+
+
+def _wall_volumes(model: dict, height: float) -> WallTake:
+    """
+    Masonry volume, wall face area, and run — net of openings, split by evidence.
+
+    ── Why a defaulted thickness must not become money ────────────────────────
+    `pair.py` assigns 0.115 m when it cannot find a wall's second face. That is a
+    placeholder so the geometry has something to extrude. Multiplying it by a
+    length, a height and a rate turns it into a rupee figure indistinguishable
+    from one derived from a measurement, and on this villa it is 42% of the run.
+
+    Three sessions and seven investigating agents spent a day deciding whether
+    those metres should be billed thicker or not at all, and the answer is that
+    the question is unanswerable from the drawing: of 127.87 m, roughly 52 m is a
+    sheet border and a swimming pool, 40 m is confirmed masonry face by the
+    drawing's own hatch, and 36 m remains genuinely unknown after six independent
+    discriminators were measured and all six failed.
+
+    So this stops answering it. Defaulted walls leave the money entirely and are
+    reported as METRES OF RUN with no price, which is the one honest statement
+    available: "there are 127.87 m of wall here whose thickness nobody measured".
+    A quantity surveyor can act on that. They cannot act on a total that has
+    quietly averaged a guess into it.
+
+    This is the fourth instance of one principle in this module and its
+    neighbours — `unpriced` for lines with no rate, `undetermined` for daylight
+    with no window, `None` for a ratio with no floor area, and now run with no
+    measured thickness. Each began as a number that looked computed and was not.
+    """
     walls = model.get("elements", {}).get("walls", [])
     openings = model.get("elements", {}).get("openings", [])
 
-    volume = 0.0
-    face_area = 0.0
-    run = 0.0
+    take = WallTake()
 
     for wall in walls:
         a, b = wall["a"], wall["b"]
@@ -293,10 +423,22 @@ def _wall_volumes(model: dict, height: float) -> tuple[float, float, float]:
         duplicate = float(wall.get("duplicate", 0.0))
         billable = max(length - duplicate, 0.0)
 
-        run += billable
-        volume += billable * thickness * height
+        # Sorted before it is counted. A wall that fails either test contributes
+        # its LENGTH to the report and nothing at all to the money — no volume,
+        # no face area, so no brick, mortar, plaster or paint follows from it.
+        if _unmeasured(wall):
+            take.unmeasured_run += billable
+            continue
+
+        if thickness < MIN_BUILDABLE_THICKNESS:
+            take.unbuildable_run += billable
+            take.unbuildable_volume += billable * thickness * height
+            continue
+
+        take.run += billable
+        take.volume += billable * thickness * height
         # Two faces per wall, for plaster and paint.
-        face_area += 2 * billable * height
+        take.face_area += 2 * billable * height
 
     hole_area = 0.0
     hole_volume = 0.0
@@ -307,11 +449,9 @@ def _wall_volumes(model: dict, height: float) -> tuple[float, float, float]:
         hole_area += width * opening_height
         hole_volume += width * opening_height * thickness
 
-    return (
-        max(volume - hole_volume, 0.0),
-        max(face_area - 2 * hole_area, 0.0),
-        run,
-    )
+    take.volume = max(take.volume - hole_volume, 0.0)
+    take.face_area = max(take.face_area - 2 * hole_area, 0.0)
+    return take
 
 
 def build(
@@ -337,11 +477,10 @@ def build(
     scale = scale if isinstance(scale, dict) else {}
 
     if scale.get("trustworthy") is False:
-        costing.provisional = True
-        costing.provisional_reason = (
+        _flag(costing, (
             scale.get("warning")
             or "The model's scale was not confirmed against a second source."
-        )
+        ))
 
     # A model built from more than one storey on a single slab doubles every
     # quantity below, and nothing in the arithmetic can notice. Detected by the
@@ -369,14 +508,13 @@ def build(
         origin = (frames[index].get("origin") if isinstance(index, int)
                   and 0 <= index < len(frames) and isinstance(frames[index], dict)
                   else None)
-        costing.provisional = True
-        costing.provisional_reason = (
+        _flag(costing, (
             f"This is drawing {(index if isinstance(index, int) else 0) + 1} of "
             f"{len(frames)} on the sheet"
             + (f" ({origin})" if origin else "")
             + ". If the others are further storeys of the same building, this "
             "bill covers one of them."
-        )
+        ))
 
     def add(section, description, quantity, unit, rule, *terms, tier=None, note=""):
         rate = library.find(*terms, tier=tier)
@@ -422,7 +560,36 @@ def build(
         costing.lines.append(line)
         return line
 
-    volume, face_area, run = _wall_volumes(model, height)
+    take = _wall_volumes(model, height)
+    volume, face_area, run = take.volume, take.face_area, take.run
+    costing.unmeasured_run = round(take.unmeasured_run, 2)
+    costing.unbuildable_run = round(take.unbuildable_run, 2)
+
+    # THE STAMP IS THE DELIVERABLE HERE, NOT THE TOTAL.
+    #
+    # ── Why a share of run rather than a share of money ─────────────────────
+    # Defaulted walls contribute nothing to the total, so measuring their
+    # importance in rupees would report zero however much of the building they
+    # are. Run is the quantity that still exists when the price does not.
+    #
+    # On the villa this fires at 42% — 127.87 m of 305.15 m has no measured
+    # thickness. The honest headline for that model is not a corrected figure;
+    # it is "two fifths of the wall run was never measured", which tells the
+    # reader the bill is a floor rather than an estimate.
+    #
+    # 5% because a handful of stranded faces is normal on any drawing and does
+    # not change how a bill should be read, while anything approaching a tenth
+    # does.
+    if take.total_run > 0:
+        share = take.unmeasured_run / take.total_run
+        if share > UNMEASURED_RUN_TRIP:
+            _flag(costing, (
+                f"{take.unmeasured_run:.1f} m of {take.total_run:.1f} m of wall "
+                f"({share:.0%}) has no measured thickness — the reader could not "
+                "find a second face, so a default was used. Those metres are "
+                "reported and NOT priced, which makes this total a floor rather "
+                "than an estimate. The drawing has to be checked before quoting."
+            ))
     rooms = model.get("elements", {}).get("spaces", [])
     openings = model.get("elements", {}).get("openings", [])
 
@@ -501,24 +668,22 @@ def build(
         # closing, and a bill still prices — INR 1,115,165 of it, measured — with
         # its shape check silently absent.
         costing.wall_run_per_area = None
-        costing.provisional = True
-        costing.provisional_reason = costing.provisional_reason or (
+        _flag(costing, (
             "No enclosed floor area, so the wall-run-per-area check could not "
             "run. This bill has no independent check on its wall quantities — "
             "the one measurement that would catch walls counted twice is "
             "missing, not passing."
-        )
+        ))
     else:
         ratio = run / enclosed
         if not (WALL_RUN_BAND[0] <= ratio <= WALL_RUN_BAND[1]):
-            costing.provisional = True
-            costing.provisional_reason = costing.provisional_reason or (
+            _flag(costing, (
                 f"This model has {ratio:.2f} m of wall per m2 of floor, outside "
                 f"the {WALL_RUN_BAND[0]}-{WALL_RUN_BAND[1]} a building normally "
                 "sits in. Either the plan is unusually cellular, or walls are "
                 "being counted more than once — check the wall run before "
                 "ordering against this."
-            )
+            ))
         costing.wall_run_per_area = round(ratio, 3)
 
     # ---- Masonry ------------------------------------------------------------
