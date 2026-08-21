@@ -33,11 +33,7 @@ from typing import Literal, NamedTuple
 import cv2
 import numpy as np
 
-try:
-    import pymupdf
-except Exception:  # pragma: no cover - depends on the install
-    pymupdf = None  # type: ignore[assignment]
-
+import pdfbackend
 import labels as text_labels
 
 Kind = Literal["plan", "elevation", "render", "board", "other"]
@@ -67,8 +63,8 @@ FLOOR_WORDS = re.compile(
 )
 
 
-def available() -> bool:
-    return pymupdf is not None
+def available() -> bool:  # noqa: D401 - kept for the /health report
+    return pdfbackend.available()
 
 
 class Sheet(NamedTuple):
@@ -88,25 +84,19 @@ class Sheet(NamedTuple):
 
 def outline(data: bytes) -> list[Sheet]:
     """Everything worth extracting from the document, without extracting it."""
-    if pymupdf is None:
-        raise RuntimeError("PyMuPDF is not installed.")
-
-    document = pymupdf.open(stream=data, filetype="pdf")
+    document = pdfbackend.open_document(data)
     sheets: list[Sheet] = []
     boilerplate = repeated_text(document)
 
-    for number, page in enumerate(document, start=1):
+    for page in document:
+        number = page.number
         page_area = abs(page.rect.width * page.rect.height) or 1.0
         blocks = [
-            block for block in text_blocks(page) if normalise(block[1]) not in boilerplate
+            block for block in page.text_blocks() if normalise(block[1]) not in boilerplate
         ]
 
-        for index, info in enumerate(page.get_images(full=True)):
-            xref = info[0]
-            rects = page.get_image_rects(xref)
-            if not rects:
-                continue
-            placed = max(rects, key=lambda rect: abs(rect.width * rect.height))
+        for index, image in enumerate(page.images()):
+            placed = image.rect
             share = abs(placed.width * placed.height) / page_area
             if share < MIN_PAGE_SHARE:
                 continue
@@ -128,12 +118,10 @@ def outline(data: bytes) -> list[Sheet]:
                     if kind is not None:
                         break
 
-            pixmap = pymupdf.Pixmap(document, xref)
-            if pixmap.n > 4:
-                pixmap = pymupdf.Pixmap(pymupdf.csRGB, pixmap)
-
+            pixels = None
             if kind is None:
-                kind = classify_pixels(to_array(pixmap))
+                pixels = image.to_array()
+                kind = classify_pixels(pixels)
 
             sheets.append(
                 Sheet(
@@ -143,10 +131,14 @@ def outline(data: bytes) -> list[Sheet]:
                     caption=caption,
                     floor=floor_of(caption),
                     room=room_of(caption) if kind in ("render", "plan") else None,
-                    width=pixmap.width,
-                    height=pixmap.height,
+                    width=image.width,
+                    height=image.height,
                     share=round(share, 3),
-                    palette=palette(to_array(pixmap)) if kind == "render" else [],
+                    palette=(
+                        palette(pixels if pixels is not None else image.to_array())
+                        if kind == "render"
+                        else []
+                    ),
                 )
             )
 
@@ -156,19 +148,12 @@ def outline(data: bytes) -> list[Sheet]:
 
 def extract(data: bytes, page: int, index: int, long_edge: int = 2400) -> bytes:
     """One image out of the document, as PNG, bounded in size."""
-    if pymupdf is None:
-        raise RuntimeError("PyMuPDF is not installed.")
-
-    document = pymupdf.open(stream=data, filetype="pdf")
+    document = pdfbackend.open_document(data)
     try:
-        images = document[page - 1].get_images(full=True)
+        images = document[page - 1].images()
         if index >= len(images):
             raise IndexError(f"Page {page} has no image {index}.")
-
-        pixmap = pymupdf.Pixmap(document, images[index][0])
-        if pixmap.n > 4:
-            pixmap = pymupdf.Pixmap(pymupdf.csRGB, pixmap)
-        image = to_array(pixmap)
+        image = images[index].to_array()
     finally:
         document.close()
 
@@ -186,31 +171,9 @@ def extract(data: bytes, page: int, index: int, long_edge: int = 2400) -> bytes:
     return encoded.tobytes()
 
 
-def to_array(pixmap) -> np.ndarray:
-    """A PyMuPDF pixmap as an OpenCV BGR image."""
-    buffer = np.frombuffer(pixmap.samples, dtype=np.uint8)
-    buffer = buffer.reshape(pixmap.height, pixmap.width, pixmap.n)
-    if pixmap.n == 1:
-        return cv2.cvtColor(buffer, cv2.COLOR_GRAY2BGR)
-    if pixmap.n == 4:
-        return cv2.cvtColor(buffer, cv2.COLOR_RGBA2BGR)
-    return cv2.cvtColor(buffer, cv2.COLOR_RGB2BGR)
-
-
 def text_blocks(page) -> list[tuple]:
     """Each block of text on the page as (rect, text, point size)."""
-    blocks = []
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type") != 0:
-            continue
-        spans = [span for line in block["lines"] for span in line["spans"]]
-        text = re.sub(r"\s+", " ", " ".join(span["text"] for span in spans)).strip()
-        if not text:
-            continue
-        blocks.append(
-            (pymupdf.Rect(block["bbox"]), text, max(span["size"] for span in spans))
-        )
-    return blocks
+    return page.text_blocks()
 
 
 def normalise(text: str) -> str:
@@ -239,7 +202,7 @@ def repeated_text(document) -> set[str]:
 
     seen: dict[str, int] = {}
     for page in document:
-        for text in {normalise(block[1]) for block in text_blocks(page)}:
+        for text in {normalise(block[1]) for block in page.text_blocks()}:
             if text:
                 seen[text] = seen.get(text, 0) + 1
 

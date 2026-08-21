@@ -1,0 +1,39 @@
+# Development and diagnosis only. NOT installed by a release, and nothing in
+# `requirements.txt` refers to this file.
+#
+#     pip install -r requirements-dev.txt
+#
+# ── Read this before installing ──────────────────────────────────────────────
+# PyMuPDF is dual-licensed AGPL-3.0 or commercial, and AGPL reaches NETWORK USE:
+# hosting a service with it inside obliges you to offer the whole source to
+# every user of that service. It was the only restrictive dependency in the
+# entire stack and was removed on 2026-08-22 for exactly that reason.
+#
+# It is back as a SELECTABLE second reader, not as a dependency. The difference
+# is the whole point:
+#
+#   * `requirements.txt` does not mention it. A deployment that installs the
+#     documented way does not have it and cannot accidentally reach it.
+#   * `pdfbackend.py` never falls back to it. Selecting it is an explicit act
+#     (`ARCVIA_PDF_BACKEND=pymupdf`), and asking for it on a machine without it
+#     raises rather than quietly using the permissive reader.
+#   * The obligation attaches to distribution and network use, not to how often
+#     the library is called. A "we only use it sometimes" arrangement would
+#     carry the full obligation. Only "it is not in the shipped artifact" does
+#     not.
+#
+# So: fine on a developer's machine, fine in a diagnostic container, never in
+# an image that serves users. If that changes, buy the commercial licence.
+#
+# ── Why have it at all ───────────────────────────────────────────────────────
+# Two independent readers of the same PDF disagree in useful ways. When a deck
+# extracts as an empty sheet list, re-reading it with the other engine turns
+# "the importer is broken" into "these two disagree about page 4". That is worth
+# a great deal at 2am and nothing at all in production.
+pymupdf>=1.24
+
+# The fixture generator. PyMuPDF used to write the test PDFs too; moving that to
+# reportlab is what let it leave the shipped and the default dev install alike,
+# and the fixtures must keep working when PyMuPDF is absent — which is the
+# normal case. Already in the venv; pinned here so a fresh clone gets it.
+reportlab>=4.0

@@ -30,4 +30,14 @@ onnxruntime>=1.20
 
 # Reading the PDF decks people actually send instead of drawings. Optional in
 # the same way: /health reports reads_pdf, and the service runs without it.
-pymupdf>=1.24
+#
+# NOT PyMuPDF. It is dual-licensed AGPL-3.0 or commercial, and AGPL reaches
+# NETWORK USE — hosting this as a service with PyMuPDF inside would oblige us to
+# publish the whole source to every user. It was the only restrictive dependency
+# in the entire stack; everything else is MIT/BSD/Apache/CC0.
+#
+# pypdfium2 (BSD-3/Apache-2.0) gives embedded images at native resolution, which
+# is the trick deck.py relies on. pdfplumber (MIT) gives positioned text WITH
+# font size, which is what separates a caption from a footer. See pdfbackend.py.
+pypdfium2>=5.0
+pdfplumber>=0.11

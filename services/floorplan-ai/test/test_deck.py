@@ -15,7 +15,6 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-import pymupdf
 
 import deck
 
@@ -52,19 +51,44 @@ def photograph(width=900, height=600, seed=4):
     return cv2.resize(base, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
+#: The fixture is written with reportlab (BSD-3), not PyMuPDF.
+#:
+#: PyMuPDF is AGPL, and while a test fixture never ships, leaving it in the dev
+#: dependencies means the obligation is one careless `import` away from the
+#: service. Removing it entirely is cheaper than remembering the distinction.
+#:
+#: reportlab measures y UPWARD from the bottom of the page; the rectangles below
+#: are given in the top-down coordinates the rest of this codebase uses, and
+#: converted in one place.
+PAGE_W, PAGE_H = 960, 540
+
+
+def _place(canvas, png: bytes, x0, y0, x1, y1):
+    from reportlab.lib.utils import ImageReader
+
+    canvas.drawImage(
+        ImageReader(io.BytesIO(png)),
+        x0, PAGE_H - y1,                 # the flip, once
+        width=x1 - x0, height=y1 - y0,
+        mask=None,
+    )
+
+
 def build_deck(pages):
     """A PDF of captioned, full-bleed images — the shape a studio deck has."""
     import cv2
+    from reportlab.pdfgen import canvas as rl_canvas
 
-    document = pymupdf.open()
+    out = io.BytesIO()
+    canvas = rl_canvas.Canvas(out, pagesize=(PAGE_W, PAGE_H))
     for caption, image in pages:
-        page = document.new_page(width=960, height=540)
         ok, encoded = cv2.imencode(".png", image)
         assert ok
-        page.insert_image(pymupdf.Rect(60, 40, 900, 440), stream=encoded.tobytes())
-        page.insert_text((60, 480), caption, fontsize=18)
-    out = io.BytesIO()
-    document.save(out)
+        _place(canvas, encoded.tobytes(), 60, 40, 900, 440)
+        canvas.setFont("Helvetica", 18)
+        canvas.drawString(60, PAGE_H - 480, caption)
+        canvas.showPage()
+    canvas.save()
     return out.getvalue()
 
 
@@ -123,13 +147,19 @@ check(
 # ---- Small images are furniture of the page, not content -------------------
 import cv2
 
-document = pymupdf.open()
-page = document.new_page(width=960, height=540)
-ok, encoded = cv2.imencode(".png", photograph(80, 60))
-page.insert_image(pymupdf.Rect(10, 10, 60, 45), stream=encoded.tobytes())
-page.insert_text((60, 480), "ARDS x CDC, Hyderabad", fontsize=12)
+from reportlab.pdfgen import canvas as rl_canvas
+
+ok, logo = cv2.imencode(".png", photograph(80, 60))
+assert ok
+
 buffer = io.BytesIO()
-document.save(buffer)
+canvas = rl_canvas.Canvas(buffer, pagesize=(PAGE_W, PAGE_H))
+_place(canvas, logo.tobytes(), 10, 10, 60, 45)
+canvas.setFont("Helvetica", 12)
+canvas.drawString(60, PAGE_H - 480, "ARDS x CDC, Hyderabad")
+canvas.showPage()
+canvas.save()
+
 check("a logo is ignored", deck.outline(buffer.getvalue()) == [])
 
 # ---- Extraction ------------------------------------------------------------
@@ -148,6 +178,78 @@ check(
     "a room survives a parenthesised aside",
     deck.room_of("GROUND FLOOR - BEDROOM (EAST ORIENTED)") == "Bedroom",
 )
+
+# ---- The two readers must agree --------------------------------------------
+#
+# `pdfbackend` ships pypdfium2 + pdfplumber and can optionally be pointed at
+# PyMuPDF (`ARCVIA_PDF_BACKEND=pymupdf`, see requirements-dev.txt). Having two
+# is only worth anything if they agree on an easy document — otherwise a
+# disagreement on a hard one tells you nothing, because you never established a
+# baseline.
+#
+# The specific thing being guarded: PyMuPDF and pdfplumber measure y DOWNWARD
+# from the top of the page, pypdfium2 measures it UPWARD from the bottom. There
+# is a `height - y` flip on one path and none on the other. Getting that wrong
+# does not raise — it pairs each image with some other page's caption, so every
+# sheet comes back plausibly populated and wrong. Comparing captions across the
+# backends is what catches it.
+#
+# Skipped, not failed, when PyMuPDF is absent. Absent is the *normal* case: it
+# is not in requirements.txt and a release never has it.
+import pdfbackend  # noqa: E402
+
+if pdfbackend.backend_available(pdfbackend.PYMUPDF):
+    def read_with(backend):
+        previous = os.environ.get("ARCVIA_PDF_BACKEND")
+        os.environ["ARCVIA_PDF_BACKEND"] = backend
+        try:
+            assert pdfbackend.backend_name() == backend
+            return deck.outline(data)
+        finally:
+            if previous is None:
+                os.environ.pop("ARCVIA_PDF_BACKEND", None)
+            else:
+                os.environ["ARCVIA_PDF_BACKEND"] = previous
+
+    permissive = read_with(pdfbackend.PERMISSIVE)
+    mupdf = read_with(pdfbackend.PYMUPDF)
+
+    check("both backends find the same number of sheets",
+          len(permissive) == len(mupdf), f"{len(permissive)} vs {len(mupdf)}")
+
+    # Caption first and on its own. If the flip were wrong this is the assertion
+    # that fails, and it fails legibly — you see which caption landed on which
+    # page rather than a downstream classification being mysteriously off.
+    check("both backends pair the same caption with each page",
+          [(s.page, s.caption) for s in permissive] == [(s.page, s.caption) for s in mupdf],
+          f"{[(s.page, s.caption) for s in mupdf]}")
+
+    check("both backends agree what each sheet is",
+          [(s.page, s.kind, s.floor, s.room) for s in permissive]
+          == [(s.page, s.kind, s.floor, s.room) for s in mupdf])
+
+    # Native resolution, not placed size — the reason either backend is worth
+    # having. The fixture places a 900 px drawing into an 840 pt box, so a
+    # backend that rasterised the page region would come back at ~840 and a
+    # backend reading the embedded bitmap comes back at 900.
+    check("both backends read the embedded bitmap at its native size",
+          [(s.page, s.width, s.height) for s in permissive]
+          == [(s.page, s.width, s.height) for s in mupdf],
+          f"{[(s.width, s.height) for s in mupdf]}")
+else:
+    print("SKIP  cross-backend agreement (PyMuPDF not installed — the normal case)")
+
+# An unrecognised backend name must raise rather than quietly using the other
+# reader. This is the failure mode that would otherwise be invisible: the PDFs
+# still parse, so nothing looks wrong until two machines disagree about a deck.
+os.environ["ARCVIA_PDF_BACKEND"] = "pymudpf"  # a plausible typo
+try:
+    deck.outline(data)
+    check("a mistyped backend name is refused", False, "it silently used a backend")
+except RuntimeError as error:
+    check("a mistyped backend name is refused", "not a backend" in str(error))
+finally:
+    os.environ.pop("ARCVIA_PDF_BACKEND", None)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

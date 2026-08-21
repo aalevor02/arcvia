@@ -37,6 +37,7 @@ import numpy as np
 
 import deck
 import labels as text_labels
+import pdfbackend
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -162,6 +163,12 @@ def health() -> dict:
         # rather than merely how well it does it, so the caller is told.
         "reads_text": text_labels.available(),
         "reads_pdf": deck.available(),
+        # WHICH reader, not just whether there is one. Two backends that both
+        # work will still disagree about a difficult deck, so a bug report that
+        # does not say which one produced the output is a bug report that costs
+        # an extra round trip. Anything other than "permissive" here means a
+        # human deliberately selected it — see requirements-dev.txt.
+        "pdf_backend": pdfbackend.backend_name(),
     }
 
 
