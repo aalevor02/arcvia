@@ -330,6 +330,43 @@ async function start(job) {
 
   child.on('close', (code) => {
     if (!running.has(job.id)) return // already cancelled or timed out
+
+    // A multi-view run that rendered SOME of its views is not done.
+    //
+    // ── The partial success this closes ─────────────────────────────────────
+    // `render_views.py` prints `ARCVIA_DONE:<n>/<total>` and the marker loop
+    // above already captures it, so a 22-view run that lost two views recorded
+    // `markers.done = "20/22"` on the job. Nothing ever compared the two
+    // numbers. The run exited 0, printed ARCVIA_OUTPUT for the views that did
+    // work, published, and finished as `done` at 100% — with the evidence of its
+    // own incompleteness sitting in the job record, unread.
+    //
+    // It is worse than a clean failure because of how resuming works: a view is
+    // skipped when its PNG already exists, so a retry of a job marked `done`
+    // never asks for the missing frames again. The customer has a complete-
+    // looking job that is permanently two frames short.
+    //
+    // Not hypothetical — three of the six styles do not currently render, and
+    // Blender EXITS 0 ON A PYTHON TRACEBACK, so the exit code cannot be the
+    // check. The existing `code === 0 && outputPath` guard is what stops a
+    // total failure from publishing; this is the same guard for a partial one.
+    //
+    // Absence of the marker is NOT a failure: `render.py`, the single-image
+    // path, never prints it. Only a marker that is present and short counts.
+    const short = viewsMissing(entry.markers)
+    if (short) {
+      void finish('failed', {
+        markers: entry.markers,
+        error:
+          `Rendered ${short.done} of ${short.total} views. The run exited ` +
+          `cleanly but did not finish — Blender returns 0 even on a Python ` +
+          `error, so the exit code cannot be trusted here. Retrying re-renders ` +
+          `only the missing views.\n` +
+          (stderr.trim().split('\n').slice(-3).join('\n') || ''),
+      })
+      return
+    }
+
     if (code === 0 && outputPath) {
       void publish(outputPath, job)
         .then((url) =>
@@ -344,6 +381,28 @@ async function start(job) {
       })
     }
   })
+}
+
+/**
+ * Whether a multi-view run finished short of the views it was asked for.
+ *
+ * Returns `{ done, total }` when the worker reported progress AND that progress
+ * is incomplete, otherwise null. Exported so the rule can be tested without a
+ * Blender process — it is a decision about a string, and burying it in a `close`
+ * callback made it untestable and therefore untested, which is how it came to be
+ * recorded on every job and read by nothing.
+ *
+ * A missing marker returns null on purpose. `render.py`, the single-image path,
+ * never prints ARCVIA_DONE, and treating silence as failure would fail every
+ * ordinary render.
+ */
+export function viewsMissing(markers) {
+  const progressed = /^(\d+)\/(\d+)$/.exec((markers && markers.done) || '')
+  if (!progressed) return null
+  const done = Number(progressed[1])
+  const total = Number(progressed[2])
+  if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null
+  return done < total ? { done, total } : null
 }
 
 /**
