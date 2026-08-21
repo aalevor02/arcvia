@@ -19,6 +19,15 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
  */
 const BAKED_ENVIRONMENT = 0.12
 
+/**
+ * Environment intensity when the scene is NOT lit by a bake.
+ *
+ * Named because it now has two callers — `setBakedLighting` restoring it and
+ * `loadEnvironment` asserting it for a freshly picked HDRI — and two literals
+ * that have to agree about one physical fact will eventually stop agreeing.
+ */
+const LIT_ENVIRONMENT = 0.85
+
 export interface LightSpec {
   id: string
   type: 'point' | 'spot' | 'sun' | 'area'
@@ -450,7 +459,7 @@ export class SceneViewer {
     // Shadow maps have nothing left to do once the lights are off, and they
     // are the most expensive thing in the frame.
     this.renderer.shadowMap.enabled = !enabled
-    this.scene.environmentIntensity = enabled ? BAKED_ENVIRONMENT : 0.85
+    this.scene.environmentIntensity = enabled ? BAKED_ENVIRONMENT : LIT_ENVIRONMENT
 
     // Screen-space AO on top of a baked scene darkens corners that are already
     // darkened, and the result reads as grime rather than shade. The bake
@@ -714,11 +723,66 @@ export class SceneViewer {
     this.options.onReady?.({ triangles: Math.round(triangles), objects })
   }
 
-  async loadEnvironment(url: string): Promise<void> {
-    const texture = await new RGBELoader().loadAsync(url)
+  /**
+   * Light the scene from an HDRI.
+   *
+   * ── Three faults this had, all of them silent ──────────────────────────────
+   * Found by the session wiring the asset hub's 301 CC0 HDRIs to a picker, and
+   * verified here before fixing. None of them throws; each produces a viewer
+   * that looks subtly wrong and blames the HDRI.
+   *
+   * 1. THE PREVIOUS TEXTURE WAS NEVER DISPOSED. `applySkyBackground` a few
+   *    hundred lines up disposes carefully and explains why; this did not, so
+   *    every pick leaked a cubemap. Three.js does not free GPU memory on its
+   *    own — that is the first thing this repo's own notes say about it.
+   *
+   *    This was NOT merely latent, which is worth recording because the report
+   *    that found it said "only reachable once something calls it".
+   *    `loadEnvironment` already has two callers — `apps/visualisation`'s
+   *    dollhouse-live and walkthrough-live pages — so the leak has been
+   *    reachable in production all along. Bounded there because those pages
+   *    load once per scene, which is exactly why nobody saw it.
+   *
+   * 2. IT NEVER SET `environmentIntensity`. Enabling a lightmap bake drops that
+   *    to BAKED_ENVIRONMENT (0.12), because a baked scene already carries its
+   *    indirect light and would double-count. An HDRI chosen AFTER a bake
+   *    therefore arrived seven times dimmer than the 0.85 default and looked
+   *    like a bad HDRI. The user's next move is to pick a different one, which
+   *    is also dim.
+   *
+   * 3. NO ERROR PATH. A failed fetch or a malformed .hdr rejected into whatever
+   *    called it. `models.ts` deliberately warns and keeps its stand-in rather
+   *    than tearing down the scene; an environment is strictly less essential
+   *    than a model, so it has even less business taking the viewer with it.
+   *
+   * Returns whether the environment actually loaded, so a caller can leave its
+   * picker on the previous selection instead of showing one that is not applied.
+   */
+  async loadEnvironment(url: string): Promise<boolean> {
+    let texture: THREE.DataTexture
+    try {
+      texture = await new RGBELoader().loadAsync(url)
+    } catch (error) {
+      // Keep whatever is lighting the scene now. A viewer with the wrong
+      // environment is usable; a viewer that threw during a picker click is not.
+      console.warn(`[SceneViewer] could not load environment ${url}:`, error)
+      return false
+    }
+
     texture.mapping = THREE.EquirectangularReflectionMapping
+
+    // Dispose the outgoing one AFTER the new one is in hand, never before: on a
+    // failed load the old environment is still the one on screen.
+    const previous = this.scene.environment
     this.scene.environment = texture
+    if (previous instanceof THREE.Texture && previous !== texture) previous.dispose()
+
+    // An HDRI is a real environment, so it gets the un-baked intensity. If a
+    // bake is subsequently toggled, `setBaked` reasserts BAKED_ENVIRONMENT.
+    this.scene.environmentIntensity = LIT_ENVIRONMENT
+
     this.needsRender = true
+    return true
   }
 
   /** Replace the light rig with the one the user authored. */
