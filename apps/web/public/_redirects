@@ -1,0 +1,10 @@
+# Published walkthroughs.
+#
+# Every walkthrough is served by one static HTML file that reads its slug from
+# the path at runtime — scenes are published long after the site is built, so
+# there is nothing to prerender. This rewrite is what makes /view/casa-altinho/
+# work instead of only /view/?s=casa-altinho.
+#
+# 200, not 301: the browser must keep the original URL so the page can read the
+# slug out of it. A redirect would rewrite the address bar and lose it.
+/view/*  /view/index.html  200

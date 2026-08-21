@@ -1,0 +1,268 @@
+---
+import brand from '@arcvia/brand'
+
+/**
+ * The published walkthrough — what a client actually opens.
+ *
+ * ── Why this page is the product ────────────────────────────────────────────
+ * Everything upstream of here is a tool for making this page. A buyer never
+ * sees the plan editor, the catalogue or the bake queue; they get a link, and
+ * this is what is behind it. If this page is not convincing, none of the rest
+ * counts.
+ *
+ * ── Why it is static ────────────────────────────────────────────────────────
+ * The site builds to plain HTML with no Node process in production, which is
+ * what makes hosting cost pennies. A slug cannot be prerendered — scenes are
+ * published after the build — so the slug is read from the path at runtime and
+ * the scene fetched from the API. One HTML file serves every walkthrough ever
+ * published.
+ *
+ * That needs one rewrite rule at the host: `/view/*` -> `/view/index.html`.
+ * See public/_redirects. Without it, only `/view/?s=slug` works.
+ */
+
+const title = 'Walkthrough'
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <!-- A shared link should not be indexed: these are client deliverables,
+         not marketing pages, and the slug is the only thing keeping one
+         private. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <style is:global>
+      :root {
+        color-scheme: dark;
+        --ink: #e8ebf0;
+        --muted: #9aa3b2;
+        --ground: #0b0e13;
+        --panel: rgba(14, 18, 25, 0.82);
+        --line: rgba(255, 255, 255, 0.12);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--ground); color: var(--ink);
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+      #stage { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+      .overlay { position: fixed; pointer-events: none; z-index: 2; }
+      .overlay > * { pointer-events: auto; }
+
+      #topbar { top: 0; left: 0; right: 0; display: flex; align-items: center;
+        justify-content: space-between; gap: 12px; padding: 14px 18px;
+        background: linear-gradient(to bottom, rgba(0,0,0,.55), transparent); }
+      #name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+      #brand { font-size: 12px; color: var(--muted); text-decoration: none; }
+      #brand:hover { color: var(--ink); }
+
+      #controls { bottom: 0; left: 0; right: 0; display: flex; justify-content: center;
+        gap: 8px; padding: 18px; }
+      button {
+        font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+        padding: 9px 16px; backdrop-filter: blur(8px);
+      }
+      button:hover { border-color: rgba(255,255,255,.28); }
+      button[aria-pressed='true'] { background: #2f6df6; border-color: #2f6df6; }
+
+      #status { position: fixed; inset: 0; display: grid; place-items: center;
+        text-align: center; padding: 24px; z-index: 3; background: var(--ground); }
+      #status.gone { display: none; }
+      #status p { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+      .bar { width: 220px; height: 3px; border-radius: 999px; overflow: hidden;
+        background: rgba(255,255,255,.1); margin: 16px auto 0; }
+      .bar > i { display: block; height: 100%; width: 0; background: #2f6df6;
+        transition: width .25s ease; }
+
+      /* Credits sit behind a toggle rather than on screen permanently: the
+         obligation is to make attribution available, not to put it over the
+         client's living room. */
+      #credits { position: fixed; right: 18px; bottom: 68px; max-width: min(360px, 78vw);
+        max-height: 46vh; overflow: auto; padding: 14px 16px; border-radius: 12px;
+        background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
+        font-size: 12px; line-height: 1.55; z-index: 2; }
+      #credits[hidden] { display: none; }
+      #credits h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+        letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+      #credits a { color: inherit; }
+      #credits li { margin-bottom: 6px; list-style: none; }
+      #credits ul { margin: 0; padding: 0; }
+      .lic { color: var(--muted); }
+    </style>
+  </head>
+
+  <body>
+    <div id="stage"><canvas id="canvas"></canvas></div>
+
+    <div class="overlay" id="topbar">
+      <div id="name">Loading…</div>
+      <a id="brand" href={brand.domains.marketing} target="_blank" rel="noreferrer">
+        Made with {brand.name}
+      </a>
+    </div>
+
+    <div class="overlay" id="controls" hidden>
+      <button id="walk" aria-pressed="false">Walk through it</button>
+      <button id="fit">Overview</button>
+      <button id="creditsToggle" aria-pressed="false" hidden>Credits</button>
+    </div>
+
+    <aside id="credits" hidden>
+      <h2>Models</h2>
+      <ul id="creditList"></ul>
+    </aside>
+
+    <div id="status">
+      <div>
+        <strong id="statusTitle">Loading the walkthrough</strong>
+        <p id="statusDetail">Fetching the scene…</p>
+        <div class="bar"><i id="statusBar"></i></div>
+      </div>
+    </div>
+
+    <script>
+      import { SceneViewer, WalkController } from '@arcvia/viewer'
+
+      const api =
+        import.meta.env.PUBLIC_API_URL ??
+        `${window.location.protocol}//${window.location.hostname}:8787`
+
+      /**
+       * The slug, from `/view/<slug>/` or `?s=<slug>`.
+       *
+       * Both are supported because the path form needs a rewrite rule at the
+       * host and the query form does not. A deployment without the rewrite
+       * still works; it just has uglier links.
+       */
+      function slugFromLocation() {
+        const query = new URLSearchParams(location.search).get('s')
+        if (query) return query
+        const parts = location.pathname.split('/').filter(Boolean)
+        return parts[0] === 'view' && parts[1] ? decodeURIComponent(parts[1]) : null
+      }
+
+      const els = {
+        status: document.getElementById('status'),
+        title: document.getElementById('statusTitle'),
+        detail: document.getElementById('statusDetail'),
+        bar: document.getElementById('statusBar'),
+        name: document.getElementById('name'),
+        controls: document.getElementById('controls'),
+        walk: document.getElementById('walk'),
+        fit: document.getElementById('fit'),
+        credits: document.getElementById('credits'),
+        creditList: document.getElementById('creditList'),
+        creditsToggle: document.getElementById('creditsToggle'),
+      }
+
+      const fail = (title, detail) => {
+        els.title.textContent = title
+        els.detail.textContent = detail
+        els.bar.parentElement.style.display = 'none'
+      }
+
+      const absolute = (url) => (url?.startsWith('/') ? api + url : url)
+
+      async function main() {
+        const slug = slugFromLocation()
+        if (!slug) return fail('No walkthrough specified', 'This link is missing its scene.')
+
+        const response = await fetch(`${api}/scenes/public/${encodeURIComponent(slug)}`)
+        if (!response.ok) {
+          return fail(
+            'Walkthrough not found',
+            'The link may be wrong, or the scene may have been unpublished.',
+          )
+        }
+
+        const { scene } = await response.json()
+        document.title = scene.name ? `${scene.name} — Walkthrough` : 'Walkthrough'
+        els.name.textContent = scene.name ?? 'Walkthrough'
+
+        if (!scene.modelUrl) {
+          return fail('Nothing to show yet', 'This scene was published before it had any geometry.')
+        }
+
+        const viewer = new SceneViewer({
+          canvas: document.getElementById('canvas'),
+          onProgress: (fraction) => {
+            els.bar.style.width = `${Math.round(fraction * 100)}%`
+            els.detail.textContent = 'Loading the model…'
+          },
+          onError: (error) => fail('Could not load the walkthrough', error.message),
+        })
+
+        await viewer.loadModel(absolute(scene.modelUrl))
+
+        // The bake, if there is one. Applied before the first frame is shown, so
+        // the client never sees the flat version and then a jump.
+        //
+        // One call into the shared viewer rather than the material walk this
+        // page used to do inline — that duplicate had a bug the studio's copy
+        // did not, and rendered an empty sky. See applyBakedLightmap.
+        if (scene.bakedUrl) {
+          els.detail.textContent = 'Loading the lighting…'
+          // A missing or unreadable atlas is a flatter room, not a broken page.
+          const lit = await viewer.applyBakedLightmap(absolute(scene.bakedUrl)).catch(() => 0)
+          if (lit === 0) console.warn('The bake did not apply; showing real-time lighting.')
+        }
+
+        viewer.frameModel()
+
+        const walk = new WalkController(viewer, document.getElementById('canvas'), {
+          eyeHeight: 1.6,
+          speed: 2.68,
+        })
+
+        let walking = false
+        els.walk.addEventListener('click', () => {
+          walking = !walking
+          els.walk.setAttribute('aria-pressed', String(walking))
+          els.walk.textContent = walking ? 'Leave walkthrough' : 'Walk through it'
+          if (walking) {
+            // Stand inside before enabling, or the visitor enters the
+            // walkthrough in the garden looking at the building.
+            viewer.standInside(1.6)
+            walk.enable()
+          } else {
+            walk.disable()
+            viewer.frameModel()
+          }
+        })
+
+        els.fit.addEventListener('click', () => {
+          if (walking) els.walk.click()
+          else viewer.frameModel()
+        })
+
+        // Attribution. Present when it is owed, absent when it is not.
+        const credits = scene.credits ?? []
+        if (credits.length > 0) {
+          els.creditsToggle.hidden = false
+          els.creditList.innerHTML = credits
+            .map(
+              (credit) =>
+                `<li><a href="${credit.source}" target="_blank" rel="noreferrer">${credit.author}</a>` +
+                `<span class="lic"> — ${credit.licence}</span></li>`,
+            )
+            .join('')
+          els.creditsToggle.addEventListener('click', () => {
+            const open = els.credits.hasAttribute('hidden')
+            els.credits.toggleAttribute('hidden', !open)
+            els.creditsToggle.setAttribute('aria-pressed', String(open))
+          })
+        }
+
+        els.status.classList.add('gone')
+        els.controls.hidden = false
+      }
+
+      main().catch((error) =>
+        fail('Something went wrong', error?.message ?? 'The walkthrough could not be opened.'),
+      )
+    </script>
+  </body>
+</html>

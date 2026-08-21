@@ -5,7 +5,7 @@ import { suggestedCamera } from '../plan/buildGeometry'
 import { activeFloor } from '../plan/planStore'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import { exportForBake, loadAndApply } from '../plan/bake'
-import { uploadScene, updateScene, storedUrl } from '../lib/api'
+import { uploadScene, updateScene, storedUrl, publishScene, siteOrigin } from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import type { Plan } from '../plan/types'
@@ -83,6 +83,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * it has to be *said*, or it reads as the feature quietly not working.
    */
   const [baked, setBaked] = useState(false)
+  /** The public link, once this scene has been published. */
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -245,6 +247,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         return
       }
 
+      // Recorded on the scene, not just applied to the screen. A published
+      // walkthrough cannot reach render-job records, and the atlas *is* the
+      // lighting — without it a client opens the flat, sourceless room the
+      // bake exists to fix.
+      await updateScene(sceneId, { bakedUrl: result.outputUrl })
+
       const applied = await loadAndApply(model, storedUrl(result.outputUrl))
       // The atlas already contains the sun, the sky, the bounce and the
       // occlusion. Leaving the real-time rig on top of it does not add to the
@@ -298,6 +306,30 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       )
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Export failed')
+    }
+  }
+
+  /**
+   * Publish the scene and show the link.
+   *
+   * Publishing an unbaked scene is allowed, and deliberately so — a client
+   * looking at flat lighting is still better than a client waiting half an
+   * hour. But it is said out loud, because "I published it and it looks
+   * nothing like the preview" is the obvious way for this to go wrong.
+   */
+  async function handlePublish() {
+    setStatus('Publishing…')
+    try {
+      const { url } = await publishScene(sceneId)
+      const absolute = new URL(url, siteOrigin()).toString()
+      setShareUrl(absolute)
+      setStatus(
+        baked
+          ? 'Published — the link is below.'
+          : 'Published. This scene has no bake yet, so it will look flatter than a baked one.',
+      )
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not publish')
     }
   }
 
@@ -454,6 +486,50 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
               </span>
             </button>
           ))}
+
+          <button
+            className="btn btn-primary"
+            style={{ justifyContent: 'space-between', marginTop: 8 }}
+            onClick={() => void handlePublish()}
+            disabled={Boolean(job) || empty}
+            title="Put this walkthrough on a link you can send to a client"
+          >
+            <span style={{ textAlign: 'left' }}>
+              <strong style={{ display: 'block', fontSize: 12.5 }}>Publish</strong>
+              <span className="muted" style={{ fontSize: 11 }}>
+                A link for the client
+              </span>
+            </span>
+          </button>
+
+          {shareUrl && (
+            <div style={{ marginTop: 8 }}>
+              <input
+                readOnly
+                value={shareUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{ width: '100%', fontSize: 11, fontFamily: 'var(--mono, monospace)' }}
+              />
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <button
+                  className="btn"
+                  style={{ flex: 1, fontSize: 11 }}
+                  onClick={() => void navigator.clipboard?.writeText(shareUrl)}
+                >
+                  Copy link
+                </button>
+                <a
+                  className="btn"
+                  style={{ flex: 1, fontSize: 11, textAlign: 'center' }}
+                  href={shareUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open
+                </a>
+              </div>
+            </div>
+          )}
 
           <button
             className="btn"

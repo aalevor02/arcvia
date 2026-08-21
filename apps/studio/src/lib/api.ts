@@ -148,6 +148,8 @@ export interface SceneListItem {
 export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   plan: Plan | null
   lightsUrl: string | null
+  /** The baked lightmap atlas, once a bake has completed. */
+  bakedUrl: string | null
   hdriUrl: string | null
   floorPlanUrl: string | null
 }
@@ -169,6 +171,21 @@ export const updateScene = (id: string, patch: Partial<Scene>) =>
     method: 'PATCH',
     body: patch,
   }).then((r) => r.scene)
+
+/**
+ * Publish a scene and get back the link a client opens.
+ *
+ * Separate from `updateScene` because publishing is not an edit — it changes
+ * who can see the scene, and it is the one action in the editor with
+ * consequences outside the account.
+ */
+export const publishScene = (id: string) =>
+  request<{ scene: SceneListItem; url: string }>(`/scenes/${id}/publish`, {
+    method: 'POST',
+  })
+
+export const unpublishScene = (id: string) =>
+  request<{ scene: SceneListItem }>(`/scenes/${id}/unpublish`, { method: 'POST' })
 
 export const deleteScene = (id: string) =>
   request<void>(`/scenes/${id}`, { method: 'DELETE' })
@@ -320,3 +337,19 @@ export async function uploadScene(blob: Blob): Promise<StoredFile> {
 /** Absolutise a stored path against the API origin, for loading in the page. */
 export const storedUrl = (path: string): string =>
   path.startsWith('/') ? BASE + path : path
+
+/**
+ * Where a published walkthrough lives.
+ *
+ * The studio and the public viewer are different origins — 5173 and 4321 in
+ * development, a subdomain and the main site in production — so a link built
+ * from `window.location` would send clients to a page the studio does not
+ * serve. `VITE_SITE_URL` names the real one; the fallback keeps the host and
+ * swaps the port, which is what makes it work from a phone on the LAN as well
+ * as from localhost.
+ */
+export function siteOrigin(): string {
+  const configured = import.meta.env.VITE_SITE_URL
+  if (configured) return String(configured).replace(/\/$/, '')
+  return `${window.location.protocol}//${window.location.hostname}:4321`
+}

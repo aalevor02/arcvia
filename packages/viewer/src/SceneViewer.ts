@@ -490,6 +490,113 @@ export class SceneViewer {
   }
 
   /**
+   * Stand the camera inside the model, at eye height.
+   *
+   * Entering a walkthrough from wherever the orbit camera happened to be puts
+   * the visitor outside the building looking at it — which reads as the
+   * walkthrough being broken, because nothing about pressing "walk through it"
+   * suggests you will end up in the garden.
+   *
+   * The studio has better information and uses it: it drops you into the
+   * largest *room*, which it knows from the plan graph. A published
+   * walkthrough has only geometry, so this is the honest fallback — the centre
+   * of the model's footprint, at eye height above its floor. For a single
+   * building that is inside it; for a scene of several detached masses it may
+   * land between them, which is the limit of what a bounding box can tell you.
+   *
+   * Returns false when there is no model, so the caller can decline to enter
+   * rather than walking around inside nothing.
+   */
+  standInside(eyeHeight = 1.6): boolean {
+    if (!this.model) return false
+
+    const box = new THREE.Box3().setFromObject(this.model)
+    if (box.isEmpty()) return false
+
+    const centre = box.getCenter(new THREE.Vector3())
+    this.camera.position.set(centre.x, box.min.y + eyeHeight, centre.z)
+
+    // Face along the longer horizontal axis. A room is usually entered looking
+    // down its length, and it puts more of the space in the first frame than
+    // facing the nearest wall does.
+    const size = box.getSize(new THREE.Vector3())
+    this.camera.rotation.order = 'YXZ'
+    this.camera.rotation.set(0, size.x >= size.z ? Math.PI / 2 : 0, 0)
+
+    this.needsRender = true
+    return true
+  }
+
+  /**
+   * Load a baked lightmap atlas and hand lighting over to it.
+   *
+   * ── Why this lives here and not in each app ─────────────────────────────
+   * It was written twice — once in the studio, once inline in the published
+   * viewer page — and the second copy had a bug the first did not: it assigned
+   * an *array* of materials to every mesh, and a mesh with an array material
+   * and no geometry groups draws nothing at all. The published walkthrough
+   * rendered an empty sky.
+   *
+   * That is exactly the drift this package exists to prevent. The editor
+   * preview and the thing a client opens must render through one code path, or
+   * they disagree and nobody notices until a client does.
+   *
+   * Resolves to the number of meshes lit. Zero is meaningful: it means the
+   * geometry arrived without lightmap UVs, so the atlas has nothing to address.
+   */
+  async applyBakedLightmap(url: string, intensity = 2.2): Promise<number> {
+    const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+      new THREE.TextureLoader()
+        .setCrossOrigin('anonymous')
+        .load(url, resolve, undefined, () =>
+          reject(new Error('The baked lightmap could not be loaded.')),
+        )
+    })
+
+    texture.flipY = false
+    texture.colorSpace = THREE.SRGBColorSpace
+    // Channel 1, always. Since r152 a texture picks its UV attribute with
+    // `channel`, and the default of 0 is the albedo set — which runs 0-1 across
+    // every face, so every surface renders the whole atlas smeared over it.
+    texture.channel = 1
+    texture.needsUpdate = true
+
+    let applied = 0
+
+    this.scene.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      // No lightmap UVs, nothing to address. Applying anyway would light the
+      // mesh with whatever the albedo UVs happen to point at.
+      if (!child.geometry.getAttribute('uv1')) return
+
+      const wasArray = Array.isArray(child.material)
+      const materials = wasArray ? child.material : [child.material]
+
+      const lit = materials.map((material: THREE.Material) => {
+        // Cloned per mesh: materials are shared across a scene, and a shared
+        // one carrying a lightmap would light every other mesh with it.
+        const clone = material.clone() as THREE.MeshStandardMaterial
+        clone.lightMap = texture
+        clone.lightMapIntensity = intensity
+        return clone
+      })
+
+      // Preserve the original shape. Handing a single-material mesh an array
+      // is not a harmless generalisation — without geometry groups to index
+      // it, the mesh renders nothing.
+      child.material = wasArray ? lit : lit[0]
+      applied++
+    })
+
+    // The atlas already contains the sun, sky, bounce and occlusion. Leaving
+    // the real-time rig on top does not add to it, it cancels it out.
+    if (applied > 0) this.setBakedLighting(true)
+    this.needsRender = true
+
+    return applied
+  }
+
+  /**
    * The AO pass itself, for tuning.
    *
    * Exposed because "the corners are not dark enough" cannot be diagnosed from

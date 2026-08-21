@@ -70,7 +70,19 @@ export async function registerSceneRoutes(app) {
     // of kilobytes — and it changes on every edit, so a presigned round-trip per
     // save would cost two requests to move less data than the request headers.
     // Revisit if plans ever carry raster underlays inline; they must not.
-    const allowed = ['name', 'modelUrl', 'lightsUrl', 'hdriUrl', 'floorPlanUrl', 'plan']
+    // `bakedUrl` is the lightmap atlas produced by a bake. It belongs on the
+    // scene rather than only on the render job: a published walkthrough has no
+    // access to job records, and the atlas *is* the lighting — without it the
+    // client sees the same flat, sourceless room the bake exists to fix.
+    const allowed = [
+      'name',
+      'modelUrl',
+      'lightsUrl',
+      'hdriUrl',
+      'floorPlanUrl',
+      'bakedUrl',
+      'plan',
+    ]
     const patch = Object.fromEntries(
       Object.entries(request.body ?? {}).filter(([k]) => allowed.includes(k)),
     )
@@ -129,6 +141,14 @@ export async function registerSceneRoutes(app) {
         modelUrl: scene.modelUrl,
         lightsUrl: scene.lightsUrl,
         hdriUrl: scene.hdriUrl,
+        // The whole point of publishing. A scene with a bake renders with real
+        // light; one without falls back to the real-time rig, which is worse
+        // but still a walkthrough — so this is optional rather than required.
+        bakedUrl: scene.bakedUrl ?? null,
+        // Credits travel with the scene because the obligation does. A CC-BY
+        // model's licence is met by the page the client opens, not by anything
+        // in the editor.
+        credits: scene.credits ?? [],
       },
     }
   })
