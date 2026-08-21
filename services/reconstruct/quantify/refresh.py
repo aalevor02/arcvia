@@ -112,6 +112,31 @@ def parse_prices(html: str) -> dict[str, dict]:
             # — it is two unrelated numbers that happened to sit near a dash.
             if not (low and high and low <= base <= high):
                 low = high = None
+            elif spread.start() <= price.start() and price.end() <= spread.end():
+                # THE HEADLINE PRICE IS THE RANGE'S OWN LOWER BOUND.
+                #
+                # ── A systematic 30% deflation, caught on the first live run ──
+                # `_PRICE` takes the FIRST price in the row. Where a page prints
+                # only a range — "Particle Board | Rs 29 - Rs 56" — that first
+                # price IS the 29, so base came out equal to low. The bracket
+                # test above then passed trivially, because low <= low <= high is
+                # always true, and the row was accepted with base at the bottom
+                # of its own range.
+                #
+                # Measured against the real library: page 29-56 against a stored
+                # base of 43.0, page 87-168 against 128.0. Those stored values
+                # are the range midpoints, 42.5 and 127.5 — the library was built
+                # by taking midpoints and the refresher was taking lows. Four
+                # materials moved 26-33% DOWNWARD in one run, all of them on
+                # range-only pages, and every move sat inside TRUST_BAND so
+                # nothing refused them.
+                #
+                # The test is POSITIONAL, not `base == low`. A page may
+                # legitimately publish a base equal to its low, and comparing
+                # values cannot tell that apart from this. Comparing spans can:
+                # if the headline match lies inside the range match, it is not a
+                # separate figure, it is the lower bound being read twice.
+                base = (low + high) / 2.0
 
         key = _normalise(cells[0])
         if key and key not in found:
@@ -179,12 +204,48 @@ def refresh(
         stamped = page_date(html)
 
         for rate in rates:
-            match = next((v for k, v in prices.items() if _matches(rate, k)), None)
-            if not match:
+            # EVERY match, not the first one.
+            #
+            # ── The brand substitution this closes ──────────────────────────
+            # `next(...)` took whichever matching row the dict happened to yield
+            # first. Measured on the live tiles page, three rows match
+            # "Ceramic Wall Tile 300x450":
+            #
+            #   Ceramic Wall Tiles                        base 64  low 42  high 85
+            #   Kajaria Ceramic Wall Tile | 300x450       base 47   (page: inferred)
+            #   Johnson Ceramic Wall Tile | 300x450       base 43   (page: inferred)
+            #
+            # The first row is the generic material and carries EXACTLY the
+            # library's stored 64/42/85. The other two are brand-qualified and
+            # the page itself marks them inferred. Because the library's
+            # specification is "300x450" and only the brand rows repeat it, the
+            # generic row does not match and a brand row does — so the refresher
+            # replaced a generic rate with one manufacturer's price, a 26% move,
+            # inside TRUST_BAND, reported as a routine update.
+            #
+            # Picking the "best" match would be guessing which brand the user
+            # meant. Refusing is the same choice `RateLibrary.find` already makes
+            # for exactly this reason: an ambiguous match goes to the report
+            # rather than into the price.
+            found = [(k, v) for k, v in prices.items() if _matches(rate, k)]
+
+            if not found:
                 report.untrusted.append(
                     {"id": rate.id, "url": url, "reason": "no row matched this material"}
                 )
                 continue
+
+            if len(found) > 1:
+                labels = ", ".join(v.get("label", k)[:34] for k, v in found[:3])
+                report.untrusted.append({
+                    "id": rate.id,
+                    "url": url,
+                    "reason": f"{len(found)} rows matched, so which price this is "
+                              f"cannot be decided: {labels}",
+                })
+                continue
+
+            match = found[0][1]
 
             before = rate.base
             move = abs(match["base"] - before) / before if before else 1.0
@@ -220,8 +281,102 @@ def refresh(
     return report
 
 
+#: The only cells a refresh is allowed to change. Everything else in the file is
+#: the user's and is copied through untouched.
+REFRESHABLE_COLUMNS = (
+    "Hyderabad_Low_INR", "Hyderabad_Base_INR", "Hyderabad_High_INR", "Rate_Date",
+)
+
+
 def write_csv(library: RateLibrary, path: str) -> None:
-    """Write the library back in the shape it was read."""
+    """
+    Update the priced cells in place, preserving every other column verbatim.
+
+    ── The data loss this replaces, caught on the first live write ────────────
+    This used to rebuild the file from the `Rate` dataclass. `Rate` models 16 of
+    the supplied CSV's 18 columns, so `India_Typical_INR` and `Notes` were
+    written as empty strings — on all 235 rows, on the first run, silently. The
+    per-run backup is the only reason it was recoverable, and a weekly scheduled
+    job would have done it unattended.
+
+    The lesson is not "add two fields to the dataclass". It is that ANY writer
+    which reconstructs a user's file from a parsed object loses whatever the
+    object does not model, and will keep doing so every time a column is added
+    upstream. A model built for reading is the wrong thing to write from.
+
+    So this never reconstructs. It re-reads the file it is about to overwrite,
+    replaces only the four cells a refresh can legitimately change, and copies
+    every other cell — including columns this module has never heard of — byte
+    for byte. Column order, spelling, blank cells and the BOM all survive,
+    because they are never regenerated.
+    """
+    import csv
+    import os
+
+    # The template is the file the library was READ from, not the file being
+    # written. `write_csv(library, somewhere_new)` is a legitimate export and
+    # must still carry every column through — reading the destination would find
+    # nothing there. Falling back to `path` covers a refresh in place where the
+    # library was built by hand.
+    template = library.source if os.path.exists(library.source or "") else (
+        path if os.path.exists(path) else None
+    )
+
+    if template is None:
+        # No file to copy from: a library assembled in memory. There are no
+        # unmodelled columns to preserve because there was never a file holding
+        # them, so reconstructing is safe HERE and only here.
+        _write_from_model(library, path)
+        return
+
+    with open(template, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        columns = list(reader.fieldnames or [])
+        rows = list(reader)
+
+    # Keep the file's own line ending. `csv` writes CRLF by default whatever it
+    # read, so a refresh that changed one price would rewrite all 235 lines on an
+    # LF file and show up as a whole-file diff — hiding the one line that
+    # actually moved. Preserving the terminator is the same principle as
+    # preserving the columns: this is the user's file, and a refresh may change
+    # only what it can justify.
+    with open(template, "rb") as raw:
+        terminator = "\r\n" if raw.read(4096).find(b"\r\n") != -1 else "\n"
+
+    by_id = {r.id: r for r in library.rates}
+
+    for row in rows:
+        rate = by_id.get((row.get("Material_ID") or "").strip())
+        if rate is None:
+            # A row the library did not load — a blank line, or a material this
+            # build does not understand. Copied through rather than dropped: a
+            # writer that silently loses rows is the same defect one level up.
+            continue
+        if "Hyderabad_Low_INR" in row:
+            row["Hyderabad_Low_INR"] = rate.low
+        if "Hyderabad_Base_INR" in row:
+            row["Hyderabad_Base_INR"] = rate.base
+        if "Hyderabad_High_INR" in row:
+            row["Hyderabad_High_INR"] = rate.high
+        if "Rate_Date" in row:
+            row["Rate_Date"] = rate.rate_date.isoformat() if rate.rate_date else ""
+
+    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore",
+                                lineterminator=terminator)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_from_model(library: RateLibrary, path: str) -> None:
+    """
+    Write a library that has no source file behind it.
+
+    Only reachable for a library assembled in memory. Reconstructing from the
+    dataclass is exactly the data-loss path `write_csv` exists to avoid — it is
+    safe here and nowhere else, because there was never a file carrying columns
+    this model does not know about.
+    """
     import csv
 
     columns = [

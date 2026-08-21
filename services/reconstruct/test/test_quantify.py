@@ -21,6 +21,8 @@ these pages are small sites run by people.
 
 from __future__ import annotations
 
+import csv
+import os
 import sys
 import tempfile
 from datetime import date, timedelta
@@ -551,6 +553,88 @@ normal = boq.build(MODEL, full, height=3.0).as_dict(TODAY)
 ok("a model with floor area still reports a real ratio",
    isinstance(normal["wallRunPerArea"], float) and normal["wallRunPerArea"] > 0,
    str(normal["wallRunPerArea"]))
+
+print("\n-- refresh: three faults found by running it against the live sources --")
+# None of these were reachable from a unit test, because all three need a page
+# shaped the way a real one is. They were found by running the refresher for the
+# first time against the actual library it ships with, which is the argument for
+# doing that before scheduling it rather than after.
+
+# ONE: a range-only row put the base at the bottom of its own range.
+# `_PRICE` takes the FIRST price in the row, so on "Rs 29 - Rs 56" the headline
+# price IS the 29, and the bracket test low <= base <= high passes trivially.
+# Measured live: four materials moved 26-33% DOWNWARD in one pass, all on
+# range-only pages, every move inside TRUST_BAND so nothing refused them.
+RANGE_ONLY = """<table><tr><td>Particle Board 18 mm</td><td>Rs 29 - Rs 56</td></tr></table>"""
+parsed = refresh_mod.parse_prices(RANGE_ONLY)
+row = next(iter(parsed.values()))
+ok("a range-only row prices at the MIDPOINT, not the bottom",
+   abs(row["base"] - 42.5) < 1e-9, f"base {row['base']}, range {row['low']}-{row['high']}")
+
+# And a row with a genuine headline price beside a range keeps the headline.
+# The test is positional, not `base == low`, so this must still work.
+HEADLINE = """<table><tr><td>Particle Board 18 mm</td><td>Rs 43</td>
+<td>Rs 29 - Rs 56</td></tr></table>"""
+row = next(iter(refresh_mod.parse_prices(HEADLINE).values()))
+ok("but a distinct headline price beside a range is kept, not averaged",
+   abs(row["base"] - 43.0) < 1e-9, f"base {row['base']}")
+
+# TWO: more than one row matched and it silently took the first.
+# Live, three rows matched "Ceramic Wall Tile 300x450": the generic material
+# carrying exactly the stored 64/42/85, and two brand rows the page itself marks
+# inferred. The generic row does not repeat the size so it did NOT match; a brand
+# row did. A generic rate was replaced by one manufacturer's price, 26% away,
+# inside the trust band, reported as a routine update.
+AMBIGUOUS = """<table>
+<tr><td>Ceramic Wall Tiles</td><td>Rs 64</td></tr>
+<tr><td>Kajaria Ceramic Wall Tile 300 450</td><td>Rs 47</td></tr>
+<tr><td>Johnson Ceramic Wall Tile 300 450</td><td>Rs 43</td></tr>
+</table>"""
+tiles = RateLibrary([make_rate("T-1", "Ceramic Wall Tile", "300 450", "Flooring",
+                              base=64.0, days_old=30, unit="sq ft")])
+result = with_page(AMBIGUOUS, lambda: refresh_mod.refresh(tiles, today=TODAY))
+ok("two rows matching one rate is REFUSED, not resolved by picking one",
+   len(result.updated) == 0 and len(result.untrusted) == 1,
+   f"updated {len(result.updated)}, untrusted {len(result.untrusted)}")
+ok("and the refusal names the rows, so a human can settle it",
+   "rows matched" in result.untrusted[0]["reason"]
+   and "Kajaria" in result.untrusted[0]["reason"],
+   result.untrusted[0]["reason"][:80])
+ok("the price is left alone rather than taking a brand's",
+   tiles.rates[0].base == 64.0, str(tiles.rates[0].base))
+
+# THREE: the writer rebuilt the file from the dataclass and wiped two columns.
+# `Rate` models 16 of the supplied CSV's 18. India_Typical_INR and Notes were
+# written as empty strings on all 235 rows, on the first live write. Only the
+# per-run backup made it recoverable.
+sample = (
+    "Material_ID,Category,Material,Specification / Grade,Quality_Tier,Unit,"
+    "Hyderabad_Low_INR,Hyderabad_Base_INR,Hyderabad_High_INR,India_Typical_INR,"
+    "Wastage_%,GST_%,Rate_Date,Rate_Basis,Vendor_Quote_Required,"
+    "IS_Code / Standard,Notes,Source_URL\n"
+    "HYD-1,Cement,OPC Cement,43 Grade,Standard,bag,370.0,383.0,395.0,386.87,"
+    "0.02,0.28,2026-08-12,Direct,NO,IS 8112,keep this note,https://example.test/p\n"
+)
+with tempfile.TemporaryDirectory() as tmp:
+    target = os.path.join(tmp, "rates.csv")
+    with open(target, "w", encoding="utf-8-sig", newline="") as handle:
+        handle.write(sample)
+    original = open(target, "rb").read()
+
+    library = RateLibrary.load(target)
+    refresh_mod.write_csv(library, target)
+    ok("an unchanged round-trip is BYTE-IDENTICAL",
+       open(target, "rb").read() == original)
+
+    library = RateLibrary.load(target)
+    library.rates[0].base = 999.0
+    refresh_mod.write_csv(library, target)
+    written = list(csv.DictReader(open(target, encoding="utf-8-sig")))[0]
+    ok("editing a price changes that cell", written["Hyderabad_Base_INR"] == "999.0")
+    ok("and preserves a column the dataclass does not model",
+       written["India_Typical_INR"] == "386.87", repr(written["India_Typical_INR"]))
+    ok("and preserves free-text the dataclass does not model",
+       written["Notes"] == "keep this note", repr(written["Notes"]))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
