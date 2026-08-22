@@ -397,21 +397,39 @@ recoverable.
 > One file was destroyed today because a session wrote to a path without
 > checking who owned it, and it was untracked so nothing could restore it.
 >
-> Then, in this order:
+> **Then read `docs/PENDING-ARCVIA.md`, and take your work from there, not from
+> this list.** That file is the whole product with the ownership map; this one
+> is one subsystem in depth. Three sessions spent a day inside this document
+> while most of Arcvia sat untouched, and the user was right to call it.
 >
-> 1. ~~Write tests for quantify/~~ — DONE by `aalev-35`, `test/test_quantify.py`,
->    57 assertions, no network (refresh.fetch is stubbed).
-> 2. ~~Investigate the masonry question~~ — DONE, and it was two independent
->    defects compounding to 3.09x. See §4. Do not re-open it; see §9 for the
->    fix that looks right and is not.
-> 3. Schedule the weekly rate refresh and surface `oldestRateDays` wherever a
->    costing is shown.
-> 4. Gather VR requirements as a written spec; do not build it — it cannot be
->    tested on this machine.
-> 5. Re-import of a revised DWG: the user has reopened this decision. Design it
->    before building it — the existing note says "one-shot importer, no merge
->    engine", and that was a considered choice.
+> **All five items that used to be listed here are done.** Recorded so nobody
+> redoes them:
+>
+> 1. ~~Tests for `quantify/`~~ — `test/test_quantify.py`, since extended to 92
+>    assertions. No network; `refresh.fetch` is stubbed.
+> 2. ~~The masonry question~~ — two independent defects compounding. See §4, and
+>    §9 for the fix that looks right and is not.
+> 3. ~~Surface `oldestRateDays`~~ — the `costing` CLI command prints it with an
+>    escalating warning past 7 and past 90 days. **The one half still open:
+>    nothing runs `rates --refresh` on a timer.** `--refresh` alone is a dry run
+>    that reaches the network and reports what it *would* change; nothing is
+>    written without `--write`; it exits 1 if a refresh updated nothing but hit
+>    unreachable or untrusted sources, so a scheduler can tell a dead run from a
+>    quiet one. It needs a cron entry and a decision about who it emails.
+> 4. ~~VR requirements~~ — `docs/SPEC-VR.md`. Deliberately builds nothing, and
+>    names three prerequisites that are each independently worth having.
+> 5. ~~Re-import of a revised DWG~~ — `docs/DESIGN-REIMPORT.md`. Short version:
+>    the schema was **already** built for it (`locked`/`suppressed`, IDs shaped
+>    `w:dxf:LATEST#2F3A`), and DXF entity handles are readable but the engine
+>    discards every one. One field at ingest, ~8 days, and it avoids the lossy
+>    projection that correctly killed round-tripping.
 >
 > Do not re-derive anything in §2. Do not revert the reader to per-stroke wall
 > classification. Use the Write/Edit tools for code containing regexes — bash
 > heredocs silently corrupt escape sequences in this environment.
+>
+> And the rule that has produced more of today's real findings than any other:
+> **when you sweep a constant or change a default, measure whether the RESULT is
+> still valid, not just whether the metric moved.** Three changes were reverted
+> today on that basis, each with a better finding attached than the change it
+> replaced.
