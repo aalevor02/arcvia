@@ -106,6 +106,24 @@ export async function registerOrgRoutes(app) {
       return reply.status(409).send({ message: 'The account owner cannot be removed.' })
     }
 
+    // ── The target must be a seat of THIS organisation ───────────────────────
+    // Everything above this line proves the CALLER is a legitimate owner. None
+    // of it proved anything about the TARGET, and `db.remove('users', id)`
+    // filters the entire users collection by id with no scope — so an owner
+    // could pass any user id in the system and delete that account. Every
+    // signup is the owner of its own org, so "be an owner" is just "have an
+    // account": any user could hard-delete any other user, across tenants,
+    // with one request. The seat-filter on the next line hid it — it removes
+    // the id from THIS org's seats whether or not it was ever there, so the
+    // call returned 204 while the victim's real record was already gone.
+    //
+    // A member is a seat of this org. Nothing outside it is this owner's to
+    // remove. 404, not 403: an owner has no business learning whether an id
+    // they do not own exists.
+    if (!org.seats.includes(request.params.userId)) {
+      return reply.status(404).send({ message: 'That person is not a member of your organisation.' })
+    }
+
     await db.remove('users', request.params.userId)
     await db.update('organisations', org.id, {
       seats: org.seats.filter((id) => id !== request.params.userId),
