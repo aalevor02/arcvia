@@ -251,37 +251,33 @@ export default function Publisher({ onBack }: Props) {
         </button>
       </div>
 
-      <div className="split" style={{ gridTemplateColumns: '260px 1fr', gap: 24, alignItems: 'start' }}>
+      <div className="pub">
         {/* ---- The list ---- */}
-        <section>
+        <section className="card pub-list">
           <span className="eyebrow">Projects</span>
           {publications === null ? (
             <p className="muted">Loading…</p>
           ) : publications.length === 0 ? (
-            <p className="hint">No published projects yet.</p>
+            <p className="note">No published projects yet.</p>
           ) : (
             publications.map((publication) => (
               <button
                 key={publication.id}
-                className="btn"
+                className="btn pub-item"
                 onClick={() => void open(publication.id)}
                 style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  marginBottom: 6,
                   borderColor: publication.id === selectedId ? 'var(--accent)' : undefined,
                 }}
               >
                 <span style={{ display: 'block' }}>{publication.name}</span>
-                <span className="hint">
-                  {publication.unitTypes} type(s)
+                <span className="note">
+                  {publication.unitTypes} type{publication.unitTypes === 1 ? '' : 's'}
                   {publication.published ? ' · live' : ' · draft'}
                 </span>
               </button>
             ))
           )}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <div className="pub-new">
             <input
               value={newName}
               placeholder="New project name"
@@ -300,19 +296,38 @@ export default function Publisher({ onBack }: Props) {
 
         {/* ---- The one being edited ---- */}
         {selectedId === null ? (
-          <section>
-            <p className="hint">Choose a project, or make one.</p>
+          <section className="card">
+            <p className="note">Choose a project on the left, or make one.</p>
           </section>
         ) : (
           <div>
-            <section>
+            <div className="stat-strip">
+              <div>
+                <span className="k">Unit types</span>
+                <span className="v">{types.length}</span>
+              </div>
+              <div>
+                <span className="k">Status</span>
+                <span className="v" style={{ color: published ? 'var(--signal)' : undefined }}>
+                  {published ? 'Live' : 'Draft'}
+                </span>
+              </div>
+              <div>
+                <span className="k">To check</span>
+                <span className="v" style={{ color: warnings?.length ? 'var(--warn)' : undefined }}>
+                  {warnings === null ? '—' : warnings.length}
+                </span>
+              </div>
+            </div>
+
+            <section className="card">
               <span className="eyebrow">Unit types</span>
-              <p className="hint">
+              <p className="note">
                 Each one is a scene. Its floors, rooms and areas come from the drawing every time you
                 compose.
               </p>
               {types.map((type, index) => (
-                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6 }}>
+                <div key={index} className="row-grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) auto' }}>
                   <select
                     value={type.sceneId}
                     onChange={(event) => {
@@ -351,30 +366,34 @@ export default function Publisher({ onBack }: Props) {
               </button>
             </section>
 
-            <section>
+            <section className="card">
               <span className="eyebrow">Copy</span>
-              <p className="hint">None of this is in a drawing, so none of it can be derived.</p>
-              {COPY_FIELDS.map((field) => (
-                <label key={field.key} className="field" style={{ display: 'block', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12 }}>{field.label}</span>
-                  <input
-                    value={(copy[field.key] as string | undefined) ?? ''}
-                    onChange={(event) => setCopy({ ...copy, [field.key]: event.target.value })}
-                    style={{ width: '100%' }}
-                  />
-                  <span className="hint">{field.hint}</span>
-                </label>
-              ))}
+              <p className="note">Not in any drawing, so none of it can be derived.</p>
+              <div className="form-grid">
+                {COPY_FIELDS.map((field) => (
+                  // The explanation is a tooltip rather than a line under every
+                  // field. Eight captions stacked under eight inputs is the
+                  // wall of text; the guidance is still there for whoever wants
+                  // it, without being read eight times by everyone who does not.
+                  <label key={field.key} title={field.hint}>
+                    <span>{field.label}</span>
+                    <input
+                      value={(copy[field.key] as string | undefined) ?? ''}
+                      onChange={(event) => setCopy({ ...copy, [field.key]: event.target.value })}
+                    />
+                  </label>
+                ))}
+              </div>
             </section>
 
-            <section>
+            <section className="card">
               <span className="eyebrow">Contacts</span>
-              <p className="hint">
+              <p className="note">
                 Without one, a visitor who wants to buy cannot. This is the only part of the footer
                 that does something.
               </p>
               {contacts.map((contact, index) => (
-                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 6, marginBottom: 6 }}>
+                <div key={index} className="row-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr)) auto' }}>
                   {(['region', 'name', 'phone'] as const).map((field) => (
                     <input
                       key={field}
@@ -401,7 +420,7 @@ export default function Publisher({ onBack }: Props) {
               </button>
             </section>
 
-            <section>
+            <section className="card">
               <span className="eyebrow">Compose &amp; publish</span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" onClick={() => void handleCompose()} disabled={busy}>
@@ -434,7 +453,7 @@ export default function Publisher({ onBack }: Props) {
               </div>
 
               {status ? (
-                <p className="hint" style={{ marginTop: 8 }}>
+                <p className="note" style={{ marginTop: 8 }}>
                   {status}
                 </p>
               ) : null}
@@ -452,12 +471,12 @@ export default function Publisher({ onBack }: Props) {
               <section>
                 <span className="eyebrow">Before this goes to a client</span>
                 {warnings.length === 0 ? (
-                  <p className="hint">Nothing to check.</p>
+                  <p className="note">Nothing to check.</p>
                 ) : (
                   // Listed rather than counted. "12 warnings" is a number
                   // somebody dismisses; "the RERA number has not been written
                   // yet" is a thing they fix.
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
+                  <ul className="checks">
                     {warnings.map((warning, index) => (
                       <li key={index}>{warning}</li>
                     ))}

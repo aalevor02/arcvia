@@ -11,21 +11,65 @@
  * marketing site's light palette, not a second brand.
  */
 
+/*
+ * ── The palette, and why these numbers ──────────────────────────────────────
+ * Dark is right for this tool: the viewport is the subject and a bright chrome
+ * around a 3D scene fights it. What was wrong was not the darkness but the
+ * contrast, and it was measurable rather than a matter of taste. Against the
+ * old --panel (#161b23):
+ *
+ *   --ink-faint  #5b6472   2.89 : 1   the `.hint` colour — every explanatory
+ *                                     line in every panel, below the 4.5 : 1
+ *                                     WCAG AA needs for body text, and the
+ *                                     most-used small text in the product
+ *   --accent     #2f6df6   3.82 : 1   links and primary buttons
+ *   --line       #242b36   1.21 : 1   borders, effectively invisible
+ *
+ * Every value below is checked against the surface it actually sits on. The
+ * three that failed now pass, and the ones that already passed were left alone
+ * rather than churned.
+ *
+ * The greys are lifted a step and warmed very slightly off pure blue-black:
+ * #0f1319 to #12171e. Panels sat 1.10 : 1 from the page behind them, so the
+ * card edges did all the work of separating them and the card edges were the
+ * invisible part.
+ */
 :root {
   color-scheme: dark;
 
-  --ink: #e9edf5;
-  --ink-soft: #8b95a7;
-  --ink-faint: #5b6472;
-  --surface: #0f1319;
-  --panel: #161b23;
-  --panel-alt: #1b212b;
-  --line: #242b36;
-  --accent: #2f6df6;
-  --accent-hover: #2357cc;
-  --signal: #00c2a8;
-  --warn: #f5a524;
-  --danger: #e5484d;
+  --ink: #eef2f8; /* 14.6 : 1 on panel */
+  --ink-soft: #aab5c6; /*  7.9 : 1 */
+  --ink-faint: #8b96a7; /*  5.5 : 1 — was 2.89, the single worst offender */
+  --surface: #12171e;
+  --panel: #1a2029;
+  --panel-alt: #212936;
+
+  /*
+   * Two line weights, because one was doing two jobs badly.
+   *
+   * A divider between rows should be quiet — that is what a divider is for, and
+   * 1.5 : 1 is correct there. The edge of something you can TYPE IN or CLICK is
+   * not a divider: it tells you where the control is, so it carries the 3 : 1
+   * that WCAG asks of non-text UI. Using one token for both meant either
+   * shouting dividers or invisible inputs, and it had picked invisible.
+   */
+  --line: #333e4d;
+  --line-strong: #5b6a80; /* 3.0 : 1 — input and button edges */
+
+  --accent: #6ea0ff; /*  6.3 : 1 — was 3.82 */
+  --accent-hover: #8ab4ff; /*  7.8 : 1 */
+  /*
+   * Text ON the accent, not beside it.
+   *
+   * Raising the accent so it reads as a link inverts what can sit on top of it:
+   * white on #6ea0ff is 2.58 : 1 and fails, where this is 7.15 : 1. A light
+   * accent takes dark text — the two roles pull in opposite directions and
+   * cannot share one value.
+   */
+  --on-accent: #0d1420;
+  --signal: #2ad4b8;
+  --warn: #ffb648;
+  --danger: #ff6b70;
 
   --radius: 10px;
   --radius-sm: 7px;
@@ -86,7 +130,7 @@ select {
   font: inherit;
   color: var(--ink);
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: 7px 10px;
   width: 100%;
@@ -105,7 +149,7 @@ select:focus {
   gap: 7px;
   padding: 8px 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.15s, border-color 0.15s;
@@ -119,7 +163,7 @@ select:focus {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -132,7 +176,7 @@ select:focus {
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(229, 72, 77, 0.12);
+  background: rgba(255, 107, 112, 0.14);
 }
 
 .muted {
@@ -165,7 +209,7 @@ select:focus {
 }
 
 .pill-live {
-  border-color: rgba(0, 194, 168, 0.4);
+  border-color: rgba(42, 212, 184, 0.45);
   color: var(--signal);
 }
 
@@ -177,8 +221,8 @@ select:focus {
 }
 
 .alert-error {
-  border-color: rgba(229, 72, 77, 0.35);
-  background: rgba(229, 72, 77, 0.1);
+  border-color: rgba(255, 107, 112, 0.4);
+  background: rgba(255, 107, 112, 0.12);
   color: var(--danger);
 }
 
@@ -210,7 +254,7 @@ select:focus {
   height: 26px;
   border-radius: 7px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 700;
 }
@@ -594,7 +638,7 @@ select:focus {
 
 .segmented button[aria-pressed='true'] {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .saving {
@@ -674,4 +718,177 @@ select:focus {
 @media (prefers-reduced-motion: reduce) {
   /* Still distinguishable from a real 0%, without the movement. */
   [style*='sweep'] { animation: none !important; opacity: 0.55; }
+}
+
+/* ---- Publisher ---------------------------------------------------------- */
+
+/*
+ * ── Why this screen needed its own layout ───────────────────────────────────
+ * It was first built out of class names borrowed from the published-site app —
+ * `.split` for a two-column grid and `.hint` for a caption. Neither means that
+ * here. `.split` does not exist in this stylesheet at all, so the columns never
+ * applied; `.hint` is the floating pill in the plan editor, absolutely
+ * positioned at the bottom of the viewport, so fifteen captions stacked into
+ * one pill on top of the page.
+ *
+ * The result was a 1440 px screen with everything in a 490 px column and a
+ * caption floating over it. Borrowing a class by its NAME rather than its
+ * definition.
+ */
+
+.pub {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+  .pub {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A panel, so sections read as things rather than as a run of labels. */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.card > .eyebrow {
+  display: block;
+  margin-bottom: 10px;
+}
+
+/*
+ * Two columns of fields rather than eight stacked rows.
+ *
+ * A full-width input for a RERA number tells the reader it wants a paragraph.
+ * Sizing a field to its content is most of what stops a form looking like a
+ * wall — and it halves the scroll, which is the actual complaint.
+ */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 14px;
+}
+
+.form-grid label {
+  display: block;
+  min-width: 0;
+}
+
+.form-grid label > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Small print that sits in the flow, unlike `.hint`, which floats. */
+.note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.row-grid {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* A findings list that reads as findings rather than as prose. */
+.checks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.checks li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.checks li::before {
+  content: '!';
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: rgba(255, 182, 72, 0.16);
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.stat-strip div {
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.stat-strip .k {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.stat-strip .v {
+  display: block;
+  margin-top: 3px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Scoped to the list itself, not to every button inside the card.
+ *
+ * `.pub-list button` also matched the "Add" beside the new-project field and
+ * stretched it to 100%, squashing the input it sits next to into a sliver.
+ */
+.pub-list .pub-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.pub-new {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.pub-new input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pub-new .btn {
+  flex: none;
 }
