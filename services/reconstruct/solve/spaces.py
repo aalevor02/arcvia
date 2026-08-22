@@ -71,16 +71,55 @@ class Space:
         }
 
 
-def _thickness_around(poly: Polygon, walls, default: float) -> float:
-    """Mean thickness of the walls actually bounding this face."""
-    near = [
-        w.thickness
-        for w in walls
-        if poly.exterior.distance(
-            LineString([(w.ax, w.ay), (w.bx, w.by)])
-        ) < 0.05
+#: How close a wall's centreline must run to a room's boundary to be bounding it.
+#:
+#: **CHOSEN, not measured.** A face produced by `polygonize` runs ALONG wall
+#: centrelines by construction, so a bounding wall's distance is nominally zero
+#: and this only has to absorb floating-point noise and the corner-joining
+#: trims. 50 mm is comfortably under the thinnest wall anyone builds (0.075 m),
+#: so it cannot reach across a wall to the room on the other side — which is the
+#: error that would matter, because it would attribute one wall to two rooms
+#: that do not share it.
+BOUNDING_TOLERANCE = 0.05
+
+
+def _walls_around(poly: Polygon, walls) -> list[int]:
+    """
+    Indices of the walls that actually bound this face.
+
+    ── Why this is worth having, and why it was missing ────────────────────────
+    `Space.bounded_by` has been in the schema and empty on every space the engine
+    has ever produced. It is the missing link under three separate things:
+
+      * **wall run cannot be attributed to the rooms it bounds**, so a bill of
+        quantities can total a building's masonry but not say which room's walls
+        it is;
+      * **`wall-run-per-area` has to report two bases** — indoor-only and
+        including-site — because it has no way to know which walls belong to the
+        indoor rooms and which enclose a lawn;
+      * **indoor/outdoor cannot be resolved geometrically**, so it falls back to
+        reading a room's name and its kind, which on this one villa disagree in
+        both directions (`OFFICE PATIO` has kind `study`; `Enclosed Balcony` has
+        kind `outdoor`).
+
+    The geometry was already here — `_thickness_around` did exactly this test and
+    threw the identities away, keeping only the mean thickness. So this is the
+    same pass, returning what it found.
+    """
+    boundary = poly.exterior
+    return [
+        i
+        for i, w in enumerate(walls)
+        if boundary.distance(LineString([(w.ax, w.ay), (w.bx, w.by)]))
+        < BOUNDING_TOLERANCE
     ]
-    return sum(near) / len(near) if near else default
+
+
+def _thickness_of(indices: list[int], walls, default: float) -> float:
+    """Mean thickness of the walls bounding a face."""
+    if not indices:
+        return default
+    return sum(walls[i].thickness for i in indices) / len(indices)
 
 
 def detect_spaces(walls, labels=None, classify_room=None) -> list[Space]:
@@ -140,7 +179,8 @@ def detect_spaces(walls, labels=None, classify_room=None) -> list[Space]:
         if poly.area / max(poly.length, 1e-6) < MIN_WIDTH_M / 4:
             continue
 
-        inset = _thickness_around(poly, walls, mean_thickness) / 2
+        bounding = _walls_around(poly, walls)
+        inset = _thickness_of(bounding, walls, mean_thickness) / 2
         finished = poly.buffer(-inset, join_style=2)
         if finished.is_empty:
             continue
@@ -153,6 +193,7 @@ def detect_spaces(walls, labels=None, classify_room=None) -> list[Space]:
             area=finished.area,
             gross_area=gross,
             perimeter=poly.exterior.length,
+            bounded_by=bounding,
         )
 
         if labels:

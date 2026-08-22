@@ -99,6 +99,44 @@ if spaces:
     ok("and finished is smaller than gross", space.area < space.gross_area)
 
 
+print("\n-- a room knows which walls bound it --")
+# `Space.bounded_by` was in the schema and empty on every space the engine had
+# ever produced. It is the missing link under three separate things: wall run
+# cannot be attributed to the rooms it bounds, wall-run-per-area has to report
+# two bases because it cannot tell an indoor wall from one enclosing a lawn, and
+# indoor/outdoor cannot be resolved geometrically at all.
+if spaces:
+    bounding = spaces[0].bounded_by
+    ok("a room reports the walls that bound it", len(bounding) > 0, str(bounding))
+    ok("a four-wall room is bounded by all four",
+       sorted(bounding) == [0, 1, 2, 3], str(sorted(bounding)))
+    ok("and every index is a real wall",
+       all(0 <= i < len(walls) for i in bounding))
+
+# The error that would matter is reaching ACROSS a wall into the room beyond,
+# which would attribute one wall to rooms that do not share it.
+#
+# Two rooms a metre apart legitimately DO share walls, and the reason is worth
+# knowing: corner-joining merges the north and south faces into single
+# continuous walls spanning both rooms, so both rooms really are bounded by
+# them. An earlier version of this test asserted "share exactly one wall" and
+# was simply wrong about the geometry. What must hold is weaker and is the
+# thing that catches over-reach: **neither room's wall set contains the
+# other's** — each has at least one wall the other does not.
+apart = join_corners(pair_faces(room_faces() + room_faces(W + 1.0, 0.0)))
+rooms_apart = sp.detect_spaces(apart)
+ok("two rooms and the gap between them are all found",
+   len(rooms_apart) == 3, str(len(rooms_apart)))
+if len(rooms_apart) >= 2:
+    a = set(rooms_apart[0].bounded_by)
+    b = set(rooms_apart[1].bounded_by)
+    ok("each room has a wall the other does not",
+       bool(a - b) and bool(b - a), f"{sorted(a)} vs {sorted(b)}")
+    ok("and no room is bounded by every wall in the model",
+       all(len(r.bounded_by) < len(apart) for r in rooms_apart),
+       str([len(r.bounded_by) for r in rooms_apart]))
+
+
 print("\n-- corner-joining is load-bearing --")
 # The same faces WITHOUT the corner join. Every centreline is trimmed to the
 # overlap, so each is short at both ends and nothing closes.

@@ -484,6 +484,46 @@ def reconstruct(
         rooms = sp.detect_spaces(walls, labels=labels, classify_room=classify_room)
         room_stats = sp.summarise(rooms)
 
+        # ---- Which of that run is actually indoor -------------------------
+        # `Space.bounded_by` was in the schema and empty on every space this
+        # engine had ever produced. Populated, it answers a question nothing
+        # else could: **which walls belong to the rooms people live in.**
+        #
+        # Before this, `wall-run-per-area` had to report TWO bases — indoor-only
+        # and including-site — because it could total a building's wall run but
+        # not attribute it. On this villa that matters enormously: more than half
+        # the site is outdoor, so the ratio reads a comfortable 1.20 against
+        # everything and 2.43 against the indoor rooms alone, and only one of
+        # those is a number about a building.
+        #
+        # A wall is indoor if it bounds at least one indoor room. A party wall
+        # between a bedroom and a terrace is therefore indoor, which is right —
+        # somebody builds and plasters it, and it is the bedroom's wall.
+        from quantify.schedules import _is_outdoor
+
+        indoor_walls: set[int] = set()
+        outdoor_walls: set[int] = set()
+        for room in rooms:
+            side = outdoor_walls if _is_outdoor(room.as_dict()) else indoor_walls
+            side.update(room.bounded_by)
+
+        def _run(indices) -> float:
+            return round(sum(walls[i].length for i in indices if i < len(walls)), 2)
+
+        wall_stats["attribution"] = {
+            "indoorLength": _run(indoor_walls),
+            "outdoorOnlyLength": _run(outdoor_walls - indoor_walls),
+            # Walls bounding no room at all: the derived envelope's outer face, a
+            # compound wall, a railing. Reported separately rather than folded
+            # into either, because a large number here means the rooms are not
+            # closing and the other two figures are then both understatements.
+            "unattributedLength": _run(
+                set(range(len(walls))) - indoor_walls - outdoor_walls
+            ),
+            "roomsIndoor": sum(1 for r in rooms if not _is_outdoor(r.as_dict())),
+            "roomsOutdoor": sum(1 for r in rooms if _is_outdoor(r.as_dict())),
+        }
+
         holes, unhosted = op.from_sized_blocks(in_frame, walls, kernel.guess_item)
         holes = op.dedupe(holes)
         opening_stats = op.summarise(holes, unhosted)
