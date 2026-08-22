@@ -128,13 +128,17 @@ Ordered by value per day, which is not the same as by size.
 
 ### Quick wins, genuinely quick
 
-| Task | Est. | Note |
+~~All five below.~~ ✅ **DONE**, aalev-51, 2026-08-22. Left in place with what
+each turned out to be, because three of the five were not what the entry said
+and the difference is the useful part.
+
+| Task | Done | What it actually was |
 |---|---|---|
-| `pricing.astro` is hand-maintained | 1 d | Generate it from `creditCost`. A price list that drifts from what the code charges is a support ticket and possibly a refund. |
-| `scenes.js` allow-list **silently drops** unknown fields | 1 d | It should reject. Silent field-dropping is the same failure class as everything else that has bitten this repo today. |
-| Idempotency on submit | 1 d | A double-clicked submit currently bills twice. |
-| Room area schedule | 1 d | A report over `building.json`. The data is all there. |
-| Door / window schedule | 1–2 d | Same. |
+| `pricing.astro` is hand-maintained | `53ee3fe` | **Half wrong.** The page already read every COST from `creditCost`, so no number could drift. What it hand-maintained was WHICH ACTIONS APPEAR: nine priced actions, six listed. `cadReconstruct` charges 3 credits and was on **no published price list at all** — not a drifted number, a charge with no published price. Now enumerates the tariff; an action added without a label appears spelled awkwardly rather than invisibly. |
+| `scenes.js` silently drops unknown fields | `48e9f21` | As described. Refuses the whole patch, and refuses it WHOLE — a body mixing valid and invalid fields applies neither, since a partial write behind an error status is worse than the silent drop. Unknown and read-only are reported separately: *"hdriUrl2 is not a field"* and *"published is set by POST /publish"* send a developer to different places. |
+| Idempotency on submit | `b744501`, `c183d7c` | **Bigger than one route.** `/render/jobs` was fixed first; `/cad/jobs` charges **3 credits** and had no guard at all — and it is the slower job, so it is the one users double-click. The rule is shared, not copied. The first version also had a flaw: it deduplicated against FAILED and CANCELLED jobs, so a user retrying after a failure was handed the dead job and could not retry. Worse than the bug — a duplicate charge costs a credit, an unretryable failure costs the work. |
+| Room area schedule | `fedc763` | Indoor and outdoor are reported separately and **never summed**. The villa is 125.11 m² indoor against 127.64 m² outdoor — more than half the site is garden, so any single "total area" is wrong by over 100% as a statement about the building. The classifier reads NAME as well as kind: `OFFICE PATIO` is classified `study`, an indoor kind, and only its name says otherwise. |
+| Door / window schedule | `fedc763` | Its most valuable output is a caveat: **all 8 villa openings are doors.** An empty window section reads as "this schedule has no window section"; a reader about to order joinery needs "this building has no windows, and the schedule cannot tell whether the drawing places none or the reader missed them." |
 
 ### Highest value per day in the whole product
 
@@ -197,10 +201,29 @@ Grep note: `apps/studio/dist` is checked in and contains the whole three.js
 bundle, so a repo-wide grep for anything viewer-related returns ~150 KB of
 noise. Search `src` only.
 
-**Poché is not the studio's front door — 2–3 d.** The thing that differentiates
-Arcvia from every image-generator competitor cannot be reached from the product.
-The studio's GLB-import project start was never finished, and Poché emits GLBs.
-Both ends are small; nobody has joined them.
+**Poché is not the studio's front door — 2–3 d. NOW UNBLOCKED.** The thing that
+differentiates Arcvia from every image-generator competitor cannot be reached
+from the product. The studio's GLB-import project start was never finished, and
+Poché emits GLBs. Both ends are small; nobody has joined them.
+
+**This was deliberately held back until `6ea3fea`, and the reason generalises.**
+Until the sheet border stopped eating wall faces, the engine emitted models
+containing two phantom walls among the thickest in the building — 13.40 m at
+t=0.291 and 10.49 m at t=0.443, both the drawing's paper border paired against a
+real face — while the genuine 0.230 m west wall was absent entirely. Wiring that
+into the product would have surfaced it to real users at the moment it was least
+ready. **Making the output honest about itself is not the same as making it
+right; a model that describes its own defects accurately is still defective.**
+
+Measured on the villa across that fix:
+
+    envelope coverage   46%  ->  86%     (warns below 90%, so still marginal)
+    walls              146   -> 129
+    phantom thicknesses 0.291, 0.443  ->  gone
+    bill            INR 997,755 -> 957,376
+
+Coverage at 86% is better and not yet good. Check it on the drawing you are
+importing before deciding the front door is safe for that drawing.
 
 **Lightmap bake has no UI — 3–4 d.** API and worker both already exist.
 
@@ -209,14 +232,34 @@ Both ends are small; nobody has joined them.
 Clearance checking is the notable one: **the furniture catalogue is dimensioned
 specifically for it and nothing uses those dimensions.** 4–6 d.
 
-Then sun path / shadow study (4–6 d), code checks — min room, corridor, egress
-(8–12 d), and daylight factor (6–8 d).
+Then sun path / shadow study (4–6 d) and code checks — min room, corridor,
+egress (8–12 d).
 
-⚠ **Daylight factor needs reference values before it is built, not after.** It
-was deferred once for exactly this reason and then asked for anyway. A daylight
-number that has never been checked against a known-correct case is a liability
-in a document an architect will sign. Find validation data first; if none can be
-found, say so and build something else.
+~~**Daylight factor** (6–8 d).~~ ✅ **DONE**, aalev-51, `4a8faec`.
+
+The blocker was a framing problem, and it is worth recording because the same
+shape will recur. "Needs reference values before it is built" treated validation
+data as something you go and FIND — none was to hand, so the feature stalled
+twice. For a CIE standard overcast sky the references are **derivable**: the
+luminance distribution is defined, so unobstructed horizontal illuminance falls
+out of a two-line integral as 7·π·L_z/9. The numerical integrator is asserted
+against that and reproduces it to 4×10⁻⁵, converging as 1/N² so the agreement is
+not luck. **A derivation the next reader can check beats a downloaded table they
+cannot.**
+
+Two things it found that outlive it:
+
+- `bre_average` is computed alongside every result. Against BS 8206-2 — the
+  expression a planning authority actually quotes — this module reads **1.3–1.8×
+  HIGH**, systematically. The docstring had claimed every figure was
+  "conservative" on the strength of a zero externally-reflected component;
+  conservative *against what* was the missing half, and a reader comparing 2.71
+  to a 2% threshold would pass a room BRE fails at 1.87. Both numbers ship.
+- **Every villa opening is a door.** Counting doors as glazing would have
+  produced 23 rooms of plausible percentages, every one an artefact of treating
+  a doorway as glass, and it would have looked exactly like the feature working.
+  It reports 23 `undetermined` rooms instead, which names window detection as
+  the blocker rather than hiding it.
 
 ### Deliver — the biggest gap between "works" and "sellable"
 
