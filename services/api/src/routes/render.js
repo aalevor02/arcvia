@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+
 import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
-import { spend, InsufficientCredits } from '../lib/credits.js'
+import { spend, balanceFor, InsufficientCredits } from '../lib/credits.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
 import { resolveUrl } from '../lib/storage.js'
@@ -116,6 +118,19 @@ export async function reconcileRenderJobs() {
   return orphans.length
 }
 
+/**
+ * How long an identical submission is treated as the same submission.
+ *
+ * Short on purpose. Two identical requests seconds apart are a double-clicked
+ * button; the same two a minute apart may be a deliberate re-render after the
+ * first looked stuck, and collapsing those would be its own silent failure —
+ * the user asks for two renders, gets one, and nothing says so.
+ *
+ * Only applies when the caller sends no `Idempotency-Key`. A key is a statement
+ * of intent and is honoured regardless of age.
+ */
+const IDEMPOTENCY_WINDOW_MS = Number(process.env.RENDER_IDEMPOTENCY_MS ?? 15_000)
+
 export async function registerRenderRoutes(app) {
   // The style list, served rather than duplicated in the client. One
   // definition means a style added here appears in the editor without a
@@ -180,6 +195,66 @@ export async function registerRenderRoutes(app) {
         .send({ message: "That scene's model file could not be located." })
     }
 
+    // ── Submitting twice must not charge twice ──────────────────────────────
+    // A double-clicked button sent two identical requests, and each one charged
+    // and queued. The user paid twice and got two renders of the same frame,
+    // which are byte-identical, so the only visible trace is the balance.
+    //
+    // Two mechanisms, because they answer different questions:
+    //
+    //   Idempotency-Key   the caller states "this is the same submission".
+    //                     Authoritative, and the right primitive — it is how a
+    //                     client that retries after a dropped response says so.
+    //   fingerprint       a backstop for callers that send no key, which is all
+    //                     of them today. Same user, same scene, same preset,
+    //                     same spec inputs, inside a few seconds.
+    //
+    // The window is deliberately short. Two identical submissions seconds apart
+    // are a double-click; the same two a minute apart could be a deliberate
+    // re-render after the first looked stuck, and collapsing THOSE would be its
+    // own silent failure — the user asks for two and gets one, with nothing
+    // saying so. Narrow enough to catch the accident, not the intention.
+    const key = request.headers['idempotency-key']
+    const fingerprint = createHash('sha256')
+      .update(
+        JSON.stringify([
+          request.auth.userId, sceneId, preset,
+          cameraPosition ?? null, cameraRotation ?? null,
+          hdriUrl ?? null, captureUrl ?? null,
+          request.body?.style ?? null, request.body?.note ?? null,
+          Boolean(request.body?.prebakedUv),
+        ]),
+      )
+      .digest('hex')
+
+    const since = Date.now() - IDEMPOTENCY_WINDOW_MS
+    const existing = await db.findOne('renderJobs', (j) => {
+      if (j.ownerId !== request.auth.userId) return false
+      if (key && j.idempotencyKey) return j.idempotencyKey === key
+      if (key) return false
+      return (
+        j.fingerprint === fingerprint &&
+        Date.parse(j.createdAt ?? 0) >= since
+      )
+    })
+
+    if (existing) {
+      // 200 rather than 201: nothing was created. `deduplicated` is there so a
+      // client can tell the difference — silently returning someone else's job
+      // id as if it were new is the same class of lie this guard is closing.
+      return reply.status(200).send({
+        jobId: existing.id,
+        status: existing.status,
+        creditsCharged: 0,
+        creditsRemaining: (await balanceFor(request.auth.userId)) ?? null,
+        queueDepth: await queueDepth(),
+        deduplicated: true,
+        message:
+          'This looks like the same submission as an existing job, so it was ' +
+          'not charged or queued again.',
+      })
+    }
+
     // Charge before queueing. Charging on completion sounds fairer but lets a
     // user with zero credits fill the queue and consume GPU time anyway.
     let charge
@@ -201,6 +276,11 @@ export async function registerRenderRoutes(app) {
       sceneId,
       ownerId: request.auth.userId,
       preset,
+      // Both persisted so the dedupe survives a restart. Holding them in memory
+      // would make a double-click safe only until the process bounced, which is
+      // exactly when a user is most likely to click twice.
+      idempotencyKey: typeof key === 'string' ? key : null,
+      fingerprint,
       // Recorded so a refund prices itself from what this job actually was,
       // not from whatever `PRESETS` happens to hold when it fails.
       action: config.action,
