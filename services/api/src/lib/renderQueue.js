@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { extname, resolve } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { db } from '../store.js'
 import { renderWithAi } from './aiRender.js'
 import { settleRefund } from './refunds.js'
@@ -24,9 +26,29 @@ import { put } from './storage.js'
 const MODE = process.env.RENDER_MODE ?? 'local'
 const BLENDER = process.env.BLENDER_PATH ?? 'blender'
 const WORKER_URL = process.env.RENDER_WORKER_URL ?? ''
-const SCRIPT = resolve(
-  process.env.BLENDER_SCRIPT ?? '../../services/render-worker/render.py',
-)
+// ── Resolve the render script relative to THIS file, not the cwd ────────────
+// `resolve('../../services/render-worker/render.py')` with no base is anchored
+// on process.cwd(), and the API is started from at least three directories:
+// the repo root (docs/deploy.md), services/api (npm scripts), and the test
+// harness. From the repo root it resolved to `A:\services\render-worker\...`,
+// which does not exist, and — because Blender exits 0 on a Python traceback —
+// every render on a fresh deploy failed with "Python file could not be opened".
+// storage.js and cadEngine.js already anchor on import.meta; this was the
+// outlier. `.env.example` shipped a cwd-relative override that was wrong from
+// services/api, so it is removed there and the file-relative default applies.
+const SCRIPT = process.env.BLENDER_SCRIPT
+  ? resolve(process.env.BLENDER_SCRIPT)
+  : resolve(dirname(fileURLToPath(import.meta.url)), '../../../render-worker/render.py')
+
+// Say so at boot, loudly, if it is not there. A missing render script is a
+// deployment fault that otherwise only surfaces as a failed job per render,
+// with an error (OSError from Blender) that names Python rather than the deploy.
+if (MODE === 'local' && !existsSync(SCRIPT)) {
+  console.warn(
+    `[renderQueue] BLENDER_SCRIPT not found at ${SCRIPT}. ` +
+      `Local renders will fail until this path is correct.`,
+  )
+}
 
 /**
  * How many jobs may render at once.
