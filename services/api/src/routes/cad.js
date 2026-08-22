@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
 import { spend, InsufficientCredits, creditCost } from '../lib/credits.js'
+import { checkSubmission } from '../lib/idempotency.js'
 import { settleRefund } from '../lib/refunds.js'
 import { enqueue } from '../lib/renderQueue.js'
 import * as engine from '../lib/cadEngine.js'
@@ -138,6 +139,42 @@ export async function registerCadRoutes(app) {
     const out = resolve(WORK_ROOT, request.auth.userId, 'build')
     await mkdir(out, { recursive: true })
 
+    // ── The same double-charge hole as /render/jobs, and worse here ─────────
+    // A reconstruct costs 3 credits against a preview render's 1, and it takes
+    // tens of seconds during which the button gives no feedback. So this is the
+    // submission a user is MORE likely to click twice, and the one where doing
+    // so costs most.
+    //
+    // Shared with the render route rather than copied. Two implementations of an
+    // idempotency rule that must agree is the defect this repo spent a day
+    // cataloguing — they agree until one is edited.
+    //
+    // The fingerprint covers every input that changes the OUTPUT. Omitting one
+    // would merge two genuinely different reconstructions, which loses the
+    // user's work rather than their credits, and that is the worse direction.
+    const { existing, fields: idempotency } = await checkSubmission(request, [
+      'cad',
+      request.body?.key ?? null,
+      request.body?.sceneId ?? null,
+      request.body?.unit ?? null,
+      Array.isArray(request.body?.layers) ? request.body.layers : null,
+      request.body?.autoLayers !== false,
+      request.body?.height ?? null,
+      request.body?.frame ?? null,
+    ])
+
+    if (existing) {
+      return reply.status(200).send({
+        jobId: existing.id,
+        status: existing.status,
+        creditsCharged: 0,
+        deduplicated: true,
+        message:
+          'This looks like the same drawing and settings as an existing job, ' +
+          'so it was not charged or queued again.',
+      })
+    }
+
     let charge
     try {
       charge = await spend(request.auth.userId, 'cadReconstruct', { key: request.body.key })
@@ -160,6 +197,10 @@ export async function registerCadRoutes(app) {
       status: 'queued',
       progress: 0,
       creditsCharged: charge.charged,
+      // Persisted with the job so the guard survives a restart — which is when
+      // a user is most likely to click twice, the first click having appeared
+      // to do nothing.
+      ...idempotency,
       spec: {
         inputPath: file.path,
         outDir: out,

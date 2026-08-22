@@ -131,6 +131,35 @@ ok('another user never receives my job', yours.body.jobId !== mine.body.jobId,
   `${mine.body.jobId} vs ${yours.body.jobId}`)
 ok('and is charged for their own', yours.status === 201, String(yours.status))
 
+console.log('\n-- a job that is no longer useful must not block a retry --')
+// THE FLAW IN THE FIRST VERSION OF THIS GUARD, found by writing the CAD half.
+// It matched on fingerprint alone, so a job that had FAILED or been CANCELLED
+// still counted as a duplicate. A user whose render failed and who immediately
+// clicked again — which is exactly what a person does when something fails —
+// would be told "this is a duplicate", handed the dead job, and left unable to
+// retry until the window expired.
+//
+// Worse than the double charge it was written to prevent: a duplicate charge
+// costs a credit, an unretryable failure costs the work. A failed job has
+// already been refunded, so charging the retry is correct.
+const retryable = { sceneId: second.id, preset: 'isometric', cameraPosition: { x: 4, y: 4, z: 4 } }
+const doomed = await submit(auth, retryable)
+ok('a job to be abandoned was created', doomed.status === 201, String(doomed.status))
+
+await fetch(`${BASE}/render/jobs/${doomed.body.jobId}/cancel`, {
+  method: 'POST',
+  headers: { Authorization: auth.Authorization },
+})
+
+const retry = await submit(auth, retryable)
+ok('resubmitting after a cancel creates a NEW job, inside the same window',
+  retry.status === 201, `${retry.status} ${retry.body.message ?? ''}`)
+ok('and it is genuinely a different job',
+  retry.body.jobId !== doomed.body.jobId,
+  `${doomed.body.jobId} vs ${retry.body.jobId}`)
+ok('and the retry is charged, because the cancelled one was refunded',
+  retry.body.creditsCharged > 0, String(retry.body.creditsCharged))
+
 console.log('\n-- an explicit Idempotency-Key --')
 const keyed = { 'Idempotency-Key': `key-${stamp}` }
 const k1 = await submit(auth, { sceneId: second.id, preset: 'full' }, keyed)

@@ -109,6 +109,39 @@ const created = await submit.json()
 ok('the job is accepted', submit.status === 201, `${submit.status} ${created.message ?? ''}`)
 ok('and charges for it', created.creditsCharged === 3, String(created.creditsCharged))
 
+// ---- The double click -------------------------------------------------------
+// A reconstruct costs 3 credits against a preview render's 1, and it takes tens
+// of seconds during which the button gives no feedback — so this is the
+// submission a user is most likely to click twice, and the one where doing so
+// costs most. Before this guard, each click charged.
+//
+// Asserted here rather than in a suite of its own because the upload above is
+// the expensive part and it has already happened.
+const beforeDupe = await balanceOf()
+const again = await post('/cad/jobs', account.token, { key, autoLayers: true })
+const duplicate = await again.json()
+
+ok('submitting the same drawing again returns 200, not 201',
+  again.status === 200, String(again.status))
+ok('and the same job, rather than a second reconstruction',
+  duplicate.jobId === created.jobId, `${created.jobId} vs ${duplicate.jobId}`)
+ok('and says it was deduplicated rather than passing an old job off as new',
+  duplicate.deduplicated === true)
+// Asserted on the reported charge rather than only on the balance. `balanceOf`
+// returns null while billing is off, so a balance comparison here is null ===
+// null and would pass however much the second click cost. The first submit
+// above proves a real charge of 3; this proves the second is 0.
+ok('and the second click charges nothing', duplicate.creditsCharged === 0,
+  String(duplicate.creditsCharged))
+ok('and the balance does not move either', (await balanceOf()) === beforeDupe,
+  `${beforeDupe} -> ${await balanceOf()}`)
+
+// What must NOT be merged. Different settings are a different reconstruction,
+// and collapsing those would lose the user's work rather than their credits.
+const different = await post('/cad/jobs', account.token, { key, autoLayers: false })
+ok('different settings still get their own job',
+  different.status === 201, String(different.status))
+
 let job = null
 const deadline = Date.now() + 300_000
 while (Date.now() < deadline) {
