@@ -446,7 +446,22 @@ def reconstruct(
                 within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
             )
             if selected:
-                pool = [f for name in selected for f in within[name]]
+                # `sorted`, because `selected` is a set of layer NAME STRINGS
+                # and Python randomises string hashing per process. Iterating
+                # it directly built the wall-face pool in a different order on
+                # every run, and pairing and corner-joining are order-sensitive
+                # — so the same drawing produced 148 walls / 260.3 m2 on one
+                # run and 147 / 259.4 on the next, with no code change between
+                # them. That is a quotation that changes when you re-run it.
+                #
+                # PYTHONHASHSEED=0 pins it, which is how this was identified,
+                # but pinning the seed hides the dependency rather than
+                # removing it. Sorting cannot change WHICH layers were chosen,
+                # only the order they are read in.
+                #
+                # Note the report on the next line already sorted. The display
+                # was made deterministic and the data it described was not.
+                pool = [f for name in sorted(selected) for f in within[name]]
                 walls = join_corners(pair_faces(pool))
                 chosen_here = selected
                 layer_choice = {"selected": sorted(selected), "trace": trace}
@@ -649,6 +664,30 @@ def reconstruct(
         meshes["storey0_fixtures"] = fixture_mesh
 
     storey_report: list[dict] = []
+    # ── Furniture belongs to the building, not to the primary storey ─────────
+    # `walls`, `rooms` and `openings` below are deliberately the PRIMARY storey:
+    # they are what the plan drawing draws and what a person means by "the
+    # plan". Fixtures were following them by accident rather than by argument,
+    # and the result was a model whose GLB carried `storey0_fixtures` AND
+    # `storey1_fixtures` while `elements.fixtures` listed one storey's worth.
+    #
+    # On the villa that is 21 fixtures reported for a building holding 55. The
+    # lower ground floor's beds and sanitaryware were visible in the 3D and
+    # absent from the data — so `solve/clearance.py`, the only consumer, was
+    # checking one floor of a two-floor house and reporting a clean result for
+    # the other. Nothing here reaches the bill: `quantify/boq.py` does not read
+    # fixtures at all, which is why this list can be made complete without
+    # moving a single costed quantity.
+    #
+    # Each entry carries `storey`, because two beds at the same (x, y) on
+    # different floors are not an overlap and a checker with no storey index
+    # cannot tell that.
+    all_fixtures: list[dict] = []
+    #: Which storey `elements.walls` / `spaces` / `openings` describe. Anything
+    #: that pairs a fixture with WALLS has to filter to this one, because those
+    #: walls belong to one floor and a fixture from another would be measured
+    #: against a room it is not in.
+    primary_storey = 0
     if solved:
         meshes = {}
         # Numbered from the bottom of the stack, so storey0 is the lowest thing
@@ -662,6 +701,9 @@ def reconstruct(
             meshes[f"storey{n}_floors"] = f_mesh
             if x_build["fixtures"]:
                 meshes[f"storey{n}_fixtures"] = x_mesh
+            all_fixtures.extend({**f, "storey": n} for f in result["fixtures"])
+            if result is storey:
+                primary_storey = n
             storey_report.append({
                 "storey": n,
                 "level": level.level,
@@ -722,7 +764,8 @@ def reconstruct(
         # pairs to 5 walls, or a layer choice that fragments a partitions-only
         # plan — which produces a bill of quantities for less building than the
         # client drew. This is the number that moves when that happens.
-        "storeys": {**storeys.as_dict(), "built": storey_report},
+        "storeys": {**storeys.as_dict(), "built": storey_report,
+                    "primary": primary_storey},
         "wallsTotal": len(all_walls),
         "wallsUnframed": len(all_walls) - sum(len(f.wall_indices) for f in frames),
         "framingNote": framing_note or None,
@@ -736,7 +779,8 @@ def reconstruct(
             "walls": [w.as_dict() for w in walls],
             "spaces": [r.as_dict() for r in rooms],
             "openings": [o.as_dict() for o in holes],
-            "fixtures": fixtures,
+            # Single-storey models keep storey 0, so consumers read one shape.
+            "fixtures": all_fixtures or [{**f, "storey": 0} for f in fixtures],
         },
     }
 

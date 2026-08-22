@@ -295,7 +295,22 @@ def check(model: dict, dims: dict) -> list[Issue]:
     walls = elements.get("walls", [])
     spaces = elements.get("spaces", [])
     openings = elements.get("openings", [])
-    fixtures = [f for f in elements.get("fixtures", []) if f.get("label") == "fixture"]
+    # ── Check one floor against its own walls ────────────────────────────────
+    # `elements.fixtures` covers every storey; `walls` and `spaces` cover the
+    # primary one. Every check below pairs a fixture with a wall, a door swing
+    # or a room, so a fixture from another floor would be measured against
+    # geometry it has never been near — and two beds stacked at the same (x, y)
+    # on different floors would read as a 100% overlap.
+    #
+    # So this filters to the storey the geometry belongs to. Fixtures on other
+    # floors go unchecked, which is a stated gap rather than a silent one:
+    # checking them needs per-storey walls in the model, and `elements` carries
+    # one storey's by design because that is what the plan drawing draws.
+    primary = (model.get("storeys") or {}).get("primary", 0)
+    fixtures = [
+        f for f in elements.get("fixtures", [])
+        if f.get("label") == "fixture" and f.get("storey", primary) == primary
+    ]
 
     issues: list[Issue] = []
 
