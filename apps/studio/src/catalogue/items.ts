@@ -25,6 +25,7 @@ export const CATEGORIES = [
   'Doors & windows',
   'Lighting',
   'Decor',
+  'Outdoor',
 ] as const
 
 export const CATALOGUE: CatalogueItem[] = [
@@ -789,8 +790,182 @@ export const CATALOGUE: CatalogueItem[] = [
       triangles: 2000,
     },
   },
+  // ---- Outdoor -------------------------------------------------------------
+  //
+  // ── Why a residential tool needs these at all ─────────────────────────────
+  // More than half the site on the villa this engine was measured against is
+  // outdoor: 125.11 m² indoor against 127.64 m² of lawn, pool, patio and
+  // balcony. Until now the catalogue could furnish the smaller half and nothing
+  // could be placed on the larger one.
+  //
+  // Sizes are real. A lap pool is 12 m because that is what people build; a
+  // parasol is 2.7 m across because that is the common size; a lounger is
+  // 1.98 m long because a person is.
+  {
+    id: 'pool',
+    name: 'Swimming pool',
+    category: 'Outdoor',
+    placement: 'floor',
+    // 8 × 4 is the commonest private pool. `height` is the DEPTH of the tank,
+    // and 1.4 m is a standard constant-depth domestic pool — deep enough to
+    // swim, shallow enough to stand in, which is why it is the default built.
+    size: { width: 8, depth: 4, height: 1.4 },
+    shape: 'pool',
+    tone: 'water',
+    note: 'Height is the depth of the tank. Lay paving around it, not under it — a slab across the top hides the water.',
+  },
+  {
+    id: 'pool-plunge',
+    name: 'Plunge pool',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 4, depth: 2.4, height: 1.25 },
+    shape: 'pool',
+    tone: 'water',
+    note: 'For a courtyard or a terrace. Lay paving around it, not under it.',
+  },
+  {
+    id: 'pool-lap',
+    name: 'Lap pool',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 12, depth: 2.5, height: 1.35 },
+    shape: 'pool',
+    tone: 'water',
+    note: 'Long and narrow, for swimming rather than sitting in. Lay paving around it, not under it.',
+  },
+  {
+    id: 'deck',
+    name: 'Timber deck',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 4, depth: 3, height: 0.12 },
+    shape: 'slab',
+    tone: 'wood',
+  },
+  {
+    id: 'paving',
+    name: 'Paved terrace',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 5, depth: 4, height: 0.06 },
+    shape: 'slab',
+    tone: 'paving',
+  },
+  {
+    id: 'lawn',
+    name: 'Lawn',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 8, depth: 6, height: 0.04 },
+    shape: 'slab',
+    tone: 'grass',
+    note: 'A planted area. Drop it under a pool or a terrace to show the setting.',
+  },
+  {
+    id: 'tree',
+    name: 'Tree',
+    category: 'Outdoor',
+    placement: 'floor',
+    // A semi-mature garden tree: 4.5 m crown, 6 m tall. Big enough to shade a
+    // terrace, which is the question anybody placing one is asking.
+    size: { width: 4.5, depth: 4.5, height: 6 },
+    shape: 'tree',
+    tone: 'plant',
+  },
+  {
+    id: 'tree-small',
+    name: 'Ornamental tree',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 2.4, depth: 2.4, height: 3.2 },
+    shape: 'tree',
+    tone: 'plant',
+  },
+  {
+    id: 'hedge',
+    name: 'Hedge',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 3, depth: 0.6, height: 1.5 },
+    shape: 'hedge',
+    tone: 'plant',
+    note: 'Stretch it along a boundary. 1.5 m screens a seated terrace.',
+  },
+  {
+    id: 'shrub',
+    name: 'Shrub',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 0.9, depth: 0.9, height: 0.8 },
+    shape: 'hedge',
+    tone: 'plant',
+  },
+  {
+    id: 'planter-outdoor',
+    name: 'Planter',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 0.9, depth: 0.45, height: 1.1 },
+    shape: 'planter',
+    tone: 'stone',
+  },
+  {
+    id: 'lounger',
+    name: 'Sun lounger',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 0.7, depth: 1.98, height: 0.62 },
+    shape: 'lounger',
+    tone: 'fabric',
+  },
+  {
+    id: 'parasol',
+    name: 'Parasol',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 2.7, depth: 2.7, height: 2.4 },
+    shape: 'parasol',
+    tone: 'fabric',
+  },
+  {
+    id: 'pergola',
+    name: 'Pergola',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 4, depth: 3, height: 2.4 },
+    shape: 'pergola',
+    tone: 'wood',
+    note: 'Slatted, so it casts the striped shade that is the point of building one.',
+  },
+  {
+    id: 'fence',
+    name: 'Fence',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 3, depth: 0.1, height: 1.8 },
+    shape: 'fence',
+    tone: 'wood',
+  },
+  {
+    id: 'outdoor-table',
+    name: 'Outdoor dining table',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 1.8, depth: 0.9, height: 0.75 },
+    shape: 'table',
+    tone: 'wood',
+  },
+  {
+    id: 'outdoor-chair',
+    name: 'Outdoor chair',
+    category: 'Outdoor',
+    placement: 'floor',
+    size: { width: 0.55, depth: 0.56, height: 0.85 },
+    shape: 'chair',
+    tone: 'wood',
+  },
 ]
-
 const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
 
 export const itemById = (id: string): CatalogueItem | undefined => BY_ID.get(id)

@@ -4,7 +4,7 @@
 // behind it and the reason for its tile size are in the SURFACES table at the
 // top of it.
 //
-// 8 surfaces, 1003 KB total, all 512px.
+// 9 surfaces, 1131 KB total, all 512px.
 
 import type { SurfaceKind } from '../plan/materials'
 
@@ -153,6 +153,18 @@ export const SURFACE_MAPS: readonly SurfaceMaps[] = [
     source: "https://ambientcg.com/view?id=Marble016",
   },
   {
+    id: "paving",
+    name: "Paving",
+    note: "Grey linear pavers for a terrace or a pool surround.",
+    tileMetres: 2,
+    map: "/surfaces/paving-color.jpg",
+    roughnessMap: "/surfaces/paving-roughness.jpg",
+    normalMap: "/surfaces/paving-normal.jpg",
+    licence: "CC0 1.0 Public Domain",
+    author: "ambientCG",
+    source: "https://ambientcg.com/view?id=PavingStones126A",
+  },
+  {
     id: "metal",
     name: "Brushed steel",
     note: "Brushed steel for appliances and fixtures.",
@@ -176,6 +188,8 @@ export const surfaceMapsFor = (kind: SurfaceKind): SurfaceMaps | undefined =>
  * file, and only one of them should survive review.
  */
 export const PROCEDURAL_SURFACES: Readonly<Record<string, string>> = {
+  water: "What makes water read as water is seeing THROUGH it to a floor that is the wrong colour and the wrong distance away. A photograph of water is a photograph of whatever was under it, pinned flat.",
+  grass: "The hub has no grass — its texture harvest was filtered to interiors, the same decision that left it with 301 indoor HDRIs and no skies. A photographed lawn is the better answer and is one `hub.mjs fetch ambientcg:Grass###` away; the procedural turf is the honest stand-in until someone takes it.",
   glass: "Transparency, IOR and near-zero roughness are shader properties. A photograph of glass is a photograph of whatever was behind it.",
   plant: "Foliage colour varies per placement and the model carries its own leaves.",
   white: "A flat tint, deliberately. A texture here would only add noise to the one surface meant to have none.",

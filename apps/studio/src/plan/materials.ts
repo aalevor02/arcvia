@@ -52,6 +52,9 @@ const FLAT: Record<string, number> = {
   glass: 0xcfe3ee,
   plant: 0x4e7c42,
   white: 0xf1f3f6,
+  water: 0x2f7f9e,
+  grass: 0x5f8a4a,
+  paving: 0xa8a49d,
 }
 
 function canvas(): { ctx: CanvasRenderingContext2D; el: HTMLCanvasElement } {
@@ -281,6 +284,59 @@ function tile(): { map: THREE.Texture; roughness: THREE.Texture } {
 }
 
 /** Woven fabric, for upholstery. */
+/**
+ * Turf.
+ *
+ * ── Why not `fabric` with a green hue ───────────────────────────────────────
+ * That was the first attempt and it is wrong in a way worth recording: `fabric`
+ * fixes saturation at 14%, which is right for undyed linen and makes grass look
+ * like a dust sheet. A lawn's whole visual signature is that it is SATURATED and
+ * unevenly so — mown bands, wear, and blades catching light at different angles.
+ *
+ * Blades are drawn as short strokes at scattered angles rather than as noise,
+ * because at grazing angles a lawn's texture is directional; uniform noise reads
+ * as carpet.
+ */
+function turf(): { map: THREE.Texture; roughness: THREE.Texture } {
+  const { ctx, el } = canvas()
+  const random = seeded(41)
+
+  ctx.fillStyle = 'hsl(96, 34%, 30%)'
+  ctx.fillRect(0, 0, SIZE, SIZE)
+
+  // Broad tonal drift first: mown bands and dry patches, under the blades.
+  for (let i = 0; i < 90; i++) {
+    const r = 30 + random() * 80
+    ctx.fillStyle = `hsla(${88 + random() * 20}, ${28 + random() * 16}%, ${24 + random() * 14}%, .35)`
+    ctx.beginPath()
+    ctx.arc(random() * SIZE, random() * SIZE, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  ctx.lineWidth = 1
+  for (let i = 0; i < 5200; i++) {
+    const x = random() * SIZE
+    const y = random() * SIZE
+    const length = 3 + random() * 5
+    const angle = -Math.PI / 2 + (random() - 0.5) * 1.1
+    ctx.strokeStyle = `hsla(${92 + random() * 22}, ${34 + random() * 22}%, ${22 + random() * 24}%, .75)`
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length)
+    ctx.stroke()
+  }
+
+  const map = toTexture(el, true)
+
+  // Grass is uniformly matt. The variation that matters is in the normal, not
+  // in the gloss — a lawn with shiny patches reads as wet, permanently.
+  const { ctx: rough, el: roughEl } = canvas()
+  rough.fillStyle = '#e6e6e6'
+  rough.fillRect(0, 0, SIZE, SIZE)
+
+  return { map, roughness: toTexture(roughEl, false) }
+}
+
 function fabric(hue: number, lightness: number): { map: THREE.Texture; roughness: THREE.Texture } {
   const { ctx, el } = canvas()
 
@@ -312,18 +368,43 @@ function fabric(hue: number, lightness: number): { map: THREE.Texture; roughness
 
 // ---- Material registry -----------------------------------------------------
 
-export type SurfaceKind =
-  | 'floor-wood'
-  | 'floor-tile'
-  | 'wall'
-  | 'ceiling'
-  | 'fabric'
-  | 'wood'
-  | 'stone'
-  | 'metal'
-  | 'glass'
-  | 'plant'
-  | 'white'
+/**
+ * Every surface the studio can build.
+ *
+ * ── Why this is a value and not only a type ─────────────────────────────────
+ * `SurfaceKind` was a bare union, so nothing at run time could enumerate it and
+ * the test that checks every kind is accounted for had to keep its OWN
+ * hand-written copy of the list. That test's whole purpose is to fail when a
+ * kind is added and not wired up — and when three were added it passed, because
+ * the list it checked against was the one nobody had updated either.
+ *
+ * Declared as a const array with the type derived from it, so the two cannot
+ * disagree: adding a kind here is the only way to add one at all, and every
+ * consumer sees it immediately.
+ */
+export const SURFACE_KINDS = [
+  'floor-wood',
+  'floor-tile',
+  'wall',
+  'ceiling',
+  'fabric',
+  'wood',
+  'stone',
+  'metal',
+  'glass',
+  'plant',
+  'white',
+  // ---- Outdoor -------------------------------------------------------------
+  // A site is half the drawing on almost every residential project this tool
+  // will see — the villa it was measured against is 125 m² indoor against
+  // 128 m² outdoor — and until now nothing could be made of anything that
+  // belongs outside a wall.
+  'water',
+  'grass',
+  'paving',
+] as const
+
+export type SurfaceKind = (typeof SURFACE_KINDS)[number]
 
 const cache = new Map<SurfaceKind, THREE.MeshStandardMaterial>()
 
@@ -465,6 +546,56 @@ function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
       return new THREE.MeshStandardMaterial({ color: 0x4e7c42, roughness: 0.85, metalness: 0 })
     case 'white':
       return new THREE.MeshStandardMaterial({ color: 0xf1f3f6, roughness: 0.5, metalness: 0 })
+
+    /**
+     * Pool water.
+     *
+     * ── Why this is a shader property and not a photograph ────────────────
+     * The same reason glass is. What makes water read as water is that you see
+     * THROUGH it to a floor that is the wrong colour and the wrong distance
+     * away, and that it throws a moving highlight. A photograph of water is a
+     * photograph of whatever was under it that day, pinned flat.
+     *
+     * Near-zero roughness and a low opacity, so the pool floor shows through
+     * and the sky lands on the surface as a specular sheet. Deliberately not
+     * animated: a still pool in a plan view reads correctly, and a scrolling
+     * normal map is a frame-rate cost paid on every scene that has one.
+     */
+    case 'water':
+      return new THREE.MeshStandardMaterial({
+        color: 0x2f7f9e,
+        roughness: 0.04,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.72,
+      })
+
+    /**
+     * Turf.
+     *
+     * Procedural because the hub has no grass — its texture harvest was
+     * filtered to interiors, the same decision that left it with 301 indoor
+     * HDRIs and no skies. A photographed lawn is a better answer and is one
+     * `hub.mjs fetch ambientcg:Grass###` away; this is the honest stand-in
+     * until someone takes it.
+     */
+    case 'grass': {
+      const { map, roughness } = turf()
+      return textured(map, roughness, 1 / 1.5, 2.4, { roughness: 0.95 })
+    }
+
+    /**
+     * Paving.
+     *
+     * Reuses the tile generator at a coarser repeat: a paving slab is 600 mm
+     * where a floor tile is 300, and the grout between them is wider and
+     * deeper. `catalogue/surfaces` can replace this with photographed
+     * PavingStones, of which the hub has eighteen.
+     */
+    case 'paving': {
+      const { map, roughness } = tile()
+      return textured(map, roughness, 1 / 1.2, 3, { roughness: 0.9 })
+    }
   }
 }
 

@@ -34,6 +34,9 @@ const TONE_SURFACE: Record<string, SurfaceKind> = {
   glass: 'glass',
   plant: 'plant',
   white: 'white',
+  water: 'water',
+  grass: 'grass',
+  paving: 'paving',
 }
 
 function material(tone = 'fabric'): THREE.MeshStandardMaterial {
@@ -67,7 +70,7 @@ interface Box {
  * can legitimately be transparent and still block light — frosted glass, a
  * blind. This is the list of things daylight passes through.
  */
-const TRANSMITS_LIGHT = new Set(['glass'])
+const TRANSMITS_LIGHT = new Set(['glass', 'water'])
 
 /** A box positioned by its centre, in the object's local frame. */
 function block(
@@ -300,6 +303,171 @@ const BUILDERS: Record<string, Builder> = {
     foliage.scale.y = 1.25
     foliage.castShadow = true
     g.add(foliage)
+  },
+
+  // ---- Outdoor -------------------------------------------------------------
+
+  /**
+   * A pool: coping, a recessed tank, and a water surface inside it.
+   *
+   * ── Why it is a hole and not a blue box ─────────────────────────────────
+   * A pool is read as a pool because the water sits BELOW the deck it is set
+   * into. A blue slab on the ground reads as a rug. So the coping is built at
+   * full height, the tank walls drop from it, and the water plane sits a little
+   * under the coping — which also puts the deck's own shadow on the water,
+   * which is most of what makes it look wet.
+   *
+   * `height` is the depth of the tank, so resizing it deepens the pool rather
+   * than lifting it into the air.
+   *
+   * ⚠ Everything here is at or below y=0, because that is where a pool is. So
+   * anything opaque spanning its footprint at ground level HIDES IT — place
+   * paving and decking AROUND a pool, not under it. Verified: against a solid
+   * ground plane the pool renders as a bare white outline and looks broken;
+   * with nothing under it, the tank and water read correctly.
+   *
+   * The proper fix is for a slab to take an aperture where a pool overlaps it,
+   * which is floor-geometry work rather than a catalogue shape. Until then the
+   * item notes say so, because the failure looks like a bug in the pool.
+   */
+  pool: (g, s) => {
+    const coping = Math.min(0.35, Math.min(s.width, s.depth) * 0.12)
+    const rim = 0.12
+    const inner = { w: Math.max(0.4, s.width - coping * 2), d: Math.max(0.4, s.depth - coping * 2) }
+
+    // Coping, as four kerbs rather than a slab, so the tank inside is open.
+    block(g, 'stone', [s.width, rim, coping], [0, -rim / 2, (s.depth - coping) / 2])
+    block(g, 'stone', [s.width, rim, coping], [0, -rim / 2, -(s.depth - coping) / 2])
+    block(g, 'stone', [coping, rim, inner.d], [(s.width - coping) / 2, -rim / 2, 0])
+    block(g, 'stone', [coping, rim, inner.d], [-(s.width - coping) / 2, -rim / 2, 0])
+
+    // The tank: a floor at depth, and four walls to hide the ground through it.
+    block(g, 'floor-tile', [inner.w, 0.06, inner.d], [0, -s.height, 0])
+    block(g, 'floor-tile', [inner.w, s.height, 0.06], [0, -s.height / 2, inner.d / 2])
+    block(g, 'floor-tile', [inner.w, s.height, 0.06], [0, -s.height / 2, -inner.d / 2])
+    block(g, 'floor-tile', [0.06, s.height, inner.d], [inner.w / 2, -s.height / 2, 0])
+    block(g, 'floor-tile', [0.06, s.height, inner.d], [-inner.w / 2, -s.height / 2, 0])
+
+    // Water, a hand's width below the coping — never flush, which reads as a
+    // solid lid rather than a surface you could put a hand through.
+    block(g, 'water', [inner.w, 0.02, inner.d], [0, -0.18, 0])
+  },
+
+  /** A flat area — decking, paving, a lawn. Tone decides which. */
+  slab: (g, s, tone) => {
+    const t = Math.max(0.04, Math.min(s.height, 0.12))
+    block(g, tone, [s.width, t, s.depth], [0, t / 2, 0])
+  },
+
+  /**
+   * A tree: trunk and a layered canopy.
+   *
+   * Three offset spheres rather than one, because a single sphere on a stick is
+   * the most recognisable "3D placeholder" shape there is and undoes the work
+   * every other object here does.
+   */
+  tree: (g, s) => {
+    const trunk = Math.max(0.06, s.width * 0.06)
+    const clear = s.height * 0.38
+    cylinder(g, 'wood', trunk, clear, [0, clear / 2, 0])
+
+    const r = s.width * 0.34
+    for (const [dx, dy, dz, k] of [
+      [0, clear + r * 0.9, 0, 1],
+      [r * 0.5, clear + r * 1.5, r * 0.25, 0.72],
+      [-r * 0.45, clear + r * 1.35, -r * 0.3, 0.66],
+    ]) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(r * k, 12, 10), material('plant'))
+      mesh.position.set(dx, dy, dz)
+      mesh.castShadow = true
+      g.add(mesh)
+    }
+  },
+
+  /** A clipped hedge or shrub mass — a rounded box, not a sphere. */
+  hedge: (g, s) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s.width, s.height, s.depth), material('plant'))
+    mesh.position.y = s.height / 2
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    g.add(mesh)
+  },
+
+  /** A parasol: pole, and a canopy that actually shades something. */
+  parasol: (g, s) => {
+    cylinder(g, 'metal', 0.03, s.height, [0, s.height / 2, 0])
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(s.width / 2, s.height * 0.18, 8),
+      material('fabric'),
+    )
+    canopy.position.y = s.height - s.height * 0.09
+    canopy.castShadow = true
+    g.add(canopy)
+  },
+
+  /** A sun lounger: a raked back on a low frame. */
+  lounger: (g, s, tone) => {
+    const bed = s.height * 0.55
+    block(g, tone, [s.width, 0.08, s.depth * 0.62], [0, bed, s.depth * 0.19])
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(s.width, 0.08, s.depth * 0.42),
+      material(tone),
+    )
+    back.position.set(0, bed + s.depth * 0.13, -s.depth * 0.28)
+    back.rotation.x = -0.62
+    back.castShadow = true
+    g.add(back)
+    for (const x of [-1, 1]) {
+      block(g, 'metal', [0.05, bed, 0.05], [x * (s.width / 2 - 0.05), bed / 2, s.depth * 0.4])
+      block(g, 'metal', [0.05, bed, 0.05], [x * (s.width / 2 - 0.05), bed / 2, -s.depth * 0.3])
+    }
+  },
+
+  /** A pergola: posts and a slatted roof that casts a striped shadow. */
+  pergola: (g, s) => {
+    const post = 0.12
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      block(g, 'wood', [post, s.height, post], [
+        x * (s.width / 2 - post / 2),
+        s.height / 2,
+        z * (s.depth / 2 - post / 2),
+      ])
+    }
+    block(g, 'wood', [s.width, 0.12, post], [0, s.height - 0.06, (s.depth - post) / 2])
+    block(g, 'wood', [s.width, 0.12, post], [0, s.height - 0.06, -(s.depth - post) / 2])
+
+    // Slats. The striped shadow is the entire reason a pergola is built.
+    const slats = Math.max(4, Math.round(s.depth / 0.32))
+    for (let i = 0; i < slats; i++) {
+      const z = -s.depth / 2 + (i + 0.5) * (s.depth / slats)
+      block(g, 'wood', [s.width, 0.06, 0.06], [0, s.height + 0.03, z])
+    }
+  },
+
+  /** A planter: a box with foliage above it. */
+  planter: (g, s, tone) => {
+    const box = s.height * 0.45
+    block(g, tone, [s.width, box, s.depth], [0, box / 2, 0])
+    const foliage = new THREE.Mesh(
+      new THREE.SphereGeometry(Math.min(s.width, s.depth) * 0.42, 10, 8),
+      material('plant'),
+    )
+    foliage.position.y = box + s.height * 0.28
+    foliage.scale.y = 0.8
+    foliage.castShadow = true
+    g.add(foliage)
+  },
+
+  /** A boundary: posts with rails between them. */
+  fence: (g, s, tone) => {
+    const posts = Math.max(2, Math.round(s.width / 1.8) + 1)
+    for (let i = 0; i < posts; i++) {
+      const x = -s.width / 2 + (i * s.width) / (posts - 1)
+      block(g, tone, [0.09, s.height, 0.09], [x, s.height / 2, 0])
+    }
+    for (const y of [s.height * 0.32, s.height * 0.72]) {
+      block(g, tone, [s.width, 0.07, 0.045], [0, y, 0])
+    }
   },
 }
 

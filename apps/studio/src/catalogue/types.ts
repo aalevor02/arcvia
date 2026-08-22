@@ -54,7 +54,19 @@ export interface CatalogueItem {
   /** Which builder in `build.ts` draws it. */
   shape: string
   /** Rough palette hint, so a room does not come out uniformly grey. */
-  tone?: 'wood' | 'fabric' | 'metal' | 'stone' | 'glass' | 'plant' | 'white'
+  tone?:
+    | 'wood'
+    | 'fabric'
+    | 'metal'
+    | 'stone'
+    | 'glass'
+    | 'plant'
+    | 'white'
+    // Outdoor. A site is more than half the drawing on most residential
+    // projects, and none of the tones above can describe any of it.
+    | 'water'
+    | 'grass'
+    | 'paving'
   /** Shown in the picker when the difference between two items is not obvious. */
   note?: string
   /**

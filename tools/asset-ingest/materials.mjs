@@ -159,6 +159,16 @@ const SURFACES = [
     note: 'Dark marble with white veining, for counters and sills.',
   },
   {
+    id: 'paving',
+    slug: 'PavingStones126A',
+    name: 'Paving',
+    // Linear plank pavers, roughly three units across and four courses down the
+    // map. At 2 m that is about 660 x 500 mm — large-format paving, which is
+    // what is actually laid on a terrace.
+    tileMetres: 2.0,
+    note: 'Grey linear pavers for a terrace or a pool surround.',
+  },
+  {
     id: 'metal',
     slug: 'Metal010',
     name: 'Brushed steel',
@@ -177,6 +187,8 @@ const SURFACES = [
  * generated file, and only one of them is a decision.
  */
 const PROCEDURAL = {
+  water: 'What makes water read as water is seeing THROUGH it to a floor that is the wrong colour and the wrong distance away. A photograph of water is a photograph of whatever was under it, pinned flat.',
+  grass: 'The hub has no grass — its texture harvest was filtered to interiors, the same decision that left it with 301 indoor HDRIs and no skies. A photographed lawn is the better answer and is one `hub.mjs fetch ambientcg:Grass###` away; the procedural turf is the honest stand-in until someone takes it.',
   glass: 'Transparency, IOR and near-zero roughness are shader properties. A photograph of glass is a photograph of whatever was behind it.',
   plant: 'Foliage colour varies per placement and the model carries its own leaves.',
   white: 'A flat tint, deliberately. A texture here would only add noise to the one surface meant to have none.',

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { SURFACE_MAPS, PROCEDURAL_SURFACES, surfaceMapsFor } from '../src/catalogue/surfaces'
-import type { SurfaceKind } from '../src/plan/materials'
+import { SURFACE_KINDS } from '../src/plan/materials'
 
 /**
  * The surface catalogue, against the files it names.
@@ -51,27 +51,15 @@ check(
 )
 
 /**
- * Every surface kind the studio can ask for.
+ * Every surface kind, from the module that defines them.
  *
- * Written out because `SurfaceKind` is a type union and has no runtime form.
- * That is the point rather than a workaround: adding a kind to
- * `plan/materials.ts` and nowhere else should fail here, because the invariant
- * below is what stops a kind existing with neither a photographed map nor a
- * recorded reason for going without one.
+ * This list used to be written out here, because `SurfaceKind` was a bare union
+ * with no run-time form. That defeated the whole check: three kinds were added
+ * to materials.ts and this still passed, against a copy nobody had updated.
+ * `SURFACE_KINDS` is now the single declaration, so a kind cannot exist without
+ * appearing here.
  */
-const ALL_KINDS: SurfaceKind[] = [
-  'floor-wood',
-  'floor-tile',
-  'wall',
-  'ceiling',
-  'fabric',
-  'wood',
-  'stone',
-  'metal',
-  'glass',
-  'plant',
-  'white',
-]
+const ALL_KINDS = SURFACE_KINDS
 
 // ---- The files exist ---------------------------------------------------------
 
