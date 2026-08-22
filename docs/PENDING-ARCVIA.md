@@ -44,10 +44,25 @@ Two conventions that have already paid for themselves today:
   pathspec. **None of it helped**, because the staging happened before the
   window, not after it.
 
-  > **Stage and commit in ONE step, or skip the index entirely:**
-  > `git commit -- <paths>` with nothing staged.
+  > **Never let `git add` and `git commit` be separated by other work.**
+  >
+  > modified files only — skip the index entirely:
+  > `git commit -F <msg> -- <paths>`
+  >
+  > anything NEW — one invocation, milliseconds not minutes:
+  > `git add <new paths> && git commit -F <msg> -- <all paths>`
 
-  `git commit -- <paths>` commits only those paths and leaves the index alone.
+  **The second form is not optional for new files and the first will not work
+  for them.** git only knows a path once it is tracked, so
+  `git commit -F - -- new-file.ts` fails with *"pathspec did not match any file
+  known to git"*. The window cannot be closed for a new file, only narrowed —
+  and someone following "skip the index" literally will hit that error and may
+  fall back to a bare `git commit`, which is the exact thing this prevents.
+
+  Mind the argument order too: `--` ends option parsing, so
+  `git commit -- <path> -F -` reads `-F` as a pathspec and dies. `-F` goes
+  before the `--`.
+
   And **do not rebase to tidy an attribution mistake** — putting real work at
   risk to fix whose name is on a commit is a bad trade. Record it and move on.
 - **Report what you refuted, not just what you found.** Two of today's
@@ -123,7 +138,31 @@ Ordered by value per day, which is not the same as by size.
 
 ### Highest value per day in the whole product
 
-**`A:\Assets\Hub` is unwired — 3–5 d.** There is a `/asset-hub` skill for it.
+~~**`A:\Assets\Hub` is unwired.**~~ ✅ **DONE.** Not "a catalogue exists" — a
+user can now pick a sky and a floor in the editor and **both reach the
+renderer**, which is what the roadmap actually asked for.
+
+| | |
+|---|---|
+| models | 38 slots, done before this session |
+| surfaces | 8 keys, live in the editor (`e501c20`) |
+| environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
+
+Verified in Chrome rather than inferred, which mattered: the surface upgrade
+mutates the **same cached material instance** every mesh holds, so one call
+upgrades the whole scene with no traversal — a property no typecheck can express
+and no unit test with a fake cache can show. Had it been false the symptom would
+have been "some walls upgraded", which reads as a loading race rather than a
+design error.
+
+⚠ **One obligation left, and it is small but real:** `creditsFor()` walks placed
+objects only, so a credited HDRI or surface is **silently dropped** from the
+credits. Everything shipped is CC0 so nobody is owed today — it is **one CC-BY
+asset away** from an unmet licence obligation on a published page. Needs an owner
+alongside whoever owns credits.
+
+The original entry follows, kept because its measurements are still the reason
+the work was scoped the way it was. There is a `/asset-hub` skill for it.
 
 ⚠ **Corrected 2026-08-22, measured.** What this paragraph used to say — "the
 library exists and does nothing" — was repeating the roadmap rather than the
@@ -511,7 +550,25 @@ generalise beyond the CAD engine:
     distribution that turns out to be continuous, with no gap anywhere near the
     value, is a chosen constant wearing a measured one's clothes.
 
-13. **`apps/studio/dist` is an untracked local build** — gitignored, not in
+13. **A race that has not yet been lost is not a reason.** An environment was
+    applied inside the scene-load handler and worked — but `viewerRef` is a ref,
+    so nothing re-runs when the viewer appears, and that effect is declared
+    *before* the one that builds the viewer. It only worked because `getScene`
+    is a network round trip that resolves long after mount. The symptom would
+    have been "the editor sometimes shows the wrong sky on load": intermittent,
+    machine-dependent, and blamed on the HDRI or the loader rather than on
+    effect declaration order. **Ordering must be a property of the code, not of
+    the network.**
+
+14. **A test that resolves paths relative to itself lies to you under any
+    bundling runner.** `run.mjs` bundles each test with esbuild into a temp
+    directory, so `import.meta.url` points somewhere with no assets beside it —
+    twenty-four present files reported as missing, reading as "the assets are
+    gone" when the assets were fine. Resolve from cwd, and check the root
+    separately and **loudly**: per-file results only mean anything once the root
+    check has passed.
+
+15. **`apps/studio/dist` is an untracked local build** — gitignored, not in
    `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
    bundle. Search `src` only. (Do not go looking for it in git and conclude this
    note is stale; the directory is real, it is just not tracked.)
