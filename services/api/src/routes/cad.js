@@ -4,8 +4,8 @@ import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
 import { spend, InsufficientCredits, creditCost } from '../lib/credits.js'
 import { checkSubmission } from '../lib/idempotency.js'
-import { settleRefund } from '../lib/refunds.js'
-import { enqueue } from '../lib/renderQueue.js'
+import { settleRefund, declineRefund } from '../lib/refunds.js'
+import { enqueue, cancelJob } from '../lib/renderQueue.js'
 import * as engine from '../lib/cadEngine.js'
 import { pathOf } from '../lib/storage.js'
 
@@ -260,13 +260,26 @@ export async function registerCadRoutes(app) {
       return { jobId: job.id, status: job.status }
     }
 
+    // ── Actually stop the work, then record the decision ─────────────────────
+    // This used to write 'cancelled' and refund without ever telling the queue.
+    // A queued job stayed in `pending` and ran seconds later — free CPU, and a
+    // job the user cancelled reappearing as a completed import; a running job
+    // kept going and its finish('done') raced the cancel. cancelJob() splices a
+    // queued job out of pending and aborts a running one's engine, and the
+    // queue's finish() now refuses to move a row already marked 'cancelled'.
+    await cancelJob(job.id)
     await db.update('renderJobs', job.id, { status: 'cancelled' })
-    // Unlike a Blender render, a cancelled reconstruction has usually consumed
-    // seconds rather than minutes — but the rule is the same one the render
-    // queue applies, and it lives in one place so it cannot diverge.
-    const given = job.status === 'queued'
-      ? await settleRefund(job.id, 'cancelled-before-start', 'cadReconstruct')
-      : 0
+
+    // A reconstruction cancelled before it started refunds; one cancelled while
+    // running has already spent the CPU, so the charge stands and the refund is
+    // DECLINED — mirroring render.js exactly, and stamping the job so a later
+    // failure path cannot then refund work that was actually performed.
+    let given = 0
+    if (job.status === 'queued') {
+      given = await settleRefund(job.id, 'cancelled-before-start', 'cadReconstruct')
+    } else {
+      await declineRefund(job.id, 'cancelled-while-rendering')
+    }
 
     return { jobId: job.id, status: 'cancelled', refunded: given }
   })

@@ -132,7 +132,13 @@ export async function cancelJob(jobId) {
   const active = running.get(jobId)
   if (active) {
     clearTimeout(active.timer)
+    // A Blender render has a child to signal; an AI or CAD job has an
+    // AbortController instead (its "child" is an HTTP call or the Python engine
+    // reached through cadEngine). Both stop the work in progress; without the
+    // abort, a cancelled CAD reconstruction kept running to completion and its
+    // finish('done') raced the cancel.
     active.child?.kill('SIGTERM')
+    active.controller?.abort()
     running.delete(jobId)
     drain()
     return true
@@ -195,6 +201,20 @@ async function runJob(job) {
     if (active) clearTimeout(active.timer)
     running.delete(job.id)
 
+    // ── A cancelled job stays cancelled ──────────────────────────────────────
+    // The worker (or the CAD engine) may complete a fraction of a second after
+    // a cancel writes 'cancelled', and this closure would then overwrite it
+    // with 'done' at 100% — the user cancels, is refunded, and the job reappears
+    // as a finished import moments later. Re-read the row and refuse to move a
+    // job that has already reached a terminal state someone else set. This is
+    // the guard that makes cancel real for every job kind rather than only the
+    // ones whose child can be killed.
+    const current = await db.findOne('renderJobs', (j) => j.id === job.id)
+    if (current && ['cancelled', 'failed', 'done'].includes(current.status)) {
+      drain()
+      return
+    }
+
     if (status === 'done') completedToday += 1
     await db.update('renderJobs', job.id, { status, ...patch })
 
@@ -237,7 +257,12 @@ async function runJob(job) {
   // tracked in `running` like any other job so the daily cap, the concurrency
   // limit and boot reconciliation all apply without special cases.
   if (job.preset === 'cad') {
-    running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
+    // An AbortController rather than a child process: the Python engine is
+    // reached through cadEngine, which kills it on abort. cancelJob() aborts
+    // this to actually stop a running reconstruction — without it, a cancelled
+    // CAD job kept running to completion.
+    const controller = new AbortController()
+    running.set(job.id, { child: null, controller, startedAt: Date.now(), progress: 0, markers: {} })
 
     try {
       const { reconstruct } = await import('./cadEngine.js')
@@ -249,6 +274,7 @@ async function runJob(job) {
         autoLayers: job.spec.autoLayers !== false,
         height: job.spec.height,
         frame: job.spec.frame,
+        signal: controller.signal,
         onProgress: (percent) => {
           const active = running.get(job.id)
           if (active) active.progress = percent

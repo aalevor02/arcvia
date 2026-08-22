@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch src/server.js",
     "start": "node --env-file-if-exists=../../.env src/server.js",
-    "test": "node test/store-durability.mjs && node test/static-urls.mjs && node test/publications.mjs && node test/comments.mjs && node test/render-partial.mjs && node test/scene-patch.mjs && node test/render-idempotency.mjs && node test/refunds.mjs && node test/referral-and-reset.mjs && node test/uploads.mjs && node test/detect.mjs && node test/bake.mjs && node test/access-code.mjs && node test/cad.mjs && node test/share-card.mjs && node test/scene-slugs.mjs && node test/org-members.mjs && node test/render-capture-ssrf.mjs && node test/rate-limit.mjs && node test/render-script-path.mjs && node test/render-concurrency.mjs && node test/storage-put.mjs"
+    "test": "node test/store-durability.mjs && node test/static-urls.mjs && node test/publications.mjs && node test/comments.mjs && node test/render-partial.mjs && node test/scene-patch.mjs && node test/render-idempotency.mjs && node test/refunds.mjs && node test/referral-and-reset.mjs && node test/uploads.mjs && node test/detect.mjs && node test/bake.mjs && node test/access-code.mjs && node test/cad.mjs && node test/cad-cancel.mjs && node test/share-card.mjs && node test/scene-slugs.mjs && node test/org-members.mjs && node test/render-capture-ssrf.mjs && node test/rate-limit.mjs && node test/render-script-path.mjs && node test/render-concurrency.mjs && node test/storage-put.mjs"
   },
   "dependencies": {
     "@arcvia/brand": "*",
