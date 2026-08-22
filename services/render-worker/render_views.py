@@ -124,9 +124,32 @@ def place_camera(view: dict):
     return cam
 
 
-#: A frame this blown out, or with this few distinct tones, is not a picture of
-#: anything. Both thresholds are measured, not chosen — see `inspect_frame`.
+#: Blown-out fraction past which a frame is not a picture of anything.
+#:
+#: Measured. Across 56 lit frames the observed values sort as:
+#:
+#:     ... 18.55, 28.44, 29.00 | 71.66, 81.20, 81.58, 95.44, 100.00
+#:
+#: A clean empty band from 29 to 72, and 60 sits inside it, so any line drawn in
+#: that range separates the same frames. This one is a real threshold.
 BLOWN_LIMIT = 0.60
+
+#: Distinct tone count below which a frame is worth a second look.
+#:
+#: NOT measured, and the comment above this pair used to claim both were. The
+#: observed counts are:
+#:
+#:     5, 10, 11, 22, 25, 25, 31, 34, 35, 36, 38, 42, 43, 54, 69, 71, 77, 84,
+#:     89, 107, 112, 118, 122, 124, 125, 166, 167, ...
+#:
+#: Entirely continuous. 64 falls between 54 and 69 — a gap of 15, and not even
+#: the widest in the distribution. There is no natural line here, so this will
+#: eventually argue with a reader about a 54-versus-69 frame and lose.
+#:
+#: It stays because it is only ever a SUSPECT marker: nothing in this file fails
+#: a render, and low tone count is the only signal that catches a frame aimed at
+#: a blank wall, which is not bright enough to trip BLOWN_LIMIT. Kept, labelled
+#: honestly, rather than dressed up as measured.
 MIN_TONES = 64
 
 #: Read every Nth pixel. The statistics below are proportions, and 130k samples
@@ -168,17 +191,32 @@ def inspect_frame(path: Path) -> dict:
         if not count:
             return {"error": "no pixels"}
 
+        # The thresholds below are stated in the values a person reads off the
+        # image, which is right — but whether the buffer needs converting to get
+        # there depends on the image, and this used to assume it always did.
+        #
+        # A rendered PNG is 8-bit, `is_float` is False, and `pixels` hands back
+        # the stored bytes scaled to 0-1 with no colour management applied. They
+        # are ALREADY display-referred. Encoding them again moves every midtone
+        # up: measured on one cgi isometric, 32.06% blown became 41.07%, and
+        # across 58 frames it produced 8 false positives — one frame in seven —
+        # while deflating tone counts by about 30% (250 read as 205, 163 as 94).
+        # Both errors push the same way, toward flagging frames that are fine.
+        #
+        # Float buffers (EXR, and any AOV pass) genuinely are linear, so the
+        # conversion is kept for them rather than deleted.
+        encode = bool(img.is_float)
+
         dark = blown = seen = 0
         tones = set()
         for i in range(0, count, SAMPLE_STRIDE):
             base = i * 4
             lin = (0.2126 * px[base] + 0.7152 * px[base + 1]
                    + 0.0722 * px[base + 2])
-            # Blender's buffer is linear; the thresholds are stated in the sRGB
-            # values a person reads off the image.
-            srgb = (1.055 * (max(lin, 0.0) ** (1 / 2.4)) - 0.055
-                    if lin > 0.0031308 else lin * 12.92)
-            tone = max(0, min(255, int(srgb * 255 + 0.5)))
+            if encode:
+                lin = (1.055 * (max(lin, 0.0) ** (1 / 2.4)) - 0.055
+                       if lin > 0.0031308 else lin * 12.92)
+            tone = max(0, min(255, int(lin * 255 + 0.5)))
             tones.add(tone)
             seen += 1
             if tone <= 8:
