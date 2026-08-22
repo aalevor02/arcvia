@@ -196,7 +196,7 @@ def inspect_frame(path: Path) -> dict:
 
 
 def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool,
-               line_art: bool = False) -> dict | None:
+               line_art: bool = False, diagnostic: bool = False) -> dict | None:
     target = out_dir / f"{stem}.{view['id']}.png"
     if target.exists():
         print(f"ARCVIA_SKIP:{target}")
@@ -235,10 +235,18 @@ def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool,
     #
     # The tone count still applies. A line style with almost no tones has no
     # linework in it, which is a real failure and the one worth catching here.
-    if not line_art and stats.get("blown", 0) >= BLOWN_LIMIT:
-        suspect.append(f"{stats['blown'] * 100:.0f}% blown out")
-    if stats.get("tones", 999) < MIN_TONES:
-        suspect.append(f"only {stats['tones']} distinct tones")
+    #
+    # `raw` is exempt from both tests rather than tuned around. It is not a
+    # picture: flat world plus emission returns every surface's own colour
+    # regardless of light or facing, so a uniform near-white frame with a
+    # handful of tones is its CORRECT output. It exists as the base layer the
+    # --aov passes key against. A rule that flags it is measuring the wrong
+    # thing, not measuring it badly.
+    if not diagnostic:
+        if not line_art and stats.get("blown", 0) >= BLOWN_LIMIT:
+            suspect.append(f"{stats['blown'] * 100:.0f}% blown out")
+        if stats.get("tones", 999) < MIN_TONES:
+            suspect.append(f"only {stats['tones']} distinct tones")
     if suspect:
         # Not an error. The frame rendered, and something upstream — exposure on
         # this style, or where the camera is pointing — made it carry nothing.
@@ -296,7 +304,8 @@ def main():
     for i, view in enumerate(views):
         print(f"ARCVIA_VIEW:{i + 1}/{len(views)} {view['id']}")
         result = render_one(view, out_dir, stem, args.aov,
-                            line_art=bool(applied.get("freestyle")))
+                            line_art=bool(applied.get("freestyle")),
+                            diagnostic=args.style == "raw")
         if result:
             done.append(result)
 
@@ -310,6 +319,15 @@ def main():
         encoding="utf-8",
     )
     print(f"ARCVIA_MANIFEST:{manifest}")
+
+    # Always, never only when something is wrong. A line that appears solely on
+    # failure is indistinguishable from a version that does not emit it at all,
+    # and a caller cannot tell "every frame is good" from "this build predates
+    # the check". That ambiguity is the same silent-drop family as the bug this
+    # exists to catch, and renderQueue needs a number it can compare rather than
+    # a marker it can only observe.
+    valid = sum(1 for r in done if not r.get("suspect"))
+    print(f"ARCVIA_VALID:{valid}/{len(done)}")
     print(f"ARCVIA_DONE:{len(done)}/{len(views)}")
 
 
