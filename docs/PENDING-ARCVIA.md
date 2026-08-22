@@ -190,18 +190,46 @@ takes real wall-clock. Renders must be **resumable** and cameras placed
 **absolutely** from the view spec, never relatively; this is already recorded as
 a trap and the reason is precisely that these runs get interrupted.
 
-⚠ **The "~1 min/frame" figure that used to be here was never measured, and it is
-wrong.** Measured 2026-08-22 on the m11 villa (2,076 tri, Blender 5.1.2, 16
-threads, CPU): `fast` (32 samples, 1280×720) renders an isometric in **15–19 s
-wall-clock including Blender startup and glTF import** — photoreal 19.3 s, cgi
-15.2 s, clay 15.7 s. That is 4–5× faster than the figure every wall-clock
-estimate on the roadmap derives from.
+⚠ **The "~1 min/frame" figure that used to be here was never measured.** Measured
+2026-08-22 on the m11 villa (2,076 tri, Blender 5.1.2, 16 threads, CPU-only),
+seconds per frame at `fast` (32 samples, 1280×720):
 
-**Do not re-plan on this yet.** It is one model at one tier, and 2,076 triangles
-is small. `standard` is 128 samples at 1920×1080 and `ultra` is 512 at
-2560×1440 — 16× the samples and 4× the pixels of `fast` — and those have not
-been measured. A full pass is ~22 usable views of 29 (`--skip-tight` defaults
-true).
+| kind | photoreal | cgi | clay | cad | sketch |
+|---|---|---|---|---|---|
+| plan | 32.3 | **3.0** | — | — | — |
+| exterior | 14.3 | 10.9 | — | — | — |
+| isometric | 19.3 | 15.2 | 15.7 | 20.9 | 22.5 |
+| interior | **43.9** | **44.7** | — | — | — |
+
+`standard` is **7.8×** `fast` (122–145 s per isometric). A **full 22-view pass**
+(16 interior + 4 exterior + 1 isometric + 1 plan) is **~13 min at `fast`**,
+~105 min at `standard`. Note that is neither the ~22 min a flat 1 min/frame
+implied nor the ~6 min a flat 16 s/frame would: **interiors dominate**, at
+2.3–3× an isometric, and there are sixteen of them.
+
+Two per-kind oddities, both re-measured clean: **a photoreal plan costs 10.8× a
+cgi plan** (the sky world is expensive on a top-down ortho where most of the
+frame is not building), and **exteriors are the cheapest real view** — which is
+what makes an orbit film affordable.
+
+**Film cost model:** frames × exterior cost. 36 frames (1.5 s) ≈ 8 min, 72
+frames ≈ 17 min, 120 frames (5 s) ≈ 28 min, at `fast`/`cgi`. Validated end to
+end: 36 frames → 143 KB h264, `ARCVIA_DONE:36/36`, 0 invalid, loop-closure delta
+0.73 (seamless 360°).
+
+⚠ **`ultra` is not measurable on this machine, and that is the finding.** On the
+*cheapest* view (cgi plan, 3.0 s at `fast`, nominal 64× ≈ 190 s expected) it ran
+past 570 s and was stopped at 8,656 CPU-seconds with no frame. Diagnostics: ~400
+MB paged out mid-render, 2,353 pages/sec, 0.81 GB of 15.7 GB free, all 16 cores
+saturated. Compute-bound *and* thrashing, so any number would have measured this
+box's memory pressure rather than the tier. Plan `ultra` as "hours per frame
+here" until measured on a quiet machine.
+
+⚠ **Concurrent rendering on this box inflates wall-clock by up to 2×.** Measured
+against a second Blender running: cad 41.7 → 20.9 s, sketch 36.3 → 22.5 s,
+photoreal exterior 25.1 → 14.3 s. **Check for another `blender` process before
+benching anything here**, and never run a render batch alongside asset
+conditioning.
 
 Two things found while measuring, both open at the time of writing:
 
@@ -223,7 +251,20 @@ Two things found while measuring, both open at the time of writing:
 
 **Asset hub conditioning.** Running 2,132 assets through `condition_asset.py`
 and wiring the results into the catalogue is batch work with a long tail of
-per-asset failures. Ideal for a session that can babysit it.
+per-asset failures. Ideal for a session that can babysit it. **Do not run it
+alongside a render batch** — they contend for the same cores and both sets of
+numbers become meaningless.
+
+~~**The lightmap bake.**~~ **Not long-running — measured, and it belongs in §3
+with the UI work.** 4.1 s at 512/16, 8.3 s at 1024/32, **24.9 s at 2048/32**,
+52.6 s at 2048/128. All valid, `litMean` 0.65–0.69, nowhere near the 0.062 that
+`render.py:116` records as a darkened scene. It is a UI job, not a grind job.
+
+(One defect found while measuring, with aalev-f3: **the atlas always wastes
+exactly 25% of itself.** `bake_lightmap` packs into `ceil(sqrt(n))` cells and
+every Arcvia GLB has exactly n=3 meshes, so it always builds 2×2 and always
+leaves one cell empty. The top-right quadrant measures 0.00% lit at every size.
+`1 − n/ceil(sqrt(n))²` = 25%, deterministically, on every bake forever.)
 
 **Multi-storey (§2).** Not long-running in the wall-clock sense, but it is the
 biggest single piece of design-and-build in the product and deserves an
@@ -344,7 +385,19 @@ generalise beyond the CAD engine:
    valuable environment is the sky outside the window. An interior lit by a
    photograph of somebody's derelict bakery is plausible and wrong.
 
-8. **`apps/studio/dist` is an untracked local build** — gitignored, not in
+8. **A third of all rendered frames are invalid, and every check in this
+   codebase looks for BLACK.** Measured: **17 of 52 frames bad — 32.7%.**
+   photoreal interiors 10/16, cgi interiors 5/16. Every failure is an interior
+   and **every one is BLOWN OUT or BLANK, not black** — one TOILET view has four
+   distinct grey values in the whole 1280×720 frame. A blank white frame passes
+   the near-black test, passes `rc == 0`, passes the `ARCVIA_OUTPUT` sentinel,
+   and writes a healthy 900 KB PNG. It has been invisible for exactly that
+   reason. **Validity needs a two-sided test and a spread test, not a darkness
+   test.** (And the test must be style-aware: a `cad` line drawing is white paper
+   with thin lines, has 165 grey levels and more edge content than `cgi`, and a
+   brightness threshold flags it at "95.8% blown out" incorrectly.)
+
+9. **`apps/studio/dist` is an untracked local build** — gitignored, not in
    `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
    bundle. Search `src` only. (Do not go looking for it in git and conclude this
    note is stale; the directory is real, it is just not tracked.)
