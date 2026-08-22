@@ -1,0 +1,11 @@
+{
+  "name": "@arcvia/publication",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The shape of a published project — written by the studio, read by the published site, so the two cannot drift apart.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

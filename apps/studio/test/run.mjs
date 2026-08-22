@@ -36,6 +36,7 @@ const targets = entries.length
       'test/credits.test.ts',
       'test/surfaces.test.ts',
       'test/environments.test.ts',
+      'test/compose.test.ts',
       'test/presentation.test.ts',
       'test/detectionQuality.test.ts',
       'test/furnish.test.ts',
