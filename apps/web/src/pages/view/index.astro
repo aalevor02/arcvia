@@ -215,6 +215,7 @@ const title = 'Walkthrough'
 
     <script>
       import { SceneViewer, WalkController } from '@arcvia/viewer'
+      import { mountConfigurator } from '../../lib/configurator'
 
 
       const api =
@@ -412,6 +413,22 @@ const title = 'Walkthrough'
         }
 
         viewer.frameModel()
+
+        // ---- The configurator -----------------------------------------------
+        // Finish switching, mounted only when the author composed options for
+        // this scene. After the bake on purpose: mountConfigurator leaves
+        // `lightMap` alone precisely so a switch keeps the baked lighting, and
+        // mounting before the bake applied would put the picker on screen while
+        // the floors it recolours were still loading.
+        if (scene.options) {
+          mountConfigurator(
+            els.controls,
+            scene.options,
+            () => viewer.modelRoot,
+            absolute,
+            () => viewer.requestRender(),
+          )
+        }
 
         const walk = new WalkController(viewer, canvas, {
           eyeHeight: 1.6,
