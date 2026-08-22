@@ -154,11 +154,40 @@ function drain() {
     }
 
     const job = pending.shift()
+    // ── Reserve the slot BEFORE yielding ─────────────────────────────────────
+    // `start()` does not register the job in `running` until after its first
+    // `await` (db.update below), so without this line `running.size` is
+    // unchanged when the loop re-tests its condition — and the whole `pending`
+    // array is shifted and started in one tick. At CONCURRENCY=1 that launched
+    // five queued jobs at once: five simultaneous Blender processes locally, or
+    // five times the operator's configured worst-case GPU burn in remote mode
+    // — the exact number the CONCURRENCY comment calls the most important cost
+    // control. Reserving here makes the counter honest across the await; the
+    // per-branch `running.set` calls in start() overwrite this placeholder with
+    // the real entry (same key, so size is unchanged), and finish() deletes it
+    // on every exit path.
+    running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
     void start(job)
   }
 }
 
 async function start(job) {
+  // A throw before any branch registers its real entry would strand the slot
+  // reserved in drain(), wedging the queue one job at a time. Anything
+  // unexpected here fails the job, which frees the slot and refunds.
+  try {
+    await runJob(job)
+  } catch (error) {
+    const active = running.get(job.id)
+    if (active?.timer) clearTimeout(active.timer)
+    running.delete(job.id)
+    await db.update('renderJobs', job.id, { status: 'failed', error: error.message })
+    await settleRefund(job.id, 'render-failed')
+    drain()
+  }
+}
+
+async function runJob(job) {
   await db.update('renderJobs', job.id, { status: 'rendering' })
 
   const finish = async (status, patch = {}) => {
