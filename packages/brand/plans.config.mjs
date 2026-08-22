@@ -40,6 +40,59 @@ export const creditCost = {
   cadReconstruct: 3, // CPU-only, tens of seconds — priced like an isometric
 }
 
+/**
+ * What each metered action is called on the published price list.
+ *
+ * ── Why this lives beside the prices ────────────────────────────────────────
+ * `pricing.astro` used to name its own six rows. It read the COSTS from
+ * `creditCost`, so no number could drift — but it chose which actions to show,
+ * and that list fell behind. Measured: nine priced actions, six on the page.
+ *
+ * The one missing that matters is `cadReconstruct`, at 3 credits. A user was
+ * charged for CAD reconstruction and could not find it on the price list at any
+ * point before or after paying. That is not a drift of a number, it is a charge
+ * with no published price, and it is exactly the conversation nobody wants to
+ * have with a customer.
+ *
+ * So the page now enumerates THIS object rather than a hand-written list, and
+ * `labelFor` falls back to a humanised key. An action added to `creditCost`
+ * without a label here still appears on the price list, spelled awkwardly —
+ * which is a far better failure than being charged for invisibly.
+ */
+export const creditLabel = {
+  sceneCreate: 'Create a scene',
+  sceneSave: 'Save a scene',
+  floorplanDetect: 'Detect a floor plan',
+  previewRender: 'Preview render (thumbnail)',
+  isometricRender: 'Isometric render (1920×1080)',
+  fullRender: 'Full-resolution still',
+  lightmapBake: 'Full scene lightmap bake',
+  cadSurvey: 'Read a CAD drawing (survey and layers)',
+  cadReconstruct: 'Reconstruct a CAD drawing into 3D',
+}
+
+/** The label for an action, or a readable fallback so nothing is ever hidden. */
+export function labelFor(action) {
+  return (
+    creditLabel[action] ??
+    action.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())
+  )
+}
+
+/**
+ * Every metered action, cheapest first, for the published price list.
+ *
+ * Free actions are kept rather than filtered. "Reading a drawing is free" is a
+ * deliberate product decision — `creditCost` says so in its own comment, that
+ * charging for a survey makes people guess instead of check — and a price list
+ * that silently omits the free things makes the paid ones look like the whole
+ * product.
+ */
+export const meteredActions = () =>
+  Object.entries(creditCost)
+    .map(([action, cost]) => ({ action, cost, label: labelFor(action) }))
+    .sort((a, b) => a.cost - b.cost || a.label.localeCompare(b.label))
+
 export const plans = {
   free: {
     id: 'free',

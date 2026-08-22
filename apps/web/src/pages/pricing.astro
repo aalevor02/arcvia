@@ -1,7 +1,7 @@
 ---
 import brand from '@arcvia/brand'
 import Base from '../layouts/Base.astro'
-import { billingEnabled, plans, creditCost, formatCredits } from '@arcvia/brand/plans'
+import { billingEnabled, plans, meteredActions, formatCredits } from '@arcvia/brand/plans'
 import FaqAccordion from '../components/FaqAccordion.tsx'
 import PlanTable from '../components/PlanTable.astro'
 import { faqs } from '../data/faqs'
@@ -11,14 +11,17 @@ const free = plans.free
 // Everything metered, so people can see exactly what a credit buys before we
 // ever charge for one. Being upfront about this now avoids the "wait, renders
 // cost money?" conversation later.
-const meter = [
-  { label: 'Create and save a scene', cost: creditCost.sceneSave },
-  { label: 'Detect a floor plan', cost: creditCost.floorplanDetect },
-  { label: 'Preview render (thumbnail)', cost: creditCost.previewRender },
-  { label: 'Isometric render (1920×1080)', cost: creditCost.isometricRender },
-  { label: 'Full-resolution still', cost: creditCost.fullRender },
-  { label: 'Full scene lightmap bake', cost: creditCost.lightmapBake },
-]
+//
+// DERIVED, not listed. This page used to name its own six rows. The costs were
+// already read from `creditCost`, so no number could drift — but the page chose
+// which actions to show, and that choice fell behind: nine priced actions, six
+// on the page. `cadReconstruct` charges 3 credits and was on none of them, so a
+// user could be charged for CAD reconstruction and find no price for it before
+// or after paying.
+//
+// Enumerating the tariff means an action cannot be charged for without
+// appearing here. See `meteredActions` in plans.config.mjs.
+const meter = meteredActions()
 ---
 
 <Base
