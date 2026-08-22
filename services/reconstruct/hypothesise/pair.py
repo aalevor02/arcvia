@@ -278,10 +278,31 @@ def pair_faces(faces: list[Face], merge: bool = True) -> list[Wall]:
     """
     Match faces into pairs and collapse each pair to a centreline.
 
-    Greedy nearest-match, longest first. Two faces of one wall are dramatically
-    closer to each other than to anything else, so greedy and optimal agree in
-    practice; consuming the long, unambiguous walls first stops a short stub
-    stealing one of their faces.
+    Greedy nearest-match, TIGHTEST PAIR FIRST.
+
+    ── Why not longest face first, which is what this used to do ────────────
+    The old order rested on "consuming the long, unambiguous walls first stops a
+    short stub stealing one of their faces". The premise is that a long face is
+    probably a real wall. On an architect's sheet the longest linework is the
+    SHEET BORDER, and it is not a wall at all.
+
+    Measured on the villa: the border is a closed 20.82 x 15.10 m rectangle
+    around the whole drawing. Processed first, its west side found a real wall
+    face 0.291 m away and consumed it; its north side did the same at 0.443 m.
+    Both artefacts landed among the thickest long walls in the model, and the
+    genuine 0.230 m west wall never formed, because its partner had already been
+    taken by a piece of paper.
+
+    Ordering by face length asks "which face is most likely a wall?" and answers
+    with a property no wall actually has. Ordering by GAP asks "which pair is
+    most likely a wall?" — and a wall's two faces are separated by a wall
+    thickness, which is the definition. The real west wall's own faces are
+    0.230 m apart, tighter than the 0.291 m the border offered, so under this
+    order the true pair forms first, consumes both faces, and the border is left
+    with nothing to steal.
+
+    Ties break toward the longer shared overlap, so that where two candidates sit
+    at the same distance the one that runs alongside for further wins.
     """
     # Reassemble before filtering. Filtering first throws away the fragments
     # that would have made a long face pairable — see `merge_collinear`.
@@ -295,26 +316,17 @@ def pair_faces(faces: list[Face], merge: bool = True) -> list[Wall]:
     geoms = [LineString([(f.ax, f.ay), (f.bx, f.by)]) for f in usable]
     tree = STRtree(geoms)
 
-    order = sorted(range(len(usable)), key=lambda i: -usable[i].length)
-    used: set[int] = set()
-    walls: list[Wall] = []
-
-    for i in order:
-        if i in used:
-            continue
-        segment = usable[i]
-
-        # Only segments whose envelope comes within a wall thickness can be the
-        # other face. Everything the O(n^2) version tested and rejected on the
-        # gap check is simply never visited.
-        candidates = tree.query(geoms[i].buffer(MAX_WALL_THICKNESS, resolution=1))
-
-        best_index: int | None = None
-        best_gap = float("inf")
-
-        for j in candidates:
+    # Every admissible pair, collected once. Only segments whose envelope comes
+    # within a wall thickness can be the other face, so everything the O(n^2)
+    # version tested and rejected on the gap check is simply never visited.
+    admissible: list[tuple[float, float, int, int]] = []
+    for i, segment in enumerate(usable):
+        for j in tree.query(geoms[i].buffer(MAX_WALL_THICKNESS, resolution=1)):
             j = int(j)
-            if j == i or j in used:
+            # Each unordered pair once. Without this the same two faces arrive
+            # twice with identical keys and the second is silently discarded by
+            # the `used` check — harmless, but it doubles the sort for nothing.
+            if j <= i:
                 continue
             other = usable[j]
 
@@ -328,17 +340,37 @@ def pair_faces(faces: list[Face], merge: bool = True) -> list[Wall]:
             # Two parallel segments at opposite ends of the building are also
             # "parallel and 0.2 m apart" in the perpendicular sense. Overlap
             # along the shared direction is what actually tells them apart.
-            if _overlap_along(segment, other) < MIN_LENGTH:
+            overlap = _overlap_along(segment, other)
+            if overlap < MIN_LENGTH:
                 continue
 
-            if gap < best_gap:
-                best_index, best_gap = j, gap
+            admissible.append((gap, -overlap, i, j))
 
+    # Tightest first, then longest shared run. The indices are in the key so the
+    # order is total: two pairs with the same gap and overlap must still resolve
+    # the same way on every run, or a rebuild of an unchanged drawing produces a
+    # different model.
+    admissible.sort()
+
+    used: set[int] = set()
+    paired: dict[int, tuple[int, float]] = {}
+    for gap, _, i, j in admissible:
+        if i in used or j in used:
+            continue
         used.add(i)
-        if best_index is not None:
-            used.add(best_index)
-            walls.append(_centreline(segment, usable[best_index], best_gap))
-        else:
+        used.add(j)
+        paired[i] = (j, gap)
+
+    # Emit in face order rather than in the order pairs were resolved. The
+    # resolution order is an implementation detail of the matcher; the wall list
+    # is indexed by openings, frames, cameras and the plan SVG, so it should not
+    # move when the matcher's internals change.
+    walls: list[Wall] = []
+    for i, segment in enumerate(usable):
+        if i in paired:
+            j, gap = paired[i]
+            walls.append(_centreline(segment, usable[j], gap))
+        elif i not in used:
             # Kept, but flagged. A single unpaired line is usually a railing,
             # and extruding one to ceiling height turns a balcony into a sealed
             # box that blacks out the rooms behind it.
