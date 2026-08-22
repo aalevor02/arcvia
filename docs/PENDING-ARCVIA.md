@@ -408,14 +408,21 @@ generalise beyond the CAD engine:
    it.** Worse than the "declared but never used" family below, because here
    half of it works beautifully. Pinned in `services/api/test/static-urls.mjs`.
 
-6. **This codebase is repeatedly one small producer short of a finished
-   feature.** Four instances found in one day: `Provenance.locked`/`suppressed`
-   declared in the schema and used nowhere; `ARCVIA_DONE:n/n` printed, captured
-   into the job record, and never compared; DXF entity handles present in every
-   file and discarded at ingest; and `hdriUrl` plumbed the entire length of the
-   product with nothing writing it, so `apply_environment()` took its `else`
-   branch on every render ever run. **Before building a feature, check whether
-   it is already built and merely unreachable.**
+6. **A field declared and never written is the defining defect class of this
+   codebase — treat it as a class, not as a list of bugs.** Five instances found
+   in one day:
+   - `Provenance.locked` / `suppressed` — declared in the schema, used nowhere;
+   - `ARCVIA_DONE:n/n` — printed, captured into the job record, never compared;
+   - DXF entity handles — present in every file, discarded at ingest;
+   - `hdriUrl` — plumbed the entire length of the product with nothing writing
+     it, so `apply_environment()` took its `else` branch on every render ever
+     run;
+   - ambientCG's `dimensionX/Y/Z` — declared in its API and **zero in 15 of 15**
+     materials sampled, across every family.
+
+   **Before building a feature, check whether it is already built and merely
+   unreachable.** And when you consume someone else's declared field, check that
+   it is populated before designing around it.
 
 7. **`A:\Assets\Hub` holds no skies.** All 301 HDRIs are categorised `indoor`
    and none of Poly Haven's 297 `skies` were harvested — `harvest.mjs` says why,
@@ -436,7 +443,56 @@ generalise beyond the CAD engine:
    with thin lines, has 165 grey levels and more edge content than `cgi`, and a
    brightness threshold flags it at "95.8% blown out" incorrectly.)
 
-9. **`apps/studio/dist` is an untracked local build** — gitignored, not in
+9. **ambientCG ships two normal maps and one of them is silently wrong, and no
+   statistic can tell you which.** Every material has `_NormalGL` and
+   `_NormalDX` — the same map with the green channel inverted, because DirectX
+   and OpenGL disagree about which way +Y points. glTF and three.js are OpenGL.
+   Pick DX and every bump becomes a dent lit from the wrong side: geometry
+   right, colour right, roughness right, surface just reads oddly and nobody can
+   say why. Measured on Asphalt014:
+
+   | channel | mean abs difference |
+   |---|---|
+   | B | 0.95 |
+   | **G** | **58.23** |
+   | R | 0.80 |
+
+   …and yet green's **mean is 127.4 against 127.6**. The distribution is
+   symmetric about the midpoint, so mean, median, histogram and variance all
+   match. **The filename is the only evidence that exists.** Worse than the
+   Poly Haven Z-up trap, which at least changes a number. Match the exact
+   `_NormalGL` ending and refuse to substitute — matching with `in` picks either,
+   which is the substring defect this repo has now recorded three times.
+
+10. **Screen the artefact the renderer consumes, not the vendor's picture of
+    it.** Three of eight materials picked off ambientCG's preview spheres were
+    wrong, and all three were invisible until a metre rule went on the flat
+    albedo: a "clean mid-grey" tile whose albedo is nearly black and whose units
+    are 100 mm mosaic; a "Marble" that is speckled granite (the hub's names come
+    from its source and describe a *family*, not a look — every `Marble0NN` is
+    "marble" whatever it looks like); and a wood strongly orange with grain
+    stretched to the width of a wardrobe door. A preview sphere is a lit render
+    with its own key light and exposure. It is optimised to sell the asset.
+
+11. **A confident wrong number is worse than no number, because it gets
+    believed.** Tile scale was recovered from pixels twice — a column-mean
+    luminance profile of a floor gave 3 cycles against ~13 plank rows (running
+    bond follows blocks of similar tone, not the seams), and a gradient profile
+    gave 32 cycles at spectral strength 0.019, no dominant frequency at all.
+    Two plausible millimetre figures four times apart, one of which reported
+    400 mm floorboards and looked exactly like a measurement. Both were thrown
+    away and replaced by rendering the tile with a one-metre rule across it: a
+    board is 100–300 mm and a floor tile 300–600 mm, and the eye settles that
+    against a rule in one glance and in the abstract not at all. **That check
+    caught all three bad picks above within a minute of existing.**
+
+12. **If a constant's comment says "measured", the measurement belongs in the
+    comment.** Three comments in this codebase today claimed a measured constant
+    that was not — including one of mine. A threshold defended by a tone
+    distribution that turns out to be continuous, with no gap anywhere near the
+    value, is a chosen constant wearing a measured one's clothes.
+
+13. **`apps/studio/dist` is an untracked local build** — gitignored, not in
    `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
    bundle. Search `src` only. (Do not go looking for it in git and conclude this
    note is stale; the directory is real, it is just not tracked.)
