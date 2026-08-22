@@ -240,6 +240,34 @@ def reconstruct(
     # list works for exactly the drawing it was written against.
     chosen = set(layers) if layers else default_wall_layers(reading)
 
+    # ---- Ask the walls what unit this is ------------------------------------
+    # The reader offers candidates filtered by the drawing's overall EXTENT
+    # (`_PLAUSIBLE = (3.0, 400.0)` in the vendored kernel), which discards the
+    # right answer on any sheet bigger than a building — a site plan is not a
+    # building. That inverts the kernel's own documented trust order, which is
+    # measured > header > extent.
+    #
+    # So measure. `classify/units.py` scores each candidate by how many walls
+    # land on a thickness a mason actually builds, and it is decisive: on the
+    # seven real drawings here it agrees with itself at 6.7x to 12.5x margins
+    # and DISAGREES with the reader on four of them.
+    #
+    # Never overrides `--unit`. A human who has said what the drawing is has
+    # answered the question, and re-asking it is how you lose their calibration.
+    unit_verdict = None
+    if not unit:
+        from classify.units import rank_units
+
+        unit_verdict = rank_units(
+            [s for s in reading["_segments"] if s.layer in chosen],
+            reading["_origin"],
+        )
+        best = unit_verdict.best
+        if unit_verdict.decided and best and abs(best.scale - reading["scale"]) > 1e-9:
+            reading["scale"] = best.scale
+            reading["unit"] = f"{best.label} (measured)"
+            scale = best.scale
+
     faces = [
         Face(
             ax=(s.x1 - ox) * scale, ay=(s.y1 - oy) * scale,
@@ -451,8 +479,12 @@ def reconstruct(
     model = {
         "source": str(source),
         "converter": converter,
-        "unit": unit or header_unit,
+        "unit": unit or reading["unit"],
         "headerUnit": header_unit,
+        # What the WALLS said, alongside what the header said. Kept even when
+        # the two agree, because "we checked and they agree" and "we never
+        # checked" are different states and only one of them is reassuring.
+        "unitMeasured": unit_verdict.as_dict() if unit_verdict else None,
         "headerScale": header_scale,
         "scale": scale,
         "wallHeight": height,
@@ -516,6 +548,23 @@ def _print_build(model: dict) -> None:
         c = model["converter"]
         print(f"CONVERT  libredwg {c['version']} -> {c['modelSpaceEntities']} entities")
     print(f"UNIT     {model['unit']}  (scale {model['scale']})")
+
+    # A wrong unit is the most expensive silent failure this engine has — it
+    # builds the villa a thousand times too small and every number downstream is
+    # confidently wrong — so what the walls measured is always printed, whether
+    # it agreed, disagreed, or could not tell.
+    measured = model.get("unitMeasured")
+    if measured:
+        if not measured["decided"]:
+            print(f"         ? walls could not settle it: {measured['reason']}")
+        elif abs((measured["scale"] or 0) - model["scale"]) > 1e-9:
+            print(f"         ! walls say {measured['unit']} and the header was "
+                  f"kept: {measured['reason']}")
+        elif measured["unit"] not in str(model["unit"]):
+            print(f"         walls agree: {measured['reason']}")
+        else:
+            print(f"         measured: {measured['reason']}")
+
     print(f"LAYERS   {', '.join(model['layersUsed'][:6])}"
           f"{' …' if len(model['layersUsed']) > 6 else ''}")
 
