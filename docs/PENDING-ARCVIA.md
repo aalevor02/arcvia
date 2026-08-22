@@ -238,9 +238,26 @@ undivided session.
 - **6 of 18 doors unhosted** on the villa. Not a tolerance problem: the gap
   distribution is bimodal (hosted at 0.02 m, lost at 7–13 m). Those walls do not
   exist in the model.
-- **`LATEST DRAWINGS` yields only small rooms**, and frame selection is still
-  manual. `solve/frames.py` splits sheets correctly now, but choosing the *right*
-  frame needs a human and gets it wrong on that file. 3–5 d. aalev-35's lane.
+- ~~**`LATEST DRAWINGS` yields only small rooms**~~ — **FIXED `b7fd2da`, and it
+  was never a frame problem.** It is recorded elsewhere as one; it is a **unit**
+  problem. At the header's centimetres the sheet is 12.3 m across with 56 paired
+  walls at 0.065 m median; at metres it is 1,234 m with 675 walls at 0.230 m — a
+  nine-inch brick wall to the millimetre. The vendored reader gates unit
+  candidates on overall extent (`_PLAUSIBLE = (3.0, 400.0)`), so metres was
+  never offered, which inverts its own documented `measured > header > extent`.
+  `classify/units.py` now scores candidates by how many walls land on a
+  thickness masons actually build. **The reader gets 4 of the 7 real drawings
+  wrong.** Sheet now: 37 drawings instead of 1, rooms of 121 m² instead of
+  eleven totalling 54.73, unframed linework 19% → 4%.
+
+- **Frame *selection* is still manual.** Splitting is solved; choosing the right
+  frame is not. `frames[0]` is whichever cluster has the most wall segments, and
+  on a 37-frame sheet that is a guess — worse, dense elevation linework outranks
+  a sparse floor plan, which is the same mistake layer selection already learned
+  to avoid ("optimise named rooms, not room count"). 3–5 d, aalev-35's lane.
+  Note the ranking key is load-bearing: on the villa the compound wall is 8
+  walls over 28 m and correctly ranks last *because* count is primary, so
+  ranking by area or length is not the fix.
 - **~44% wall pairing** on the villa. Some are genuinely single lines — railings,
   jali, compound walls — but not all of them.
 
