@@ -531,6 +531,26 @@ def reconstruct(
         fixtures: list[dict] = []
         if with_fixtures:
             footprints = blk.block_footprints(doc, scale)
+            # ── Signal 4 is two questions; this path was only asking one ─────
+            # `classify_footprint` takes the room AND whether the thing is
+            # pressed against a wall. The survey at the top of this file
+            # measures the second one. This path — the one that actually builds
+            # the GLB — passed a hardcoded `against_wall=False`, which is not
+            # "unknown", it is the assertion that nothing in the building
+            # touches a wall.
+            #
+            # That assertion is wrong for precisely the items defined by
+            # touching one. `elements.py` reads it both ways: deep-against
+            # shapes lose their 1.35x, and counter / overhead / wardrobe /
+            # tv-unit are then multiplied by 0.5 for standing free. So the most
+            # common built-in furniture in a house was being halved on every
+            # reconstruct, while the free survey scored it correctly. A block
+            # named `tv unit` — which the kernel resolves to `tv-unit` without
+            # help — lost to `wardrobe-small`, and the drawing lost its TV.
+            #
+            # Solved walls are centrelines, so the faces are half a thickness
+            # out on each side; `wall_gap` takes the inset for that reason.
+            wall_faces = [(w.ax, w.ay, w.bx, w.by, w.thickness / 2.0) for w in walls]
             for placement in in_frame:
                 w, d = footprints.get(placement["block"], (0.0, 0.0))
                 px, py = placement["position"]["x"], placement["position"]["y"]
@@ -540,7 +560,9 @@ def reconstruct(
                 )
                 verdict = classify_footprint(
                     width=w, depth=d, block=placement["block"], layer=placement["layer"],
-                    room_name=room, against_wall=False, guess_item=kernel.guess_item,
+                    room_name=room,
+                    against_wall=blk.wall_gap(px, py, wall_faces) <= blk.AGAINST_WALL_M,
+                    guess_item=kernel.guess_item,
                 )
                 fixtures.append({
                     "block": placement["block"], "position": placement["position"],

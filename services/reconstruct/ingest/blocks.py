@@ -270,6 +270,33 @@ def wall_proximity(
     return best
 
 
+def wall_gap(x: float, y: float, faces) -> float:
+    """
+    Distance in metres from a point to the nearest wall FACE.
+
+    `wall_proximity` above answers the same question for raw drawing segments,
+    which already *are* faces — they are the lines somebody drew. Solved walls
+    are centrelines, so the caller passes `(ax, ay, bx, by, inset)` and the
+    half-thickness comes off the distance.
+
+    Without the inset the two paths disagree by half a wall on every query:
+    0.115 m on a 229 mm wall, against an AGAINST_WALL_M of 0.30. That is a
+    third of the threshold, and it flips the answer for exactly the items that
+    matter here — a 0.60 m deep wardrobe pressed flat against a wall has its
+    centroid 0.30 m from the face and 0.415 m from the centreline.
+    """
+    best = float("inf")
+
+    for ax, ay, bx, by, inset in faces:
+        d = _point_segment_distance(x, y, ax, ay, bx, by) - inset
+        if d < best:
+            best = d
+            if best < 0.01:
+                break
+
+    return max(best, 0.0)
+
+
 def open_dxf(path: str):
     """Open a DXF the forgiving way. Real drawings are rarely clean."""
     doc, auditor = recover.readfile(path)
@@ -283,5 +310,6 @@ __all__ = [
     "nearest_room",
     "open_dxf",
     "room_labels",
+    "wall_gap",
     "wall_proximity",
 ]

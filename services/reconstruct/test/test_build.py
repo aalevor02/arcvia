@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from build.glb import MeshBuilder, write_glb  # noqa: E402
+from ingest.blocks import AGAINST_WALL_M, wall_gap  # noqa: E402
 from build.solidify import build_slabs, build_walls  # noqa: E402
 from hypothesise import openings as op  # noqa: E402
 from hypothesise.pair import Face, join_corners, pair_faces  # noqa: E402
@@ -651,6 +652,51 @@ ok("while TOTAL length is not invariant, which is why the two must differ",
 ok("anything drawn reports zero duplication",
    all(w.duplicate == 0.0 for w in _per.add_perimeter(walls)
        if w.layer != "<derived:perimeter>"))
+
+
+# ---------------------------------------------------------------------------
+# wall_gap — the inset, and why a centreline is not a face
+#
+# The reconstruct path used to pass a hardcoded `against_wall=False` while the
+# survey path measured it. That is not a missing signal, it is a false one:
+# `elements.py` halves counter / overhead / wardrobe / tv-unit for standing
+# free, so the builder was suppressing the furniture most reliably found in a
+# house. These pin the geometry that replaced it.
+# ---------------------------------------------------------------------------
+
+print("\n-- wall_gap --")
+
+# One wall, 229 mm thick, running along y = 0 from x = 0 to x = 5.
+_W229 = [(0.0, 0.0, 5.0, 0.0, 0.229 / 2)]
+
+ok("a point on the face reads zero, not half a thickness",
+   abs(wall_gap(2.5, 0.229 / 2, _W229)) < 1e-9,
+   f"{wall_gap(2.5, 0.229 / 2, _W229):.4f}")
+
+# A 0.60 m deep wardrobe flat against that wall: centroid 0.30 m off the FACE,
+# so 0.4145 m off the centreline. This is the case the bug turned on.
+_centroid = 0.229 / 2 + 0.30
+ok("a wardrobe flat against a wall is inside AGAINST_WALL_M",
+   wall_gap(2.5, _centroid, _W229) <= AGAINST_WALL_M,
+   f"gap {wall_gap(2.5, _centroid, _W229):.3f} <= {AGAINST_WALL_M}")
+
+ok("...and would NOT be, measured to the centreline instead",
+   wall_gap(2.5, _centroid, [(0.0, 0.0, 5.0, 0.0, 0.0)]) > AGAINST_WALL_M,
+   "the inset is load-bearing, not cosmetic")
+
+ok("never negative, however far inside the wall the point falls",
+   wall_gap(2.5, 0.0, _W229) == 0.0)
+
+ok("beyond the end of a segment it measures to the endpoint",
+   abs(wall_gap(8.0, 0.0, _W229) - (3.0 - 0.229 / 2)) < 1e-9,
+   f"{wall_gap(8.0, 0.0, _W229):.4f}")
+
+_TWO = _W229 + [(0.0, 1.2, 5.0, 1.2, 0.0)]
+ok("the nearest of several walls wins",
+   abs(wall_gap(2.5, 1.0, _TWO) - 0.2) < 1e-9,
+   f"{wall_gap(2.5, 1.0, _TWO):.4f}")
+
+ok("no walls at all is far away, not an error", wall_gap(0.0, 0.0, []) > 1e6)
 
 
 print(f"\n{passed} passed, {failed} failed")
