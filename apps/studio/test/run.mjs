@@ -35,6 +35,7 @@ const targets = entries.length
       'test/lightmapUV.test.ts',
       'test/credits.test.ts',
       'test/surfaces.test.ts',
+      'test/environments.test.ts',
       'test/presentation.test.ts',
       'test/detectionQuality.test.ts',
       'test/furnish.test.ts',

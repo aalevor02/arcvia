@@ -19,6 +19,7 @@ import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { upgradeSurfaces } from '../catalogue/surfaceUpgrade'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
+import EnvironmentPanel from '../components/EnvironmentPanel'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
 import type { Plan } from '../plan/types'
@@ -104,6 +105,11 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     branding: null,
   })
   const [placing, setPlacing] = useState(false)
+  /**
+   * The scene's `hdriUrl`. Null means none has ever been chosen, which renders
+   * against the worker's own default sky rather than failing.
+   */
+  const [environment, setEnvironment] = useState<string | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -136,6 +142,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           branding: scene.branding ?? null,
         })
         setGated(Boolean(scene.protected))
+        setEnvironment(scene.hdriUrl ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -144,6 +151,14 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       cancelled = true
     }
   }, [sceneId])
+
+  /** Persist, and keep the panel responsive by not awaiting the write. */
+  function updateEnvironment(url: string | null) {
+    setEnvironment(url)
+    void updateScene(sceneId, { hdriUrl: url }).catch(() =>
+      setStatus('That change could not be saved. Check your connection.'),
+    )
+  }
 
   /** Persist, and keep the panel responsive by not awaiting the write. */
   function updatePresentation(next: Presentation) {
@@ -192,6 +207,27 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       viewerRef.current = null
     }
   }, [])
+
+  /**
+   * Show the scene's chosen environment in the editor, not only in renders.
+   *
+   * ── Why this is its own effect, declared here ───────────────────────────
+   * `viewerRef` is a ref, so nothing re-runs when the viewer appears. This
+   * effect therefore has to be declared AFTER the one that builds it: React
+   * runs effects in declaration order, so by the time this first fires the
+   * viewer exists.
+   *
+   * Applying it inside the scene load instead would depend on the same
+   * ordering while looking like it did not — that effect is declared *before*
+   * the viewer is created, and only works because `getScene` is a network
+   * round trip that resolves long after mount. That is not a reason, it is a
+   * race that has not yet been lost. The first version of this was written
+   * that way.
+   */
+  useEffect(() => {
+    if (!environment) return
+    void viewerRef.current?.loadEnvironment(environment)
+  }, [environment])
 
   // Rebuild whenever the plan changes. Cheap for a plan-sized model, and it
   // keeps the 3D view honest: there is no "regenerate" button to forget.
@@ -611,6 +647,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
             }}
           />
         </section>
+
+        <EnvironmentPanel
+          viewer={viewerRef.current}
+          value={environment}
+          onChange={updateEnvironment}
+        />
 
         <PresentationPanel
           viewer={viewerRef.current}
