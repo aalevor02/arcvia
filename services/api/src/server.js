@@ -5,6 +5,7 @@ import multipart from '@fastify/multipart'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerOrgRoutes } from './routes/organisation.js'
 import { registerSceneRoutes } from './routes/scenes.js'
+import { registerPublicationRoutes } from './routes/publications.js'
 import { registerRenderRoutes, reconcileRenderJobs } from './routes/render.js'
 import { registerLeadRoutes } from './routes/leads.js'
 import { registerBillingRoutes } from './routes/billing.js'
@@ -64,6 +65,7 @@ app.get('/health', async () => ({
 await app.register(registerAuthRoutes, { prefix: '/auth' })
 await app.register(registerOrgRoutes, { prefix: '/organisations' })
 await app.register(registerSceneRoutes, { prefix: '/scenes' })
+await app.register(registerPublicationRoutes, { prefix: '/publications' })
 await app.register(registerRenderRoutes, { prefix: '/render' })
 await app.register(registerBillingRoutes, { prefix: '/billing' })
 await app.register(registerReferralRoutes, { prefix: '/referral' })

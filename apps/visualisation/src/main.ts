@@ -1,6 +1,7 @@
 import './styles.css'
 import { brand } from '@arcvia/brand'
-import project from './data/casa-altinho'
+import bundled from './data/casa-altinho'
+import type { Project } from './types'
 import { h } from './ui/dom'
 import { homePage } from './pages/home'
 import { masterPlanPage } from './pages/masterplan'
@@ -16,6 +17,97 @@ const NAV = [
 ]
 
 const root = document.getElementById('app')!
+
+/**
+ * The project on screen.
+ *
+ * ── Why this is a binding and not an import ─────────────────────────────────
+ * Every page function here already takes a `Project` as an argument — the app
+ * was written data-driven from the start, and its type file says why: "a second
+ * project is a second data file, not a second codebase". The only thing tying
+ * it to one client was this module importing that file at build time.
+ *
+ * So it is now loaded at run time, and the bundled Casa Altinho data is the
+ * development default rather than the subject.
+ */
+let project: Project = bundled
+
+/**
+ * Which published project to show, from the URL.
+ *
+ * `/p/<slug>/` is the address a client is given; `?p=<slug>` works anywhere
+ * without a rewrite rule, which is what makes this testable on a static dev
+ * server. No slug means the bundled project, which is what `npm run dev` gets.
+ */
+function requestedSlug(): string | null {
+  const query = new URLSearchParams(location.search).get('p')
+  if (query) return query
+
+  const path = location.pathname.match(/\/p\/([^/]+)/)
+  return path ? decodeURIComponent(path[1]) : null
+}
+
+/**
+ * The API host, derived from the page rather than hard-coded.
+ *
+ * Hard-coding `localhost` breaks the moment the site is opened from another
+ * device — on a phone, `localhost` is the phone. Same reasoning as the studio's
+ * client, and deliberately the same shape.
+ */
+function apiBase(): string {
+  const configured = import.meta.env.VITE_API_URL
+  return configured
+    ? String(configured).replace(/\/$/, '')
+    : `${location.protocol}//${location.hostname}:8787`
+}
+
+/**
+ * Put the loaded project's identity on the document itself.
+ *
+ * ── Why this is not just the title ──────────────────────────────────────────
+ * `index.html` used to hard-code one client's title, description and share
+ * card. Serving many projects from it made every one of those a leak: a visitor
+ * on client B's link saw client A's name in the tab, and sharing it posted a
+ * card for A's development.
+ *
+ * So the markup is neutral and this fills it in from whatever loaded.
+ *
+ * ⚠ This does NOT fix link previews. A crawler does not run JavaScript, so
+ * WhatsApp and Slack read the static file and every project still shares the
+ * same card. That needs `/p/<slug>/` served by something that can inject the
+ * tags before the HTML leaves the server, and is recorded as an open gap.
+ */
+function describe(heading: string, detail: string): void {
+  document.title = heading
+  for (const [selector, value] of [
+    ['meta[name="description"]', detail],
+    ['meta[property="og:title"]', heading],
+    ['meta[property="og:description"]', detail],
+  ] as const) {
+    document.head.querySelector<HTMLMetaElement>(selector)?.setAttribute('content', value)
+  }
+}
+
+/** A failure a visitor can act on, rather than a blank page. */
+function failure(heading: string, detail: string): HTMLElement {
+  // Said on the document too, so a failed load does not leave the previous
+  // project's name sitting in the browser tab.
+  describe(heading, detail)
+  return h(
+    'main',
+    { class: 'band' },
+    h(
+      'div',
+      { class: 'shell' },
+      h(
+        'div',
+        { class: 'lede', style: 'margin:0 auto;text-align:center' },
+        h('h2', {}, heading),
+        h('p', {}, detail),
+      ),
+    ),
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Chrome
@@ -274,10 +366,14 @@ async function route(): Promise<void> {
   // A fresh page should start at the top; the browser restores scroll on hash
   // changes otherwise and you land halfway down a page you have never seen.
   window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
-  document.title =
+  describe(
     parts[0] === undefined
       ? `${project.name} — ${project.place}`
-      : `${project.name} · ${titleFor(parts)}`
+      : `${project.name} · ${titleFor(parts)}`,
+    // The tagline is the one line written to describe the project to someone
+    // who has not seen it, which is exactly what a description is for.
+    project.tagline || `An interactive presentation of ${project.name}.`,
+  )
 }
 
 function titleFor(parts: string[]): string {
@@ -291,4 +387,67 @@ function titleFor(parts: string[]): string {
 }
 
 window.addEventListener('hashchange', () => void route())
-void route()
+
+/**
+ * Load the requested project, then render.
+ *
+ * ── Why a failed load must NOT fall back to the bundled project ─────────────
+ * It is the obvious thing to write and it is the worst possible behaviour here.
+ * A client opens the link to *their* development, the API is unreachable, and
+ * the page renders — perfectly, with no error — showing somebody else's
+ * project: their villas, their prices, their unit availability. Nothing looks
+ * wrong, so nobody reports it.
+ *
+ * The bundled data is the default only when NO project was asked for. Once a
+ * slug is in the URL, the only honest outcomes are that project or a visible
+ * failure.
+ */
+async function boot(): Promise<void> {
+  const slug = requestedSlug()
+  if (!slug) {
+    await route()
+    return
+  }
+
+  root.replaceChildren(
+    h('main', { class: 'band' }, h('div', { class: 'shell' }, h('p', { class: 'muted' }, 'Loading…'))),
+  )
+
+  let response: Response
+  try {
+    response = await fetch(`${apiBase()}/publications/public/${encodeURIComponent(slug)}`)
+  } catch {
+    root.replaceChildren(
+      failure('This project could not be loaded', 'The server did not respond. Please try again shortly.'),
+    )
+    return
+  }
+
+  if (response.status === 404) {
+    root.replaceChildren(
+      failure('Nothing published at this address', 'The link may be out of date, or the project may have been withdrawn.'),
+    )
+    return
+  }
+  if (!response.ok) {
+    const message = await response
+      .json()
+      .then((payload: { message?: string }) => payload.message)
+      .catch(() => undefined)
+    root.replaceChildren(failure('This project is not ready yet', message ?? 'Please try again shortly.'))
+    return
+  }
+
+  const payload = (await response.json()) as { project?: Project }
+  if (!payload.project) {
+    root.replaceChildren(
+      failure('This project is not ready yet', 'It has been published but not composed.'),
+    )
+    return
+  }
+
+  project = payload.project
+  await route()
+}
+
+void boot()

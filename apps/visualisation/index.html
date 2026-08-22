@@ -3,34 +3,46 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Casa Altinho — Saipem, Goa</title>
-    <meta
-      name="description"
-      content="Casa Altinho by Fair Green Ventures — nineteen luxury villas above the Nerul river in Saipem, North Goa. Interactive master plan, floor plans and renders."
-    />
+
+    <!--
+      ── Why nothing here names a project ──────────────────────────────────────
+      This app serves any published project, chosen by slug at run time. Every
+      value that used to sit here was one client's — the title, the description,
+      the share card, and a `noscript` block carrying a developer's phone number.
+
+      With one client that was correct. With many it is a leak: a visitor opening
+      client B's link would have seen client A's name in the tab, and shared a
+      card advertising A's development.
+
+      `main.ts` sets the title, description and Open Graph tags from whichever
+      project actually loads. The defaults below are deliberately neutral, so the
+      wrong answer is never the one on screen.
+
+      ⚠ A crawler does not run JavaScript. Link previews on WhatsApp, Slack and
+      the like read THIS file, so every project currently shares the same card.
+      Fixing that properly needs `/p/<slug>/` served by something that injects
+      the tags server-side — see docs/PENDING-ARCVIA.md. It is a real gap in the
+      publisher, not an oversight here.
+    -->
+    <title>Project walkthrough</title>
+    <meta name="description" content="An interactive presentation of a residential project." />
     <meta name="theme-color" content="#16211c" />
 
-    <!-- Open Graph: these pages get shared by WhatsApp more than by any other
-         route, and a shared link with no card looks like a dead link. -->
-    <meta property="og:title" content="Casa Altinho — Saipem, Goa" />
+    <meta property="og:title" content="Project walkthrough" />
     <meta
       property="og:description"
-      content="Nineteen luxury villas above the Nerul river. Every villa with a private rooftop infinity pool and a lift."
+      content="An interactive presentation of a residential project."
     />
-    <meta property="og:image" content="renders/aerial-day-card.webp" />
     <meta property="og:type" content="website" />
-
-    <link rel="preload" as="image" href="renders/aerial-day.webp" />
   </head>
   <body>
     <div id="app"></div>
     <noscript>
       <div style="padding: 40px; font-family: system-ui, sans-serif">
-        <h1>Casa Altinho</h1>
+        <h1>This presentation needs JavaScript</h1>
         <p>
-          This interactive presentation needs JavaScript. For details of the
-          nineteen villas at Saipem, Goa, please contact Fair Green Ventures on
-          +91 99893 32555.
+          Please enable JavaScript, or contact the developer directly for details
+          of this project.
         </p>
       </div>
     </noscript>

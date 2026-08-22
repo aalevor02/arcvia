@@ -1,10 +1,15 @@
 /*
- * Casa Altinho — published visualisation.
+ * Published visualisation — the site a client opens.
  *
- * The palette is taken from the developer's own brochure rather than from the
+ * The palette is taken from a developer's own brochure rather than from the
  * Arcvia brand file: published output wears the *client's* identity, and the
  * platform's only visible mark is the "Made using Arcvia" credit. Arcvia blue
  * on a Goan villa brochure would look like a tool that had not been finished.
+ *
+ * ⚠ These values are still one client's, and the app now serves any published
+ * project. Per-project branding is a Deliver-stage item; until it lands, every
+ * published site wears the same palette. `project.branding` on a scene already
+ * carries an accent and a logo — this is the file that has to read them.
  */
 
 :root {

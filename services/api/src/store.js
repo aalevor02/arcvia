@@ -22,6 +22,7 @@ const EMPTY = {
   users: [],
   organisations: [],
   scenes: [],
+  publications: [],
   renderJobs: [],
   leads: [],
   creditLedger: [],
