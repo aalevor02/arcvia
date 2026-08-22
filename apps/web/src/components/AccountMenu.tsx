@@ -93,7 +93,10 @@ export default function AccountMenu() {
     )
   }
 
-  const plan = plans.plans[user.planId] ?? plans.plans[plans.defaultPlanId]
+  // `planFor` rather than indexing with our own fallback: it is the function
+  // that owns this decision, including the billing-off case where the plan a
+  // user carries is not the plan they are on.
+  const plan = plans.planFor(user.planId)
   const initial = (user.name || user.email).charAt(0).toUpperCase()
 
   const onCopy = async () => {

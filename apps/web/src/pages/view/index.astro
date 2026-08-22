@@ -177,8 +177,45 @@ const title = 'Walkthrough'
       </div>
     </div>
 
+    <!--
+      The watchdog. Inline and classic ON PURPOSE — it must run even when
+      module loading is broken, because module loading being broken is the
+      exact failure it reports.
+
+      The walkthrough script is a module graph: this page's script, the shared
+      viewer, three.js and its loaders. If ANY edge fails — a CDN hiccup, an
+      ad-blocker, a flaky mobile connection, a stale dev cache — the module
+      never evaluates, `main()` and its catch never exist, and the client sits
+      on the static "Fetching the scene…" text forever. Measured, not
+      hypothetical: a stale Vite dep cache 504'd the three.js chunks and this
+      page hung silently with a clean console.
+
+      The module's first act is to set `__arcviaAlive`. If that has not
+      happened shortly after the window loads, the script did not arrive, and
+      saying so beats loading text that never resolves. The timer starts at
+      `load` rather than at parse so a slow model download is not misreported —
+      by `load` the only thing outstanding is script evaluation, which is fast
+      or failed.
+    -->
+    <script is:inline>
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (window.__arcviaAlive) return
+          var title = document.getElementById('statusTitle')
+          var detail = document.getElementById('statusDetail')
+          var bar = document.getElementById('statusBar')
+          if (title) title.textContent = 'Could not start the walkthrough'
+          if (detail)
+            detail.textContent =
+              'The viewer failed to load. Check your connection — or an ad-blocker — and reload the page.'
+          if (bar && bar.parentElement) bar.parentElement.style.display = 'none'
+        }, 4000)
+      })
+    </script>
+
     <script>
       import { SceneViewer, WalkController } from '@arcvia/viewer'
+
 
       const api =
         import.meta.env.PUBLIC_API_URL ??
@@ -198,29 +235,74 @@ const title = 'Walkthrough'
         return parts[0] === 'view' && parts[1] ? decodeURIComponent(parts[1]) : null
       }
 
-      const els = {
-        status: document.getElementById('status'),
-        title: document.getElementById('statusTitle'),
-        detail: document.getElementById('statusDetail'),
-        bar: document.getElementById('statusBar'),
-        name: document.getElementById('name'),
-        controls: document.getElementById('controls'),
-        walk: document.getElementById('walk'),
-        fit: document.getElementById('fit'),
-        credits: document.getElementById('credits'),
-        creditList: document.getElementById('creditList'),
-        creditsToggle: document.getElementById('creditsToggle'),
-        views: document.getElementById('views'),
-        spots: document.getElementById('spots'),
+      /**
+       * One clickable marker in the scene, as the API sends it.
+       *
+       * `title` is required because the code reads it unconditionally, into an
+       * aria-label as well as the card — a marker with no title is an unlabelled
+       * button, which is worse than no marker.
+       */
+      type Hotspot = {
+        position: { x: number; y: number; z: number }
+        title: string
+        body?: string
+        link?: string
       }
 
-      const fail = (title, detail) => {
+      /** An attribution line for one model, as the API sends it. */
+      type Credit = { source: string; author: string; licence: string }
+
+      /**
+       * One of this page's own elements, or a loud failure.
+       *
+       * Every id below is in the markup a few lines up, so at runtime these
+       * always resolve — until someone renames one. `getElementById` answers
+       * `null` for a missing id, and the code that follows assumes an element,
+       * so the symptom of that rename is a client opening a link and getting a
+       * blank screen with a TypeError in a console they will never open.
+       *
+       * Throwing here instead names the id that went missing. It is the same
+       * broken page either way; the difference is whether anyone can tell why.
+       * `astro check` also stops reporting the assumption 36 times.
+       */
+      const must = (id: string) => {
+        const el = document.getElementById(id)
+        if (!el) throw new Error(`view: #${id} is missing from this page`)
+        return el
+      }
+
+      const els = {
+        status: must('status'),
+        title: must('statusTitle'),
+        detail: must('statusDetail'),
+        bar: must('statusBar'),
+        name: must('name'),
+        controls: must('controls'),
+        walk: must('walk'),
+        fit: must('fit'),
+        credits: must('credits'),
+        creditList: must('creditList'),
+        creditsToggle: must('creditsToggle'),
+        views: must('views'),
+        spots: must('spots'),
+      }
+
+      // Looked up once and shared. The viewer and the walk controller both need
+      // it, and two lookups is two chances to drift apart.
+      const canvas = must('canvas') as HTMLCanvasElement
+
+      const fail = (title: string, detail: string) => {
         els.title.textContent = title
         els.detail.textContent = detail
-        els.bar.parentElement.style.display = 'none'
+        const track = els.bar.parentElement
+        if (track) track.style.display = 'none'
       }
 
-      const absolute = (url) => (url?.startsWith('/') ? api + url : url)
+      // Takes a real string, not an optional one. Every call site already
+      // guards on the field being present — a missing model is a `fail()` a few
+      // lines up, not something to paper over here — and typing the parameter
+      // optional would have made those guards look unnecessary.
+      const absolute = (url: string) => (url.startsWith('/') ? api + url : url)
 
       /**
        * Ask for the access code and exchange it for the scene.
@@ -233,12 +315,12 @@ const title = 'Walkthrough'
        * visitor one step and would also mean a shared laptop keeps access to a
        * pre-launch property, which is the thing the gate exists to prevent.
        */
-      function unlock(slug, name) {
-        const gate = document.getElementById('gate')
-        const input = document.getElementById('code')
-        const error = document.getElementById('gateError')
+      function unlock(slug: string, name?: string) {
+        const gate = must('gate') as HTMLFormElement
+        const input = must('code') as HTMLInputElement
+        const error = must('gateError')
 
-        document.getElementById('gateName').textContent = name ?? ''
+        must('gateName').textContent = name ?? ''
         els.status.classList.add('gone')
         gate.hidden = false
         input.focus()
@@ -306,12 +388,12 @@ const title = 'Walkthrough'
         }
 
         const viewer = new SceneViewer({
-          canvas: document.getElementById('canvas'),
-          onProgress: (fraction) => {
+          canvas,
+          onProgress: (fraction: number) => {
             els.bar.style.width = `${Math.round(fraction * 100)}%`
             els.detail.textContent = 'Loading the model…'
           },
-          onError: (error) => fail('Could not load the walkthrough', error.message),
+          onError: (error: Error) => fail('Could not load the walkthrough', error.message),
         })
 
         await viewer.loadModel(absolute(scene.modelUrl))
@@ -331,7 +413,7 @@ const title = 'Walkthrough'
 
         viewer.frameModel()
 
-        const walk = new WalkController(viewer, document.getElementById('canvas'), {
+        const walk = new WalkController(viewer, canvas, {
           eyeHeight: 1.6,
           speed: 2.68,
         })
@@ -401,7 +483,7 @@ const title = 'Walkthrough'
 
         // ---- Hotspots -------------------------------------------------------
         const hotspots = scene.hotspots ?? []
-        const markers = hotspots.map((hotspot) => {
+        const markers = hotspots.map((hotspot: Hotspot) => {
           const marker = document.createElement('div')
           marker.className = 'spot'
           marker.dataset.open = 'false'
@@ -469,7 +551,7 @@ const title = 'Walkthrough'
           els.creditsToggle.hidden = false
           els.creditList.innerHTML = credits
             .map(
-              (credit) =>
+              (credit: Credit) =>
                 `<li><a href="${credit.source}" target="_blank" rel="noreferrer">${credit.author}</a>` +
                 `<span class="lic"> — ${credit.licence}</span></li>`,
             )
@@ -484,6 +566,13 @@ const title = 'Walkthrough'
         els.status.classList.add('gone')
         els.controls.hidden = false
       }
+
+      // The watchdog is waiting for this. Deliberately the LAST top-level
+      // statement: a failed import never reaches it, and neither does a throw
+      // anywhere above — a renamed element id, a syntax error in an edit — so
+      // both failure shapes surface instead of hanging. `main` is async and
+      // owns its own failures via the catch below.
+      ;(window as unknown as { __arcviaAlive?: boolean }).__arcviaAlive = true
 
       main().catch((error) =>
         fail('Something went wrong', error?.message ?? 'The walkthrough could not be opened.'),
