@@ -195,7 +195,9 @@ export function buildFloorGeometry(
   }
 
   // ---- Furniture and fittings ----------------------------------------------
-  const furniture = buildObjects(objects, floor.elevation)
+  // The real ceiling, so pendants hang from where this floor's ceiling is
+  // rather than from a constant that agrees with it only by default.
+  const furniture = buildObjects(objects, floor.elevation, averageWallHeight(floor))
   if (furniture.children.length > 0) group.add(furniture)
 
   return group

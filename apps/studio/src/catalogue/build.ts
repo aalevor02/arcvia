@@ -26,7 +26,7 @@ import { surface, type SurfaceKind } from '../plan/materials'
  * Swapping in a photographed oak later changes one function, not 46 catalogue
  * entries.
  */
-const TONE_SURFACE: Record<string, SurfaceKind> = {
+export const TONE_SURFACE: Record<string, SurfaceKind> = {
   wood: 'wood',
   fabric: 'fabric',
   metal: 'metal',
@@ -37,6 +37,22 @@ const TONE_SURFACE: Record<string, SurfaceKind> = {
   water: 'water',
   grass: 'grass',
   paving: 'paving',
+  /**
+   * Surface kinds used directly by builders.
+   *
+   * The pool's tank passed 'floor-tile' before this key existed, and the
+   * `?? 'fabric'` below made its floor and walls THE SAME MATERIAL INSTANCE as
+   * every sofa — which the surface upgrade then painted grey woven upholstery,
+   * visible through the water and above the waterline, on the way to a client.
+   * Found by the product audit, not by the harness that rendered the pool: the
+   * procedural fabric fallback is grey-ish, so the tank looked plausible.
+   *
+   * Exported, and tones.test.ts scans every literal a builder passes against
+   * this table — the fallback exists for uploaded models with unknown tones,
+   * not as a place for catalogue code to land by typo.
+   */
+  'floor-tile': 'floor-tile',
+  'floor-wood': 'floor-wood',
 }
 
 function material(tone = 'fabric'): THREE.MeshStandardMaterial {
@@ -477,7 +493,12 @@ const BUILDERS: Record<string, Builder> = {
  * Returns null for objects that have no geometry — an `opening` is a hole, and
  * the hole is cut by the wall builder, not filled by a mesh here.
  */
-export function buildObject(object: PlacedObject, floorElevation: number): THREE.Group | null {
+export function buildObject(
+  object: PlacedObject,
+  floorElevation: number,
+  /** Where the ceiling is, for objects that hang from it. 3 m is WALL_DEFAULTS'. */
+  ceilingHeight = 3.0,
+): THREE.Group | null {
   const item: CatalogueItem | undefined = itemById(object.item)
   if (!item) return null
 
@@ -511,12 +532,22 @@ export function buildObject(object: PlacedObject, floorElevation: number): THREE
     group.userData.modelUpAxis = object.customUrl ? 'y' : (item.model?.upAxis ?? 'y')
   }
 
-  // plan (x, y) -> world (x, elevation, -y), the same mapping walls use.
-  group.position.set(
-    object.position.x,
-    floorElevation + elevationOf(object),
-    -object.position.y,
-  )
+  /**
+   * plan (x, y) -> world (x, elevation, -y), the same mapping walls use.
+   *
+   * ── Ceiling objects hang from the top, not the bottom ────────────────────
+   * `elevationOf` for a ceiling item is a DROP BELOW THE CEILING — the type
+   * says so — but this used to add it to the floor line like every other
+   * placement. A pendant with a 0.4 m drop sat at y = 0.4 in the middle of the
+   * room's air, and a flush ceiling light (drop 0) sat at y = 0, INSIDE the
+   * 120 mm floor slab — invisible, in every editor view and every published
+   * walkthrough, with nothing anywhere reporting it.
+   */
+  const y =
+    item?.placement === 'ceiling'
+      ? floorElevation + ceilingHeight - elevationOf(object)
+      : floorElevation + elevationOf(object)
+  group.position.set(object.position.x, y, -object.position.y)
   group.rotation.y = -object.rotation
 
   return group
@@ -526,12 +557,13 @@ export function buildObject(object: PlacedObject, floorElevation: number): THREE
 export function buildObjects(
   objects: PlacedObject[],
   floorElevation: number,
+  ceilingHeight = 3.0,
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = 'objects'
 
   for (const object of objects) {
-    const built = buildObject(object, floorElevation)
+    const built = buildObject(object, floorElevation, ceilingHeight)
     if (built) group.add(built)
   }
 
