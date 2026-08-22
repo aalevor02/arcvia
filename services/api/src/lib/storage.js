@@ -261,3 +261,25 @@ export function resolveUrl(url) {
 
   return pathFor(url.slice(PUBLIC_PREFIX.length + 1))
 }
+
+/**
+ * Is this one of OUR uploaded objects, and nothing else?
+ *
+ * `resolveUrl` is a resolver: its job is to turn a value the system produced
+ * into a path, and its final branch deliberately passes through anything it
+ * does not recognise. That is the wrong function to gate a CALLER-SUPPLIED
+ * value with — an http(s) URL or a bare filesystem path sails through it and
+ * on to `readFile`. This is the gate: it returns true only for a string of the
+ * exact shape `uploadCapture` produces, `${PUBLIC_PREFIX}/<key>`, whose key
+ * resolves to a real place inside ROOT.
+ *
+ * Containment is checked on the resolved path, not the text, for the same
+ * reason `within` is — `../` filtering misses encodings, backslashes and
+ * symlinks. `http://.../uploads/x` is rejected because it does not START with
+ * the prefix (the scheme is in front of it), which is the point: an absolute
+ * URL is never one of our keys.
+ */
+export function isOwnUpload(url) {
+  if (typeof url !== 'string' || !url.startsWith(`${PUBLIC_PREFIX}/`)) return false
+  return pathFor(url.slice(PUBLIC_PREFIX.length + 1)) !== null
+}

@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth.js'
 import { spend, balanceFor, InsufficientCredits } from '../lib/credits.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
-import { resolveUrl } from '../lib/storage.js'
+import { resolveUrl, isOwnUpload } from '../lib/storage.js'
 import { checkSubmission } from '../lib/idempotency.js'
 import { AI_STYLES, isStyle } from '../lib/aiRender.js'
 
@@ -158,6 +158,22 @@ export async function registerRenderRoutes(app) {
       return reply
         .status(400)
         .send({ message: 'A photoreal render needs a captured view.' })
+    }
+    // ── captureUrl must be one of OUR uploads, nothing else ──────────────────
+    // It is caller-supplied and flows, unresolved, all the way to
+    // `readFile(sourcePath)` in the worker and then into an outbound POST to
+    // Google's API. `resolveUrl` does NOT contain it: its final branch returns
+    // any value that is not under the upload prefix unchanged, so an http(s)
+    // URL renders an SSRF (the worker fetches it) and a bare path — `/etc/passwd`,
+    // `A:/Web/Arcvia/.env` — is read off this server's disk and base64'd into
+    // the request body. The legitimate value is always the key returned by
+    // uploadCapture, i.e. `${UPLOAD_PUBLIC_PREFIX}/<key>`, so anything else is
+    // either an attack or a bug, and both should be refused here rather than
+    // resolved downstream.
+    if (isAi && !isOwnUpload(captureUrl)) {
+      return reply
+        .status(400)
+        .send({ message: 'A captured view must be an uploaded image.' })
     }
     if (isAi && !isStyle(request.body?.style ?? 'daylight')) {
       return reply.status(400).send({
