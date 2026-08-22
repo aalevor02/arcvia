@@ -1,4 +1,10 @@
-import { composeFlooringOptions, offerableFinishes } from '../src/publish/options'
+import {
+  alternativesFor,
+  composeFlooringOptions,
+  offerableFinishes,
+  variantGroupId,
+} from '../src/publish/options'
+import { itemById } from '../src/catalogue/items'
 import { PROCEDURAL_SURFACES } from '../src/catalogue/surfaces'
 
 /**
@@ -81,6 +87,28 @@ check('grass specifically is not offerable', !offerable.some((f) => f.id === 'gr
     async (u) => u,
   )
   check('a procedural finish in the selection is dropped', mixed?.choices.length === 2)
+}
+
+// ---- Object alternatives ------------------------------------------------------
+
+{
+  const alts = alternativesFor('sofa-3')
+  check('a sofa has alternatives', alts.length > 0, `${alts.length}`)
+  check('none of them is the sofa itself', alts.every((a) => a.id !== 'sofa-3'))
+  check(
+    'all of them are seating',
+    alts.every((a) => itemById(a.id)?.category === 'Seating'),
+  )
+  // A parametric stand-in swapped in beside real furniture reads as a bug, not
+  // a choice, so only modelled items qualify.
+  check('all of them carry a model', alts.every((a) => Boolean(itemById(a.id)?.model)))
+  check('an unknown item has none', alternativesFor('no-such-item').length === 0)
+}
+
+{
+  const name = variantGroupId('o1', 'armchair')
+  check('variant names carry no exporter-eaten punctuation', /^[a-zA-Z0-9_-]+$/.test(name), name)
+  check('and embed both ids', name.includes('o1') && name.includes('armchair'))
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

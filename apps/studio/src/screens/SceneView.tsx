@@ -470,16 +470,37 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       // the client will see: which models were placed, which environment was
       // chosen, and which surfaces the geometry actually bound. Written before
       // `publishScene` so a page is never public without them.
-      const credits = creditsFor(plan.floors.flatMap((floor) => Object.values(floor.objects)), {
-        environmentUrl: environment,
-        // Offered finishes ride along with the used ones: a finish a visitor
-        // can switch TO is shipped to the page whether or not any room wears
-        // it at publish time, and its author is owed either way.
-        surfaces: [
-          ...usedSurfaces(),
-          ...(options?.flooring?.choices.map((choice) => choice.id) ?? []),
+      // Switchable objects ship their models to the page whether or not a
+      // visitor ever picks them, so their authors are owed exactly as if the
+      // items had been placed. Synthetic placements reuse the one credit
+      // derivation instead of growing a second that can drift from it.
+      const variantPlacements = (options?.objects?.groups ?? []).flatMap((group) =>
+        group.choices
+          .filter((choice) => choice.id !== 'original')
+          .map((choice, index) => ({
+            id: `variant-${group.objectId}-${index}`,
+            item: choice.id,
+            position: { x: 0, y: 0 },
+            rotation: 0,
+          })),
+      )
+
+      const credits = creditsFor(
+        [
+          ...plan.floors.flatMap((floor) => Object.values(floor.objects)),
+          ...variantPlacements,
         ],
-      })
+        {
+          environmentUrl: environment,
+          // Offered finishes ride along with the used ones: a finish a visitor
+          // can switch TO is shipped to the page whether or not any room wears
+          // it at publish time, and its author is owed either way.
+          surfaces: [
+            ...usedSurfaces(),
+            ...(options?.flooring?.choices.map((choice) => choice.id) ?? []),
+          ],
+        },
+      )
       try {
         await updateScene(sceneId, { credits })
       } catch (error) {
@@ -720,7 +741,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           onChange={updateEnvironment}
         />
 
-        <OptionsPanel value={options} onSave={updateOptions} />
+        <OptionsPanel plan={plan} value={options} onSave={updateOptions} />
 
         <PresentationPanel
           viewer={viewerRef.current}

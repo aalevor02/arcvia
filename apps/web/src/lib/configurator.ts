@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 /**
  * The client-side configurator: switching finishes on a published walkthrough.
@@ -51,9 +52,34 @@ export interface FinishChoice {
   source: string
 }
 
+export interface ObjectChoice {
+  id: string
+  name: string
+  licence?: string
+  author?: string
+  source?: string
+}
+
+export interface ObjectOptionGroup {
+  objectId: string
+  label: string
+  choices: ObjectChoice[]
+}
+
 export interface SceneOptions {
   flooring?: { label: string; choices: FinishChoice[] }
+  objects?: { variantsUrl: string; groups: ObjectOptionGroup[] }
 }
+
+/**
+ * Names compared with punctuation stripped from BOTH sides.
+ *
+ * The exporter's sanitizer eats some characters and keeps others — the colon
+ * in `object:o1` dies, the commas in a room id survive — and which is which is
+ * an implementation detail of three.js. Normalising both sides makes the match
+ * immune to whatever it decides.
+ */
+const normalise = (name: string): string => name.replace(/[^a-zA-Z0-9]/g, '')
 
 const loader = new THREE.TextureLoader()
 
@@ -148,6 +174,62 @@ export async function applyFlooring(
   return true
 }
 
+/** The variants GLB, loaded once, the first time a visitor switches anything. */
+let variantsRoot: Promise<THREE.Object3D | null> | null = null
+
+function ensureVariants(url: string, attach: THREE.Object3D): Promise<THREE.Object3D | null> {
+  if (variantsRoot) return variantsRoot
+  variantsRoot = new GLTFLoader()
+    .loadAsync(url)
+    .then((gltf) => {
+      // Everything arrives visible — glTF has no visibility flag, which is the
+      // whole reason variants live in their own file. Hide the lot before the
+      // scene ever renders them; choices reveal one at a time.
+      gltf.scene.traverse((child) => {
+        if (normalise(child.name).startsWith('objectvariant')) child.visible = false
+      })
+      attach.add(gltf.scene)
+      return gltf.scene as THREE.Object3D
+    })
+    .catch(() => {
+      // The original furniture is still on screen and still correct. A picker
+      // that cannot fetch its variants degrades to a scene without options,
+      // not to a scene with holes.
+      variantsRoot = null
+      return null
+    })
+  return variantsRoot
+}
+
+/**
+ * Show one choice of an object group and hide the others.
+ *
+ * The original is a group in the MAIN model named `object:<id>`; each variant
+ * is a group in the variants file named `object:variant_<id>_<item>` (built
+ * through the same builder, hence the same prefix). Visibility is the entire
+ * mechanism: geometry never moves, materials never change, and the bake on the
+ * original — if there is one — is exactly as the author left it.
+ */
+export function applyObjectChoice(
+  root: THREE.Object3D,
+  variants: THREE.Object3D,
+  group: ObjectOptionGroup,
+  choiceId: string,
+): void {
+  const originalName = normalise(`object${group.objectId}`)
+  root.traverse((child) => {
+    if (normalise(child.name) === originalName) child.visible = choiceId === 'original'
+  })
+
+  for (const choice of group.choices) {
+    if (choice.id === 'original') continue
+    const variantName = normalise(`objectvariant_${group.objectId}_${choice.id}`)
+    variants.traverse((child) => {
+      if (normalise(child.name) === variantName) child.visible = choice.id === choiceId
+    })
+  }
+}
+
 /**
  * Build the picker and wire it to the viewer.
  *
@@ -163,10 +245,61 @@ export function mountConfigurator(
   onApplied?: () => void,
 ): void {
   const flooring = options.flooring
-  if (!flooring || flooring.choices.length < 2) return
+  const objects = options.objects
+  const hasFlooring = Boolean(flooring && flooring.choices.length >= 2)
+  const hasObjects = Boolean(objects && objects.groups.length > 0)
+  if (!hasFlooring && !hasObjects) return
 
   const wrap = document.createElement('div')
   wrap.className = 'configurator'
+
+  if (hasObjects && objects) {
+    for (const group of objects.groups) {
+      const row = document.createElement('div')
+      row.className = 'configurator-row'
+
+      const rowLabel = document.createElement('span')
+      rowLabel.className = 'configurator-label'
+      rowLabel.textContent = group.label
+      row.appendChild(rowLabel)
+
+      let pressed: HTMLButtonElement | null = null
+
+      for (const choice of group.choices) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.textContent = choice.name
+        button.setAttribute('aria-pressed', String(choice.id === 'original'))
+        if (choice.id === 'original') pressed = button
+        if (choice.author) {
+          button.title = `${choice.name} — ${choice.author}${choice.licence ? ` (${choice.licence})` : ''}`
+        }
+
+        button.addEventListener('click', () => {
+          const root = getRoot()
+          if (!root) return
+          button.disabled = true
+          void ensureVariants(resolveUrl(objects.variantsUrl), root).then((variants) => {
+            button.disabled = false
+            if (!variants) return
+            applyObjectChoice(root, variants, group, choice.id)
+            pressed?.setAttribute('aria-pressed', 'false')
+            button.setAttribute('aria-pressed', 'true')
+            pressed = button
+            onApplied?.()
+          })
+        })
+
+        row.appendChild(button)
+      }
+      wrap.appendChild(row)
+    }
+  }
+
+  if (!hasFlooring || !flooring) {
+    container.appendChild(wrap)
+    return
+  }
 
   const label = document.createElement('span')
   label.className = 'configurator-label'
