@@ -9,6 +9,56 @@
 
 export type UnitSystem = 'metric' | 'imperial'
 
+/**
+ * What the editor opens in.
+ *
+ * ── Why metric, when the code said imperial ─────────────────────────────────
+ * The editor hard-coded `'imperial'` in three places and remembered nothing, so
+ * every project on every reload opened in feet and inches. Everything around it
+ * disagrees:
+ *
+ *   - the plan model is metres (`plan/types.ts`, and the note at the top here)
+ *   - the reconstruction engine is metres throughout, down to matching wall
+ *     thicknesses against 229 mm brick
+ *   - the product is sold into a metric market — RERA, SBUA, rupees, and the
+ *     drawings this reads are dimensioned in millimetres
+ *
+ * So the default was costing every user a toggle on every project, and the
+ * toggle did not stick. Worse than the extra click: `CalibrateDialog` takes a
+ * typed real-world length, and its own comment records that a metric number
+ * entered into an imperial field scales the drawing by a thousand. A default
+ * nobody expects is the setup for exactly that.
+ *
+ * Anyone who wants imperial still gets it — once, rather than every time.
+ */
+export const DEFAULT_UNITS: UnitSystem = 'metric'
+
+const UNITS_KEY = 'arcvia.units'
+
+/**
+ * The remembered choice, or the default.
+ *
+ * Wrapped because `localStorage` throws rather than returning null in a private
+ * window and under some enterprise policies — and a preference is never worth
+ * failing to open the editor over.
+ */
+export function readUnitPreference(): UnitSystem {
+  try {
+    const stored = localStorage.getItem(UNITS_KEY)
+    return stored === 'imperial' || stored === 'metric' ? stored : DEFAULT_UNITS
+  } catch {
+    return DEFAULT_UNITS
+  }
+}
+
+export function writeUnitPreference(units: UnitSystem): void {
+  try {
+    localStorage.setItem(UNITS_KEY, units)
+  } catch {
+    // Not being able to remember it is not a reason to refuse the change.
+  }
+}
+
 const FEET_PER_METRE = 3.280839895013123
 const SQ_FEET_PER_SQ_METRE = 10.763910416709722
 

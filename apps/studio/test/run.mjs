@@ -42,6 +42,7 @@ const targets = entries.length
       'test/presentation.test.ts',
       'test/detectionQuality.test.ts',
       'test/furnish.test.ts',
+      'test/thumbnail.test.ts',
     ]
 
 const dir = await mkdtemp(join(tmpdir(), 'arcvia-test-'))

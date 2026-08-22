@@ -1,8 +1,11 @@
 import {
+  DEFAULT_UNITS,
   formatArea,
   formatLength,
   metresToFeetInches,
   parseLength,
+  readUnitPreference,
+  writeUnitPreference,
 } from '../src/lib/format'
 
 let passed = 0
@@ -73,6 +76,53 @@ check('empty returns null', parseLength('   ', 'metric') === null)
     near(back, metres, 0.0254),
     `${shown} -> ${back}`,
   )
+}
+
+// ---------------------------------------------------------------------------
+// The unit the editor opens in
+//
+// It hard-coded 'imperial' in three places and remembered nothing, so every
+// project on every reload opened in feet — in a product sold into a metric
+// market, on a model that is metres everywhere, reading drawings dimensioned
+// in millimetres.
+// ---------------------------------------------------------------------------
+
+check('the editor opens metric', DEFAULT_UNITS === 'metric', DEFAULT_UNITS)
+
+// No `localStorage` in Node — which is also a private window and a locked-down
+// browser. A preference is never worth failing to open the editor over.
+check('no storage falls back to the default', readUnitPreference() === DEFAULT_UNITS)
+check(
+  'writing without storage does not throw',
+  (() => {
+    try {
+      writeUnitPreference('imperial')
+      return true
+    } catch {
+      return false
+    }
+  })(),
+)
+
+{
+  const store = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  }
+
+  check('a fresh browser gets the default', readUnitPreference() === 'metric')
+
+  writeUnitPreference('imperial')
+  check('a choice is remembered', readUnitPreference() === 'imperial')
+
+  writeUnitPreference('metric')
+  check('and can be changed back', readUnitPreference() === 'metric')
+
+  store.set('arcvia.units', 'furlongs')
+  check('a junk stored value is ignored, not trusted', readUnitPreference() === DEFAULT_UNITS)
+
+  delete (globalThis as { localStorage?: unknown }).localStorage
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

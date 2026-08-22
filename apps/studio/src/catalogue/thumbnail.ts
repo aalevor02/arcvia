@@ -79,6 +79,24 @@ function ensureRenderer(): boolean {
     return false
   }
 
+  // ── A lost context must not be reused ───────────────────────────────────
+  // `ensureRenderer` returns early when `renderer` is set, and a renderer whose
+  // context has been lost is still set. Without this it keeps "succeeding" and
+  // every thumbnail after the loss is blank — no exception, nothing logged.
+  //
+  // Contexts are lost for ordinary reasons: the GPU process restarts, the
+  // machine sleeps, or another tab takes the last of the ~16 the browser
+  // allows. `preventDefault` is what makes the loss recoverable at all; the
+  // rest tears down so the next call rebuilds from scratch.
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault()
+    renderer = null
+    scene = null
+    camera = null
+    // The pictures rendered before the loss are still valid data URLs and are
+    // kept. Only the queue's idea of a working renderer is thrown away.
+  })
+
   renderer.setSize(WIDTH, HEIGHT, false)
   renderer.setPixelRatio(2)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -183,6 +201,24 @@ export function thumbnailFor(item: CatalogueItem): Promise<string | null> {
   const work = queue.then(() => render(item)).catch(() => null)
   queue = work
   cache.set(item.id, work)
+
+  // ── A failure is not an answer, so it is not kept ────────────────────────
+  // This cache used to hold failures for the life of the page. `render`
+  // returns null for transient reasons as well as permanent ones — most of
+  // all `upgradeModels`, which fetches real GLBs over the network, and a lost
+  // WebGL context, which blanks the renderer without throwing anywhere useful.
+  //
+  // Cached, one bad moment removed that item's picture until the next reload,
+  // and reloading is what made it come back — which is exactly the symptom
+  // seen: a catalogue that has thumbnails on one load and not the next, with
+  // nothing in the console either time.
+  //
+  // Successes are still cached forever; there is nothing to invalidate. Only
+  // the nulls are dropped, so the next panel that asks tries again.
+  void work.then((result) => {
+    if (result === null && cache.get(item.id) === work) cache.delete(item.id)
+  })
+
   return work
 }
 

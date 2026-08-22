@@ -2,7 +2,7 @@ import type { Floor, Plan, Room, Vec2 } from './types'
 import { activeFloor, vertexAt, wallAt } from './planStore'
 import { detectRooms, displayName } from './rooms'
 import { add, distance, normalise, perpendicular, scale, snapToAxis, snapToGrid, sub } from './geometry'
-import { formatArea, formatLength, type UnitSystem } from '../lib/format'
+import { DEFAULT_UNITS, formatArea, formatLength, type UnitSystem } from '../lib/format'
 import type { ProposedWall } from './detections'
 import type { CatalogueItem, PlacedObject } from '../catalogue/types'
 import { itemById } from '../catalogue/items'
@@ -64,7 +64,7 @@ export class PlanCanvas {
   private plan: Plan
   private rooms: Room[] = []
   private tool: Tool = 'wall'
-  private units: UnitSystem = 'imperial'
+  private units: UnitSystem = DEFAULT_UNITS
   private selection: Selection | null = null
 
   private view: ViewState = { zoom: 40, centre: { x: 0, y: 0 } }
