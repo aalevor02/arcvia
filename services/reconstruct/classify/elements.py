@@ -254,9 +254,19 @@ class Verdict:
     alternatives: list[tuple[str, float]] = field(default_factory=list)
     signals: dict = field(default_factory=dict)
 
+    #: The architect's label and the room disagree. Set when a named item stood
+    #: in a room whose prior would have argued against it — see the room-prior
+    #: loop. Always a review case, whatever the margin says, because the two
+    #: most reliable signals in the file are pointing different ways.
+    contested: bool = False
+
     @property
     def needs_review(self) -> bool:
-        return self.label == "unknown" or self.margin < REVIEW_MARGIN
+        return (
+            self.label == "unknown"
+            or self.margin < REVIEW_MARGIN
+            or self.contested
+        )
 
     def as_dict(self) -> dict:
         return {
@@ -373,6 +383,7 @@ def classify_footprint(
     signals["context"] = {"room": room_name, "kind": room_kind,
                           "againstWall": against_wall}
 
+    contested = False
     for item_id in list(scores):
         # A featureless rectangle is not evidence of a rug — see
         # _FOOTPRINT_UNINFERABLE. Only the architect's own label produces these.
@@ -380,7 +391,34 @@ def classify_footprint(
             scores[item_id] = 0.0
             continue
 
-        scores[item_id] *= priors.get(item_id, 1.0) * _LAYER_WEIGHT.get(layer_kind, 1.0)
+        prior = priors.get(item_id, 1.0)
+
+        # ── The room may argue with the architect. It may not overrule him ──
+        # This module's own ordering puts the written label FIRST and the room
+        # LAST: "a plan says what is in it three ways, in descending
+        # reliability". The prior was inverting that. Measured on a real
+        # drawing, the same block —
+        #
+        #     'double bed', 2.10 x 1.80, named bed-queen by the kernel
+        #
+        # — resolves to `bed-queen` in a BED ROOM and to `unknown` in an
+        # `Enclosed Balcony`, because that room classifies as outdoor and the
+        # outdoor prior takes the raw score under the floor. The architect wrote
+        # "double bed" on it. Dropping it is not caution, it is preferring our
+        # room guess to his label, and this villa is exactly where that guess is
+        # weakest — an *enclosed* balcony is not obviously outdoors.
+        #
+        # So a prior below 1.0 no longer applies to the item the drawing NAMED.
+        # It still applies to every rival, so the room keeps all of its power to
+        # decide BETWEEN candidates; it simply cannot veto the only one with a
+        # label. And the disagreement is recorded rather than smoothed over:
+        # `contested` forces review, so this shows up as "check this" instead of
+        # either a silent drop or a silent placement.
+        if item_id == named and prior < 1.0:
+            contested = True
+            prior = 1.0
+
+        scores[item_id] *= prior * _LAYER_WEIGHT.get(layer_kind, 1.0)
 
         # Depth-to-wall items — counters, wardrobes, TV units — are defined by
         # being against something. Free-standing ones mostly are not.
@@ -408,7 +446,7 @@ def classify_footprint(
     if raw_top < MIN_RAW_SCORE or top < MIN_SCORE:
         return Verdict(
             label="unknown", score=top, margin=top - runner,
-            alternatives=normalised[:4], signals=signals,
+            alternatives=normalised[:4], signals=signals, contested=contested,
         )
 
     return Verdict(
@@ -418,4 +456,5 @@ def classify_footprint(
         margin=top - runner,
         alternatives=normalised[:4],
         signals=signals,
+        contested=contested,
     )
