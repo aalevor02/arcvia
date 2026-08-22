@@ -467,6 +467,34 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     floor gets the same texel budget as a doorknob — but it is correct, and
     correctness was the thing missing. Area-weighted allocation is the obvious
     next improvement.
+
+    ── The empty cell is real, and the obvious fix is worse ─────────────────
+    Every Arcvia GLB has exactly three meshes (walls, floors, fixtures), and
+    ceil(sqrt(3)) = 2, so this always builds a 2x2 grid and always leaves one
+    cell of four untouched. Measured across atlas sizes, the top-right quadrant
+    is 0.00% covered every time. The waste is 1 - n/ceil(sqrt(n))^2 = 25%, by
+    construction, on every bake this pipeline will ever do.
+
+    The tempting fix is a 3x1 strip, which would use the whole atlas. Do not do
+    it. The UV transform below scales u and v by the SAME factor, which is what
+    keeps texel density isotropic. A non-square cell needs a per-axis scale,
+    and stretching a smart_project island into a 1/3 x 1 rectangle gives 3:1
+    anisotropic texels — lighting three times coarser along one axis. Judged by
+    the worse axis, effective resolution per object falls from (1/2)^2 to
+    (1/3)^2. Coverage rises to 100% and usable resolution drops by more than the
+    25% recovered.
+
+    So the empty cell is a symptom of uniform square allocation, not a packing
+    bug to be patched. The cure is the area-weighted allocation named above,
+    which fixes the doorknob problem and the empty cell together.
+
+    ── Coverage is not comparable across atlas sizes ────────────────────────
+    Measured 40.5% / 21.7% / 11.3% at 512 / 1024 / 2048. Lit texels scale with
+    the SIDE rather than the area because `bakeMargin` dilates every island by a
+    fixed 8 texels — a large fraction of a 512 atlas and a small one of a 2048.
+    True island coverage is about 11%; the small-atlas figures are flattered by
+    margin bleed. Going 1024 -> 2048 costs 3x the bake time and 4x the memory
+    for roughly 2x the usable texel budget.
     """
     import math
 

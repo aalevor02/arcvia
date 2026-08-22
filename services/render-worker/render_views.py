@@ -195,7 +195,8 @@ def inspect_frame(path: Path) -> dict:
         bpy.data.images.remove(img)
 
 
-def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool) -> dict | None:
+def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool,
+               line_art: bool = False) -> dict | None:
     target = out_dir / f"{stem}.{view['id']}.png"
     if target.exists():
         print(f"ARCVIA_SKIP:{target}")
@@ -225,7 +226,16 @@ def render_one(view: dict, out_dir: Path, stem: str, want_aov: bool) -> dict | N
 
     stats = inspect_frame(target)
     suspect = []
-    if stats.get("blown", 0) >= BLOWN_LIMIT:
+    # Brightness says nothing about a line drawing. `cad` and `sketch` are thin
+    # dark lines on white paper and measure 96% and 95% blown while being
+    # entirely correct — 94 and 97 distinct tones, more edge content than the
+    # shaded styles. Judging them by a photoreal exposure rule reports every
+    # good frame as broken, which is worse than not checking: a warning that
+    # always fires on a whole style teaches the reader to ignore all of them.
+    #
+    # The tone count still applies. A line style with almost no tones has no
+    # linework in it, which is a real failure and the one worth catching here.
+    if not line_art and stats.get("blown", 0) >= BLOWN_LIMIT:
         suspect.append(f"{stats['blown'] * 100:.0f}% blown out")
     if stats.get("tones", 999) < MIN_TONES:
         suspect.append(f"only {stats['tones']} distinct tones")
@@ -285,7 +295,8 @@ def main():
     done = []
     for i, view in enumerate(views):
         print(f"ARCVIA_VIEW:{i + 1}/{len(views)} {view['id']}")
-        result = render_one(view, out_dir, stem, args.aov)
+        result = render_one(view, out_dir, stem, args.aov,
+                            line_art=bool(applied.get("freestyle")))
         if result:
             done.append(result)
 
