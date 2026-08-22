@@ -66,9 +66,16 @@ def render_plan(model: dict, out_path: str | Path, title: str | None = None) -> 
     walls = model["elements"]["walls"]
     spaces = model["elements"].get("spaces", [])
     openings = model["elements"].get("openings", [])
+    # A plan is one floor. `elements.fixtures` covers every storey in the
+    # building while `walls` and `spaces` above are the primary one, so drawing
+    # the list unfiltered would lay the lower ground floor's beds over the
+    # ground floor's rooms — on the villa, 30 fixtures on a plan that holds 12.
+    # `storeys.primary` says which floor the walls belong to; a single-storey
+    # model has no such key and every fixture defaults into the drawing.
+    primary = (model.get("storeys") or {}).get("primary", 0)
     fixtures = [
         f for f in model["elements"].get("fixtures", [])
-        if f.get("label") == "fixture"
+        if f.get("label") == "fixture" and f.get("storey", primary) == primary
     ]
 
     # Bounds must cover everything DRAWN, not just the walls. Sizing the frame
