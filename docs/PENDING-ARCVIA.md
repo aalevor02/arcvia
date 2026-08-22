@@ -319,7 +319,28 @@ Measured on the villa across that fix:
 Coverage at 86% is better and not yet good. Check it on the drawing you are
 importing before deciding the front door is safe for that drawing.
 
-**Lightmap bake has no UI — 3–4 d.** API and worker both already exist.
+~~**Lightmap bake has no UI — 3–4 d.**~~ ✅ **It has one. It always did.**
+`SceneView.tsx` carries the preset, `handleBake()` exports the GLB with prebaked
+UVs, uploads, submits, polls, records `bakedUrl` **on the scene** (not just on
+screen — a published walkthrough cannot reach render-job records), applies the
+atlas and flips `setBakedLighting`. The waiting state already does the one thing
+that is easy to get wrong: **when `progress` is 0 it shows elapsed time
+instead**, with a comment saying why — *"a bake reports no progress at all,
+Blender's bake is one atomic call… showing 0% for six minutes reads as a hang."*
+It also warns when Cycles has fallen back to the CPU, which explains
+essentially every "why is this so slow" question.
+
+⚠ **This is the third roadmap entry in one day that described something already
+built.** Clearance checking was written, tested and working; the studio's GLB
+project-start existed; the bake UI is complete. In each case the entry was
+written from an earlier state of the code and never revised, and in each case
+someone was about to spend days rebuilding it.
+
+**Before starting any item in this document, go and look.** The engine and the
+studio have both moved further than the roadmap records, and the cost of
+checking is minutes against days. The corollary is the one already at trap 6:
+this codebase's real defect is not missing features, it is finished features
+nothing reaches.
 
 ### The Validate stage — nothing in it exists at all
 
@@ -357,9 +378,41 @@ Two things it found that outlive it:
 
 ### Deliver — the biggest gap between "works" and "sellable"
 
-Publisher app (15–20 d) · configurator, object and material switching (8–12 d) ·
+~~Publisher app (15–20 d)~~ ✅ **The loop is closed — DWG to a shareable link.**
+`c37619d` (publications store + the visualisation app loading by slug),
+`e369010` (composer + `@arcvia/publication`), `f4f3894` (the screen). Driven in
+a browser against a fresh API and database rather than asserted: compose → a
+room schedule read from the wall graph and printed on a client-facing page →
+publish → `/p/riverside-villas/`, serving that project with no trace of any
+other.
+
+**Still to build:** configurator, object and material switching (8–12 d) ·
 client comments (5–7 d) · per-scene branding (2–3 d) · PDF summary of chosen
 options (3–4 d).
+
+⚠ **Two things the publisher surfaced that are NOT fixed:**
+
+1. **Every published project shares the same social card.**
+   `apps/visualisation/index.html` was one client's — hard-coded title,
+   description, Open Graph tags, and a `noscript` block carrying a developer's
+   phone number. The markup is neutral now and the tags are filled in at run
+   time, **but a crawler does not run JavaScript.** WhatsApp and Slack read the
+   static file, and that file's own comment records that these pages *"get
+   shared by WhatsApp more than by any other route"* — so the commonest path is
+   the broken one, and a visitor to client B's link still sees a card
+   advertising client A's development. Fixing it needs `/p/<slug>/` served by
+   something that injects the tags before the HTML leaves the server.
+   Architectural, not an oversight.
+
+2. **`totalSbua` is not a super built-up area, and a buyer will read it as
+   one.** The composer sums measured floor areas because the published model
+   defines it that way — but rooms are bounded faces of the wall graph, so those
+   polygons run along **centrelines**: carpet plus roughly half of every wall. A
+   certified SBUA is a commercial figure, typically 1.2–1.5× carpet, and is
+   **not derivable from a drawing at all.** A warning naming the figure and the
+   unit type fires on every compose and the studio lists it before anything can
+   be published — which is why the publisher is noisy, is correct, and should
+   not be quietened without a real SBUA source.
 
 ### Operations
 
