@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  ApiError,
   createScene,
   deleteScene,
   duplicateScene,
   listScenes,
+  siteOrigin,
   uniqueName,
   type SceneListItem,
 } from '../lib/api'
@@ -13,6 +15,15 @@ type Sort = 'modified' | 'name'
 
 interface Props {
   onOpen(id: string, start?: ProjectStart): void
+  /**
+   * Open the publisher.
+   *
+   * A separate destination rather than an action on a project, because a
+   * published site is made of several of them — putting it on a row would
+   * imply one building is one client site, which is the misunderstanding the
+   * publisher exists to fix.
+   */
+  onPublish(): void
 }
 
 /**
@@ -22,7 +33,7 @@ interface Props {
  * actions, with search and sort) because that is a good design for the job, and
  * because anyone moving between the two products should not have to relearn it.
  */
-export default function Dashboard({ onOpen }: Props) {
+export default function Dashboard({ onOpen, onPublish }: Props) {
   const [scenes, setScenes] = useState<SceneListItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -31,6 +42,14 @@ export default function Dashboard({ onOpen }: Props) {
   const [dialog, setDialog] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  /**
+   * True when the list failed because the session is gone, not because the
+   * request failed.
+   *
+   * Worth distinguishing: everything else is worth retrying, and this one
+   * cannot be — there is no sign-in form in the studio and there should not be.
+   */
+  const [signedOut, setSignedOut] = useState(false)
 
   const refresh = () =>
     listScenes()
@@ -38,7 +57,14 @@ export default function Dashboard({ onOpen }: Props) {
         setScenes(list)
         setError(null)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load projects.'))
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Could not load projects.')
+        setSignedOut(err instanceof ApiError && err.status === 401)
+        // Stop the list loading. Leaving `scenes` null renders "Loading…"
+        // underneath the error forever, which tells the user two different
+        // things at once — the request is still going, and it already failed.
+        setScenes([])
+      })
 
   useEffect(() => {
     void refresh()
@@ -113,9 +139,14 @@ export default function Dashboard({ onOpen }: Props) {
                 Pick up where you left off, or start something new.
               </p>
             </div>
-            <button className="btn btn-primary" onClick={() => setDialog(true)}>
-              + Create new project
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={onPublish}>
+                Publish a site
+              </button>
+              <button className="btn btn-primary" onClick={() => setDialog(true)}>
+                + Create new project
+              </button>
+            </div>
           </div>
 
           <div className="search">
@@ -129,9 +160,23 @@ export default function Dashboard({ onOpen }: Props) {
           </div>
 
           {error && (
-            <p className="alert alert-error" role="alert" style={{ marginTop: 16 }}>
-              {error}
-            </p>
+            <div className="alert alert-error" role="alert" style={{ marginTop: 16 }}>
+              <p style={{ margin: 0 }}>{error}</p>
+              {/*
+                Sign-in lives on the marketing site, deliberately — one flow,
+                one place for reset and rate limiting, and the hand-off carries
+                the session back here. But a message saying "sign in again"
+                with nothing to click is a dead end, because there is no form
+                on this origin and no way for the user to know that.
+              */}
+              {signedOut && (
+                <p style={{ margin: '8px 0 0' }}>
+                  <a className="btn btn-primary" href={`${siteOrigin()}/login/`}>
+                    Sign in
+                  </a>
+                </p>
+              )}
+            </div>
           )}
 
           <div className="table">

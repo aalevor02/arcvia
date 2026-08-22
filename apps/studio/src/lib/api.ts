@@ -1,5 +1,6 @@
 import type { Plan } from '../plan/types'
 import type { Credit } from '../catalogue/credits'
+import type { Project } from '@arcvia/publication'
 import type { SceneView, Hotspot, Branding } from '../plan/presentation'
 
 /**
@@ -490,3 +491,67 @@ export async function uploadCapture(dataUrl: string): Promise<StoredFile> {
 /** The photoreal styles the server will accept. */
 export const renderStyles = () =>
   request<{ styles: { id: string; name: string }[] }>('/render/styles').then((r) => r.styles)
+
+// ---- Publications ----------------------------------------------------------
+
+/**
+ * A project site: several scenes, the copy around them, and one client link.
+ *
+ * Separate from a scene because it is a different unit of work. A scene is one
+ * building; a publication is the thing an architect actually hands over, and it
+ * usually contains four or five of them plus everything a scene knows nothing
+ * about — who is selling it, what it is called, and what the disclaimer says.
+ */
+export interface PublicationListItem {
+  id: string
+  name: string
+  slug: string
+  published: boolean
+  publishedAt: string | null
+  createdAt: string
+  updatedAt: string
+  /** How many unit types are composed into it, for a dashboard row. */
+  unitTypes: number
+  hasProject: boolean
+}
+
+export interface Publication extends Omit<PublicationListItem, 'unitTypes' | 'hasProject'> {
+  /** The whole client-facing payload, frozen when it was last composed. */
+  project: Project | null
+}
+
+export const listPublications = () =>
+  request<{ publications: PublicationListItem[] }>('/publications/').then((r) => r.publications)
+
+export const createPublication = (name: string) =>
+  request<{ publication: PublicationListItem }>('/publications/', {
+    method: 'POST',
+    body: { name },
+  }).then((r) => r.publication)
+
+export const getPublication = (id: string) =>
+  request<{ publication: Publication }>(`/publications/${id}`).then((r) => r.publication)
+
+export const updatePublication = (id: string, patch: { name?: string; project?: Project }) =>
+  request<{ publication: Publication }>(`/publications/${id}`, {
+    method: 'PATCH',
+    body: patch,
+  }).then((r) => r.publication)
+
+/**
+ * Publish, and get back the link a client opens.
+ *
+ * Separate from `updatePublication` for the same reason `publishScene` is
+ * separate from `updateScene`: it is not an edit. It changes who can see the
+ * project, and it is the one action here with consequences outside the account.
+ */
+export const publishPublication = (id: string) =>
+  request<{ publication: Publication; url: string }>(`/publications/${id}/publish`, {
+    method: 'POST',
+  })
+
+export const unpublishPublication = (id: string) =>
+  request<{ publication: Publication }>(`/publications/${id}/unpublish`, { method: 'POST' })
+
+export const deletePublication = (id: string) =>
+  request<void>(`/publications/${id}`, { method: 'DELETE' })

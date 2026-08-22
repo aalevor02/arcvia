@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Dashboard from './screens/Dashboard'
 import PlanEditor from './screens/PlanEditor'
+import Publisher from './screens/Publisher'
 import { getToken, getUser, redeemHandoff } from './lib/api'
 
 /**
@@ -19,6 +20,7 @@ import { getToken, getUser, redeemHandoff } from './lib/api'
 type Route =
   | { screen: 'dashboard' }
   | { screen: 'editor'; sceneId: string; start?: string }
+  | { screen: 'publisher' }
 
 /**
  * In-flight hand-off redemptions, keyed by ticket.
@@ -30,6 +32,7 @@ const pending: Record<string, Promise<boolean>> = {}
 
 function readRoute(): Route {
   const params = new URLSearchParams(window.location.search)
+  if (params.get('publish') !== null) return { screen: 'publisher' }
   const sceneId = params.get('scene')
   if (!sceneId) return { screen: 'dashboard' }
   return { screen: 'editor', sceneId, start: params.get('start') ?? undefined }
@@ -92,6 +95,8 @@ export default function App() {
       const params = new URLSearchParams({ scene: next.sceneId })
       if (next.start) params.set('start', next.start)
       url += `?${params}`
+    } else if (next.screen === 'publisher') {
+      url += '?publish'
     }
     window.history.pushState(null, '', url)
     setRoute(next)
@@ -112,12 +117,32 @@ export default function App() {
 
   if (!getToken() || !getUser()) return <SignedOut />
 
-  return route.screen === 'editor' ? (
-    <PlanEditor
-      sceneId={route.sceneId}
-      start={route.start}
-      onBack={() => navigate({ screen: 'dashboard' })}
-    />
+  if (route.screen === 'editor') {
+    return (
+      <PlanEditor
+        sceneId={route.sceneId}
+        start={route.start}
+        onBack={() => navigate({ screen: 'dashboard' })}
+      />
+    )
+  }
+
+  return route.screen === 'publisher' ? (
+    <div className="dashboard">
+      <header className="topbar">
+        <span className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            A
+          </span>
+          Arcvia Studio
+        </span>
+        <span className="spacer" />
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          {getUser()?.email}
+        </span>
+      </header>
+      <Publisher onBack={() => navigate({ screen: 'dashboard' })} />
+    </div>
   ) : (
     <div className="dashboard">
       <header className="topbar">
@@ -134,6 +159,7 @@ export default function App() {
       </header>
       <Dashboard
         onOpen={(sceneId, start) => navigate({ screen: 'editor', sceneId, start })}
+        onPublish={() => navigate({ screen: 'publisher' })}
       />
     </div>
   )
