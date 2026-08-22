@@ -356,6 +356,34 @@ def reconstruct(
 
     storeys = register_storeys(frames, rise=height + 0.3)
 
+    # ── Frame selection: TRIED, MEASURED, AND REVERTED ──────────────────────
+    # The obvious next step, now that storeys are named, is to default to the
+    # GROUND floor rather than to `frames[0]` — which is whichever cluster
+    # carries the most wall segments, a guess on a sheet with 37 drawings.
+    # It is a better reason. It produces a worse building.
+    #
+    # Measured on the villa. Switching the default from frame 0 ('Lower Ground
+    # Floor Plan') to frame 1 ('Ground Floor Plan') moves the per-frame layer
+    # scan onto a different answer — `A1 WALLS HIDDEN + A7 COMPOUND WALL`
+    # instead of `A1 WALLS HIDDEN + A5 FALSE CEILING` — and the result collapses:
+    #
+    #     frame 0 (lower ground)   146 walls   23 rooms   252.76 m2
+    #     frame 1 (ground)          58 walls    5 rooms   296.87 m2, of which
+    #                                                     ONE room is 274.84 m2
+    #
+    # A 274 m2 'LIVING / DINING' is a plan whose partitions did not close. So the
+    # ground-floor frame reconstructs badly for a reason that has nothing to do
+    # with which frame is the right one to pick: `solve/layerscan.py` chooses
+    # wrongly for it. Changing the default before fixing that trades a guess with
+    # a good outcome for a justified choice with a bad one.
+    #
+    # Recorded rather than silently dropped, because the finding is the useful
+    # part: **the layer scan gets frame 1 of the villa wrong**, and that is worth
+    # more than the selection change was. Do not re-attempt this until it is
+    # fixed, and when you do, measure rooms and enclosed area, not just which
+    # frame got chosen — the reason this was caught is that the second column
+    # was there.
+
     def _labels_in(a, b, c, d):
         return [
             lb for lb in blk.room_labels(doc, scale, (ox, oy))
