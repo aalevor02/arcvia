@@ -373,6 +373,36 @@ ok("shifted by exactly the base",
 ok("and it does not sink through its own floor",
    min(upper_z) >= 3.0 - 1e-9, f"{min(upper_z):.3f}")
 
+# Storeys are drawn SIDE BY SIDE on the sheet and have to be superimposed, so
+# the other half of placing one is a shift in plan. Plan (x, y) maps to glTF
+# (x, -z), and the sign on that third component is exactly the kind of thing
+# that translates a building the wrong way with nothing to show for it.
+shifted = MeshBuilder()
+build_walls(shifted, walls, [], height=2.7)
+before = list(shifted.positions)
+normals_before = list(shifted.normals)
+shifted.translate_plan(10.0, -4.0)
+ok("a plan shift moves x by +dx and glTF z by -dy",
+   all(abs(a[0] + 10.0 - b[0]) < 1e-9 and abs(a[2] + 4.0 - b[2]) < 1e-9
+       for a, b in zip(before, shifted.positions)),
+   f"{before[0]} -> {shifted.positions[0]}")
+ok("and leaves height alone",
+   all(abs(a[1] - b[1]) < 1e-9 for a, b in zip(before, shifted.positions)))
+ok("and does not rotate anything",
+   shifted.normals == normals_before)
+
+merged = MeshBuilder()
+build_walls(merged, walls, [], height=2.7)
+count = len(merged.positions)
+second = MeshBuilder()
+build_walls(second, walls, [], height=2.7, base_z=3.0)
+merged.merge(second)
+ok("merging two storeys keeps every vertex",
+   len(merged.positions) == count * 2, str(len(merged.positions)))
+ok("and re-bases the indices so the second storey is not drawn at the first",
+   max(merged.indices) == len(merged.positions) - 1,
+   f"max index {max(merged.indices)} of {len(merged.positions)}")
+
 # An opening's lintel has to rise with the storey too — a head height measured
 # from the wall's own base, not from the world.
 lintel_ground = build_walls(MeshBuilder(), walls, [window], height=2.7)

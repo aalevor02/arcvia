@@ -45,6 +45,30 @@ class MeshBuilder:
         self.normals: list[tuple[float, float, float]] = []
         self.indices: list[int] = []
 
+    def translate_plan(self, dx: float, dy: float) -> None:
+        """
+        Shift this whole mesh by a distance measured in PLAN coordinates.
+
+        Named for the coordinate system on purpose. Plan (x, y) maps to glTF
+        (x, -z) — see `add_box_from_segment` — so a plan shift of (dx, dy) is a
+        glTF shift of (dx, 0, -dy), and the sign on the third component is the
+        kind of thing that produces a building translated the wrong way with
+        nothing to show for it. Getting the vertical axis wrong once tonight
+        (glTF is Y-up; `positions[2]` is depth, not height) is why this is a
+        method with a name rather than a loop at the call site.
+        NORMALS ARE UNCHANGED: translation does not rotate anything.
+        """
+        if not dx and not dy:
+            return
+        self.positions = [(x + dx, y, z - dy) for x, y, z in self.positions]
+
+    def merge(self, other: "MeshBuilder") -> None:
+        """Absorb another mesh, re-basing its indices onto ours."""
+        base = len(self.positions)
+        self.positions.extend(other.positions)
+        self.normals.extend(other.normals)
+        self.indices.extend(i + base for i in other.indices)
+
     def add_quad(self, p0, p1, p2, p3) -> None:
         """One planar face, wound counter-clockwise seen from outside."""
         ux, uy, uz = (p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2])

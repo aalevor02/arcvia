@@ -201,6 +201,7 @@ def reconstruct(
     with_fixtures: bool = True,
     auto_layers: bool = False,
     with_perimeter: bool = True,
+    with_storeys: bool = False,
 ) -> dict:
     """
     Drawing -> walls, rooms, openings, fixtures -> GLB.
@@ -526,7 +527,45 @@ def reconstruct(
             "builds": (wall_build, slab_build, fixture_build),
         }
 
-    storey = _solve_frame(walls, (x0, y0, x1, y1))
+    # ---- One storey, or all of them ----------------------------------------
+    # Opt-in, because a two-storey model is a different artefact from what every
+    # consumer downstream currently expects — `storey0` is assumed by the plan
+    # SVG, the camera solver, the BOQ and the viewer alike. Off by default until
+    # each of those has been through.
+    #
+    # ── The registration datum, which is a CHOICE and is reported ───────────
+    # The storeys are drawn SIDE BY SIDE on the sheet and have to be
+    # superimposed. Aligning the minimum corner of each frame's bbox is the
+    # simplest datum that works, and on the villa it is exact: both storeys
+    # share x0 = 90.63 and are 20.82 m wide to the centimetre.
+    #
+    # It is NOT right in general. A storey with a setback has a different
+    # minimum corner, and aligning corners would slide it against the floor
+    # below by exactly the setback. A structural-grid correlation is the real
+    # answer. Until that exists the offset is recorded per storey in the model
+    # so a wrong stack can be SEEN rather than merely looked at — a
+    # mis-registered building renders perfectly plausibly.
+    solved: list[tuple] = []
+    stack = storeys.stacks[0] if (with_storeys and storeys.stacks) else []
+
+    if stack:
+        datum = frames[min(stack, key=lambda s: abs(s.level)).frame_index].bbox
+        for level in stack:
+            frame = frames[level.frame_index]
+            frame_walls = [all_walls[i] for i in frame.wall_indices]
+            result = _solve_frame(frame_walls, frame.bbox, base_z=level.base_z)
+            shift = (datum[0] - frame.bbox[0], datum[1] - frame.bbox[1])
+            for mesh in result["meshes"]:
+                mesh.translate_plan(*shift)
+            solved.append((level, result, shift))
+
+        # The ground floor is the storey whose statistics stand for the
+        # building — it is what a person means by "the plan" and what the site
+        # is measured from.
+        storey = min(solved, key=lambda item: abs(item[0].level))[1]
+    else:
+        storey = _solve_frame(walls, (x0, y0, x1, y1))
+
     walls = storey["walls"]
     rooms = storey["rooms"]
     holes = storey["holes"]
@@ -541,9 +580,39 @@ def reconstruct(
     wall_build, slab_build, fixture_build = storey["builds"]
 
 
+    # three.js sanitises node names, so `storey0/walls` loads as `storey0walls`.
+    # The underscore is load-bearing.
     meshes = {"storey0_walls": wall_mesh, "storey0_floors": floor_mesh}
     if fixture_build["fixtures"]:
         meshes["storey0_fixtures"] = fixture_mesh
+
+    storey_report: list[dict] = []
+    if solved:
+        meshes = {}
+        # Numbered from the bottom of the stack, so storey0 is the lowest thing
+        # in the building and not whichever frame happened to be first.
+        for n, (level, result, shift) in enumerate(
+            sorted(solved, key=lambda item: item[0].level)
+        ):
+            w_mesh, f_mesh, x_mesh = result["meshes"]
+            w_build, s_build, x_build = result["builds"]
+            meshes[f"storey{n}_walls"] = w_mesh
+            meshes[f"storey{n}_floors"] = f_mesh
+            if x_build["fixtures"]:
+                meshes[f"storey{n}_fixtures"] = x_mesh
+            storey_report.append({
+                "storey": n,
+                "level": level.level,
+                "title": level.title,
+                "frame": level.frame_index,
+                "baseZ": round(level.base_z, 3),
+                # The registration offset, recorded because it is a choice and a
+                # wrong one produces a building that renders perfectly.
+                "shift": [round(shift[0], 3), round(shift[1], 3)],
+                "walls": result["wallStats"]["total"],
+                "rooms": result["roomStats"]["count"],
+                "area": result["roomStats"]["totalArea"],
+            })
 
     # The gate. Every failure mode here produces *a building* rather than an
     # error, so the only defence is checking the result against its own input
@@ -586,7 +655,7 @@ def reconstruct(
         # pairs to 5 walls, or a layer choice that fragments a partitions-only
         # plan — which produces a bill of quantities for less building than the
         # client drew. This is the number that moves when that happens.
-        "storeys": storeys.as_dict(),
+        "storeys": {**storeys.as_dict(), "built": storey_report},
         "wallsTotal": len(all_walls),
         "wallsUnframed": len(all_walls) - sum(len(f.wall_indices) for f in frames),
         "framingNote": framing_note or None,
@@ -671,6 +740,15 @@ def _print_build(model: dict) -> None:
         print(f"STOREYS  {len(stack)} storeys of ONE building: {names}")
     for refusal in storey_report.get("refusals", []):
         print(f"STOREYS  ? frames {refusal['frames']}: {refusal['reason']}")
+
+    # What was actually BUILT, which is a different question from what was
+    # detected — detection happens always, building only with --storeys.
+    for built in storey_report.get("built", []):
+        shift = built["shift"]
+        moved = f"  shifted ({shift[0]:+.2f}, {shift[1]:+.2f}) m" if any(shift) else ""
+        print(f"         storey{built['storey']}  z {built['baseZ']:+.1f}  "
+              f"{built['walls']:>4} walls  {built['rooms']:>3} rooms  "
+              f"{built['area']:>7.1f} m2   {built['title']}{moved}")
 
     if model.get("framingNote"):
         print(f"       ! {model['framingNote']}")
@@ -1142,6 +1220,8 @@ def main() -> int:
                    help="Choose wall layers by what they enclose, per frame.")
     b.add_argument("--no-perimeter", action="store_true",
                    help="Do not derive the building envelope.")
+    b.add_argument("--storeys", action="store_true",
+                   help="Build every storey the sheet names, not just one frame.")
 
     R = sub.add_parser("raster", help="A photo or scan of a plan -> walls -> GLB.")
     R.add_argument("--input", required=True, help="PNG, JPG or WebP of a floor plan.")
@@ -1302,6 +1382,7 @@ def main() -> int:
             height=ns.height, frame_index=ns.frame,
             with_fixtures=not ns.no_fixtures, auto_layers=ns.auto_layers,
             with_perimeter=not ns.no_perimeter,
+            with_storeys=ns.storeys,
         )
         _print_build(model)
         return 0
