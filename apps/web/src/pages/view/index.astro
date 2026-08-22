@@ -126,6 +126,18 @@ const title = 'Walkthrough'
         background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
         font-size: 12px; line-height: 1.55; z-index: 2; }
       #credits[hidden] { display: none; }
+
+      #note { position: fixed; right: 18px; bottom: 68px; width: min(360px, 78vw);
+        display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px;
+        background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
+        font-size: 13px; z-index: 2; }
+      #note[hidden] { display: none; }
+      #note textarea, #note input[type='text'] {
+        font: inherit; color: var(--ink); background: #10141b; width: 100%;
+        border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical;
+      }
+      #noteRow { display: flex; align-items: center; gap: 10px; }
+      #noteStatus { color: var(--muted); font-size: 12px; }
       #credits h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
         letter-spacing: .08em; color: var(--muted); font-weight: 600; }
       #credits a { color: inherit; }
@@ -153,7 +165,27 @@ const title = 'Walkthrough'
       <button id="walk" aria-pressed="false">Walk through it</button>
       <button id="fit">Overview</button>
       <button id="creditsToggle" aria-pressed="false" hidden>Credits</button>
+      <button id="noteToggle" aria-pressed="false">Leave a note</button>
     </div>
+
+    <!--
+      The note form. Feedback TO the author, never a message board: nothing a
+      visitor writes here is ever shown to another visitor, which is what makes
+      the endpoint safe to leave open and this panel free of anyone else's text.
+    -->
+    <form id="note" hidden>
+      <strong>Send a note to the architect</strong>
+      <textarea
+        id="noteMessage"
+        rows="4"
+        maxlength="2000"
+        placeholder="Can the kitchen wall move half a metre?"></textarea>
+      <input id="noteName" type="text" maxlength="80" placeholder="Your name (optional)" />
+      <div id="noteRow">
+        <button type="submit" id="noteSend">Send</button>
+        <span id="noteStatus" role="status"></span>
+      </div>
+    </form>
 
     <aside id="credits" hidden>
       <h2>Models</h2>
@@ -286,6 +318,12 @@ const title = 'Walkthrough'
         creditsToggle: must('creditsToggle'),
         views: must('views'),
         spots: must('spots'),
+        note: must('note'),
+        noteToggle: must('noteToggle'),
+        noteMessage: must('noteMessage'),
+        noteName: must('noteName'),
+        noteSend: must('noteSend'),
+        noteStatus: must('noteStatus'),
       }
 
       // Looked up once and shared. The viewer and the walk controller both need
@@ -535,6 +573,60 @@ const title = 'Walkthrough'
         }
         if (branding.hideCredit) document.getElementById('brand')?.remove()
 
+        // ---- Notes to the architect ------------------------------------------
+        // The view the visitor last jumped to rides along with the note, so
+        // "this window feels small" arrives pinned to the Kitchen rather than
+        // to the whole building.
+        let lastViewName = ''
+
+        els.noteToggle.addEventListener('click', () => {
+          const open = els.note.hidden
+          els.note.hidden = !open
+          els.noteToggle.setAttribute('aria-pressed', String(open))
+          if (open) (els.noteMessage as HTMLTextAreaElement).focus()
+        })
+
+        els.note.addEventListener('submit', (event) => {
+          event.preventDefault()
+          const message = (els.noteMessage as HTMLTextAreaElement).value.trim()
+          if (!message) {
+            els.noteStatus.textContent = 'Write the note first.'
+            return
+          }
+          ;(els.noteSend as HTMLButtonElement).disabled = true
+          els.noteStatus.textContent = 'Sending…'
+          void fetch(`${api}/scenes/public/${encodeURIComponent(slug ?? '')}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message,
+              name: (els.noteName as HTMLInputElement).value.trim(),
+              view: lastViewName,
+            }),
+            // Without this, a stalled connection leaves "Sending…" and a
+            // disabled button for as long as the socket dangles — the same
+            // dead-control class as the gate's Open button before b4a114b.
+            signal: AbortSignal.timeout(10_000),
+          })
+            .then(async (response) => {
+              if (response.ok) {
+                ;(els.noteMessage as HTMLTextAreaElement).value = ''
+                els.noteStatus.textContent = 'Sent. The architect will see it.'
+                return
+              }
+              // The server's refusals are written for people — the length
+              // limit, the throttle — so they are shown, not translated.
+              const payload = (await response.json().catch(() => ({}))) as { message?: string }
+              els.noteStatus.textContent = payload.message ?? 'Could not send it. Try again.'
+            })
+            .catch(() => {
+              els.noteStatus.textContent = 'Could not send it. Check your connection.'
+            })
+            .finally(() => {
+              ;(els.noteSend as HTMLButtonElement).disabled = false
+            })
+        })
+
         // ---- Named views ----------------------------------------------------
         const views = scene.views ?? []
         if (views.length > 0) {
@@ -548,6 +640,7 @@ const title = 'Walkthrough'
               // locked, which reads as the view having failed.
               if (walking) els.walk.click()
               viewer.goToView(view)
+              lastViewName = view.name
             })
             els.views.appendChild(button)
           }

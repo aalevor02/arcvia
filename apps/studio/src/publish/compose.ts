@@ -216,6 +216,14 @@ function composeType(input: TypeInput, warnings: string[]): VillaType | null {
     warnings.push(`${name}: no floor-plan drawings yet, so the plan tab will show room schedules only.`)
   }
 
+  // The audit found the published site once drew `renders/undefined-card.webp`
+  // for a type with no renders — the page is fixed to skip missing images, but
+  // a villa CARD with no image at all is still a gap the author should hear
+  // about before a client does.
+  if ((input.renders ?? []).length === 0) {
+    warnings.push(`${name}: no renders chosen, so its card on the published site has no picture.`)
+  }
+
   const walkthrough = scene.modelUrl
     ? {
         model: scene.modelUrl,

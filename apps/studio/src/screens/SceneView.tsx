@@ -23,6 +23,7 @@ import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
 import OptionsPanel from '../components/OptionsPanel'
+import CommentsPanel from '../components/CommentsPanel'
 import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
@@ -742,6 +743,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         />
 
         <OptionsPanel plan={plan} value={options} onSave={updateOptions} />
+
+        <CommentsPanel sceneId={sceneId} />
 
         <PresentationPanel
           viewer={viewerRef.current}

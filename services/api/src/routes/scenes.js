@@ -138,6 +138,7 @@ export async function registerSceneRoutes(app) {
       published: 'use POST /scenes/:id/publish or /unpublish',
       publishedSlug: 'set by publishing',
       protected: 'use the access-code endpoint; the code never leaves the server',
+      comments: 'written by visitors through the public comment endpoint',
       accessCodeHash: 'never accepted from a client',
       floorCount: 'derived from the plan',
       hasPlan: 'derived from the plan',
@@ -287,6 +288,87 @@ export async function registerSceneRoutes(app) {
    * a forwarded link being opened by whoever received it, which is the actual
    * request. It would not stop someone who had already loaded the scene.
    */
+  /**
+   * A visitor leaves a note on a published walkthrough.
+   *
+   * ── Feedback to the author, not a message board ─────────────────────────
+   * Comments are never served back to visitors: the published page is a sales
+   * document, and one buyer's "can this wall move?" is not another buyer's
+   * business. They surface in the studio, to the owner, and nowhere else —
+   * which is also what keeps this endpoint safe to leave unauthenticated:
+   * nothing a visitor writes is ever rendered to anyone but the owner, whose
+   * studio escapes it as text.
+   *
+   * ── Refused, not truncated ──────────────────────────────────────────────
+   * The leads route silently trims long messages, which is fine for a contact
+   * form. A truncated COMPLAINT is worse than none — the author reads half a
+   * concern and answers the wrong thing — so an over-long comment is refused
+   * with the limit stated.
+   */
+  app.post('/public/:slug/comments', async (request, reply) => {
+    const slug = request.params.slug
+    const scene = await db.findOne('scenes', (s) => s.publishedSlug === slug && s.published)
+    if (!scene) {
+      return reply.status(404).send({ message: 'No published walkthrough at this address.' })
+    }
+
+    if (commentThrottled(slug, request.ip)) {
+      return reply.status(429).send({
+        message: 'That is enough notes for now — give the architect a moment to read them.',
+      })
+    }
+
+    const message = String(request.body?.message ?? '').trim()
+    if (!message) return reply.status(400).send({ message: 'Write the note first.' })
+    if (message.length > COMMENT_MAX_LENGTH) {
+      return reply.status(400).send({
+        message: `That note is ${message.length} characters. The limit is ${COMMENT_MAX_LENGTH} — a truncated note would say the wrong thing, so it is refused whole.`,
+      })
+    }
+
+    const comments = scene.comments ?? []
+    if (comments.length >= COMMENTS_PER_SCENE) {
+      // A cap because comments live inside the scene record: an unbounded
+      // array in db.json is a slow-motion outage. Said honestly to the
+      // visitor rather than dropped.
+      return reply.status(409).send({
+        message: 'This walkthrough has reached its comment limit. Contact the developer directly.',
+      })
+    }
+
+    const comment = {
+      id: nanoid(10),
+      name: String(request.body?.name ?? '').trim().slice(0, 80) || null,
+      message,
+      /** Which named view the visitor was looking at, if any. Display text only. */
+      view: String(request.body?.view ?? '').trim().slice(0, 120) || null,
+      at: new Date().toISOString(),
+    }
+
+    recordComment(slug, request.ip)
+    await db.update('scenes', scene.id, { comments: [...comments, comment] })
+    return reply.status(201).send({ received: true })
+  })
+
+  /** The owner reads what visitors left. Newest first — the new note is why they came. */
+  app.get('/:id/comments', { preHandler: requireAuth }, async (request, reply) => {
+    const scene = await owned(request, reply)
+    if (!scene) return
+    return { comments: [...(scene.comments ?? [])].reverse() }
+  })
+
+  app.delete('/:id/comments/:commentId', { preHandler: requireAuth }, async (request, reply) => {
+    const scene = await owned(request, reply)
+    if (!scene) return
+    const comments = scene.comments ?? []
+    const remaining = comments.filter((c) => c.id !== request.params.commentId)
+    if (remaining.length === comments.length) {
+      return reply.status(404).send({ message: 'No such comment.' })
+    }
+    await db.update('scenes', scene.id, { comments: remaining })
+    return reply.status(204).send()
+  })
+
   app.post('/public/:slug/unlock', async (request, reply) => {
     const slug = request.params.slug
 
@@ -334,6 +416,35 @@ const attempts = new Map()
 
 const ATTEMPT_LIMIT = 8
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000
+
+const COMMENT_MAX_LENGTH = 2000
+const COMMENTS_PER_SCENE = 500
+const COMMENT_LIMIT = 5
+const COMMENT_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * Per visitor per walkthrough, same shape as the gate's attempt throttle.
+ * Five notes in ten minutes is a person; fifty is a script.
+ */
+const commentRates = new Map()
+
+function commentThrottled(slug, ip) {
+  const key = `${slug}|${ip}`
+  const record = commentRates.get(key)
+  if (!record) return false
+  if (Date.now() > record.until) {
+    commentRates.delete(key)
+    return false
+  }
+  return record.count >= COMMENT_LIMIT
+}
+
+function recordComment(slug, ip) {
+  const key = `${slug}|${ip}`
+  const record = commentRates.get(key) ?? { count: 0, until: Date.now() + COMMENT_WINDOW_MS }
+  record.count += 1
+  commentRates.set(key, record)
+}
 
 function throttled(slug) {
   const record = attempts.get(slug)

@@ -594,3 +594,27 @@ export const unpublishPublication = (id: string) =>
 
 export const deletePublication = (id: string) =>
   request<void>(`/publications/${id}`, { method: 'DELETE' })
+
+// ---- Visitor comments --------------------------------------------------------
+
+/**
+ * A note a visitor left on the published walkthrough.
+ *
+ * Feedback to the author, never shown to other visitors — which is why these
+ * arrive through their own endpoints rather than riding on the scene record a
+ * PATCH could touch.
+ */
+export interface VisitorComment {
+  id: string
+  name: string | null
+  message: string
+  /** The named view they were looking at, if any. */
+  view: string | null
+  at: string
+}
+
+export const listComments = (sceneId: string) =>
+  request<{ comments: VisitorComment[] }>(`/scenes/${sceneId}/comments`).then((r) => r.comments)
+
+export const deleteComment = (sceneId: string, commentId: string) =>
+  request<void>(`/scenes/${sceneId}/comments/${commentId}`, { method: 'DELETE' })
