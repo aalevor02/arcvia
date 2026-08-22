@@ -88,6 +88,38 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  * leaves a few centimetres spare. So it fits *within* the box, touching on its
  * tightest axis.
  *
+ * ── Scaling each axis to its own target was tried, and is worse ─────────────
+ * The case for it is real: a king-size bed model already at the catalogue's
+ * 0.6 m height cannot grow into a 1.83 m width under a uniform scale, so it
+ * draws 0.91 m wide — a king rendering as a single, in the one dimension a plan
+ * exists to check.
+ *
+ * Implemented and measured, it corrected 29 of 38 footprints and RUINED the
+ * rest, because several models are rotated 90 degrees in plan relative to their
+ * catalogue entry:
+ *
+ *   counter         want 2.40 x 0.60    got 0.60 x 2.40
+ *   wardrobe-small  want 0.90 x 0.60    got 0.90 x 1.62
+ *   wc              want 0.38 x 0.70    got 0.60 x 0.38
+ *
+ * A uniform scale is forgiving of a wrong plan orientation — it under-fills.
+ * A per-axis scale BAKES IT IN, stretching the model along the axes it does not
+ * occupy. So the footprint cannot be made authoritative until plan orientation
+ * is, and the order of work is: measure each asset's yaw the way `upAxis` was
+ * measured, then revisit this.
+ *
+ * ── A warning was tried too, and dropped ────────────────────────────────────
+ * Comparing the model's plan aspect against its slot's does identify assets
+ * that cannot fill their footprint. It fired on 28 of 38 — 74% — because many
+ * catalogue depths are nominal rather than measured: a television is listed at
+ * 60 mm and its model includes a stand, so it reads 5555% out of proportion and
+ * nothing is wrong with either.
+ *
+ * A warning that fires on three quarters of a catalogue is noise, and this
+ * repository already has that lesson written down about render checks: one that
+ * fires on good frames teaches the reader to ignore all of them. The thumbnails
+ * are the better signal, because a person can SEE which assets are wrong.
+ *
  * Then it is centred horizontally and sat on the floor, because the parametric
  * builders all draw upward from y=0 and everything downstream — placement,
  * elevation, wall snapping — assumes that.
@@ -126,16 +158,25 @@ function fit(
    */
   const largest = Math.max(extent.x, extent.y, extent.z)
   const FLAT = 0.02
-  const ratios: number[] = []
-  if (extent.x / largest > FLAT) ratios.push(size.width / extent.x)
-  if (extent.y / largest > FLAT) ratios.push(size.height / extent.y)
-  if (extent.z / largest > FLAT) ratios.push(size.depth / extent.z)
+
+  const carries = {
+    x: extent.x / largest > FLAT,
+    y: extent.y / largest > FLAT,
+    z: extent.z / largest > FLAT,
+  }
 
   // Every axis flat is not a model, it is a point. Leave it alone rather than
-  // scale by an empty minimum, which is Infinity.
-  if (ratios.length === 0) return
+  // divide by nothing.
+  if (!carries.x && !carries.y && !carries.z) return
 
-  const scale = Math.min(...ratios)
+  const own = {
+    x: size.width / extent.x,
+    y: size.height / extent.y,
+    z: size.depth / extent.z,
+  }
+
+  const informed = (['x', 'y', 'z'] as const).filter((axis) => carries[axis])
+  const scale = Math.min(...informed.map((axis) => own[axis]))
   model.scale.setScalar(scale)
 
   // Re-measured after scaling rather than arithmetic on the old box: a model
