@@ -82,6 +82,15 @@ export class WalkController {
     window.addEventListener('pointerup', this.onPointerUp)
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
+    // A held key's `keyup` fires at whatever window has focus. Alt-Tab away
+    // with W down and the release lands in the OTHER application — this window
+    // never hears it, the key stays in the set, and the camera keeps moving
+    // after focus returns. Measured: 109 m travelled and still climbing.
+    // Collision is deliberately absent (see the class comment), so nothing
+    // bounds it, and on a single model the visitor ends up in a black void
+    // outside the building. Clearing the held keys on blur is the fix; the
+    // player simply re-presses when they come back.
+    window.addEventListener('blur', this.onBlur)
 
     this.canvas.style.cursor = 'grab'
     this.lastTime = performance.now()
@@ -98,6 +107,7 @@ export class WalkController {
     window.removeEventListener('pointerup', this.onPointerUp)
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('blur', this.onBlur)
 
     this.keys.clear()
     this.canvas.style.cursor = ''
@@ -146,6 +156,11 @@ export class WalkController {
 
   private onKeyUp = (event: KeyboardEvent): void => {
     this.keys.delete(event.key.toLowerCase())
+  }
+
+  /** Losing keyboard focus means every held key's release will never arrive. */
+  private onBlur = (): void => {
+    this.keys.clear()
   }
 
   private applyRotation(): void {

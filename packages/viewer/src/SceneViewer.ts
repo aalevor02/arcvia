@@ -557,6 +557,21 @@ export class SceneViewer {
     this.camera.rotation.order = 'YXZ'
     this.camera.rotation.set(0, size.x >= size.z ? Math.PI / 2 : 0, 0)
 
+    // ── A near plane for standing in the room, not orbiting it ──────────────
+    // `frameModel` sets `near = distance / 100`, which is scaled to the WHOLE
+    // model's radius — correct for orbiting, and on a real reconstruction that
+    // is 0.25–0.39 m. From inside, a wall 30 cm ahead of the eye is then
+    // clipped away entirely, and `WalkController` deliberately has no collision
+    // so a visitor does walk right up to surfaces: the client's buyer sees
+    // straight through a wall into the next room. 5 cm is closer than anyone
+    // stands to a wall and clears the z-fighting a fixed small near causes on a
+    // big site plan — which is why it belongs on the walking path, not the
+    // orbit one. `frameModel` restores its own values on exit, and both walk
+    // callers (view/index.astro, SceneView) already call it when leaving.
+    this.camera.near = 0.05
+    this.camera.far = Math.max(this.camera.far, 200)
+    this.camera.updateProjectionMatrix()
+
     this.needsRender = true
     return true
   }
