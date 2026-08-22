@@ -95,6 +95,53 @@ export async function registerSceneRoutes(app) {
       'hotspots',
       'branding',
     ]
+    // ── Why this rejects instead of filtering ───────────────────────────────
+    // This used to be `.filter(([k]) => allowed.includes(k))`. A caller sending
+    // an unknown field — a typo, a renamed property, a field added to the client
+    // before the server — got 200 OK and a response that looked like a
+    // successful save, with that field silently gone. The next read returns the
+    // old value, so the symptom is "my change did not stick", arbitrarily far
+    // from the cause.
+    //
+    // It is the same failure this codebase has now hit in five other places in
+    // one day, and the cheapest one to close: a write that is not performed must
+    // not answer 200.
+    //
+    // Separating unknown from read-only is most of the value. "hdriUrl2 is not a
+    // field" and "protected is real but is set elsewhere" send a developer to
+    // completely different places, and a single "invalid field" message sends
+    // them to the wrong one half the time.
+    const readOnly = {
+      id: 'assigned when the scene is created',
+      ownerId: 'assigned from your session',
+      organisationId: 'assigned from your session',
+      createdAt: 'assigned when the scene is created',
+      updatedAt: 'set by the server on every save',
+      published: 'use POST /scenes/:id/publish or /unpublish',
+      publishedSlug: 'set by publishing',
+      protected: 'use the access-code endpoint; the code never leaves the server',
+      accessCodeHash: 'never accepted from a client',
+      floorCount: 'derived from the plan',
+      hasPlan: 'derived from the plan',
+    }
+
+    const sent = Object.keys(request.body ?? {})
+    const unknown = sent.filter((k) => !allowed.includes(k) && !(k in readOnly))
+    const blocked = sent.filter((k) => k in readOnly)
+
+    if (unknown.length || blocked.length) {
+      const problems = [
+        ...unknown.map((k) => `"${k}" is not a scene field`),
+        ...blocked.map((k) => `"${k}" cannot be set here — ${readOnly[k]}`),
+      ]
+      return reply.status(400).send({
+        message: `That save was refused so nothing is silently dropped: ${problems.join('; ')}.`,
+        unknown,
+        readOnly: blocked,
+        writable: allowed,
+      })
+    }
+
     const patch = Object.fromEntries(
       Object.entries(request.body ?? {}).filter(([k]) => allowed.includes(k)),
     )
