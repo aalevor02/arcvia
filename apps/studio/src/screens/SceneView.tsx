@@ -453,7 +453,21 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         environmentUrl: environment,
         surfaces: usedSurfaces(),
       })
-      await updateScene(sceneId, { credits })
+      try {
+        await updateScene(sceneId, { credits })
+      } catch (error) {
+        // Deliberately fatal: publishing without credits is the licence breach
+        // this exists to prevent, so a page that cannot carry them must not go
+        // public. But say WHY — the likely cause is an API older than the
+        // commit that added `credits` to the scenes allow-list, and that route
+        // rejects unknown fields, so the raw message is about a field name and
+        // reads like a client bug.
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new Error(
+          `Could not save attribution, so the scene was not published: ${detail} ` +
+            '(if the API predates the credits change, restart it.)',
+        )
+      }
 
       const { url } = await publishScene(sceneId)
       const absolute = new URL(url, siteOrigin()).toString()
