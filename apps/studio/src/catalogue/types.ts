@@ -125,6 +125,27 @@ export interface AssetModel {
    * So it is one number, set once per asset, by eye. Zero is the common case.
    */
   yaw?: number
+  /**
+   * Which axis the model calls up.
+   *
+   * ── Why this cannot be left to the fit ────────────────────────────────────
+   * glTF is Y-up by specification and a great many models are exported Z-up
+   * anyway, because the tool that made them was. Nothing in the file says so,
+   * and the geometry is valid either way.
+   *
+   * The consequence is not a tilted object, it is a WRONGLY SCALED one. `fit`
+   * divides the catalogue's height by the model's Y extent; on a Z-up model
+   * that Y extent is the object's DEPTH. A rug 12 mm thick and 1.7 m wide was
+   * scaled by 0.012/1.7 and arrived one centimetre across — a valid GLB, no
+   * error, and it reads as a loading bug. The same fault laid a dining chair on
+   * its back and flattened a curtain, a mirror and a wall light.
+   *
+   * Recorded per asset rather than detected, for the reason `yaw` is: it is a
+   * fact about the file that someone can establish once and cheaply, and a
+   * heuristic that is right most of the time is worse than a number, because
+   * the times it is wrong look exactly like the times it is right.
+   */
+  upAxis?: 'y' | 'z'
 }
 
 /** An instance of a catalogue item, placed on a floor. */

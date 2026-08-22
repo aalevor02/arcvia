@@ -92,12 +92,50 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  * builders all draw upward from y=0 and everything downstream — placement,
  * elevation, wall snapping — assumes that.
  */
-function fit(model: THREE.Object3D, size: { width: number; height: number; depth: number }): void {
+function fit(
+  model: THREE.Object3D,
+  size: { width: number; height: number; depth: number },
+  upAxis: 'y' | 'z' = 'y',
+): void {
+  // Stand a Z-up model up BEFORE measuring it. Measuring first and rotating
+  // after would fit the object's depth to the catalogue's height, which is the
+  // bug this exists to remove.
+  if (upAxis === 'z') model.rotation.x = -Math.PI / 2
+
   const box = new THREE.Box3().setFromObject(model)
   const extent = box.getSize(new THREE.Vector3())
   if (extent.x <= 0 || extent.y <= 0 || extent.z <= 0) return
 
-  const scale = Math.min(size.width / extent.x, size.height / extent.y, size.depth / extent.z)
+  /**
+   * ── An axis with no size carries no information about scale ──────────────
+   * A rug, a mirror and a wall light are geometrically flat: 12 mm against a
+   * 2.4 m width. Dividing a near-zero target by a near-zero extent produces a
+   * ratio with no meaning, and `Math.min` then hands the whole model that
+   * ratio. The rug arrived ONE CENTIMETRE ACROSS — a valid GLB, no error, and
+   * it reads as a loading failure rather than a scaling one.
+   *
+   * `condition_asset.py` learned this at ingest in 678a521 and its message
+   * states the rule: "an axis the model has no size on carries no information
+   * about how big it should be, so it now takes no part in the decision."
+   * This function fits AGAIN at run time and never got the same guard, so a
+   * correctly conditioned rug was collapsed on load anyway.
+   *
+   * Flat is a proportion, not a measurement — 12 mm is flat on a rug and is
+   * the whole object on a sheet of paper — so the threshold is relative to the
+   * model's own largest extent, exactly as the ingest-side check does it.
+   */
+  const largest = Math.max(extent.x, extent.y, extent.z)
+  const FLAT = 0.02
+  const ratios: number[] = []
+  if (extent.x / largest > FLAT) ratios.push(size.width / extent.x)
+  if (extent.y / largest > FLAT) ratios.push(size.height / extent.y)
+  if (extent.z / largest > FLAT) ratios.push(size.depth / extent.z)
+
+  // Every axis flat is not a model, it is a point. Leave it alone rather than
+  // scale by an empty minimum, which is Infinity.
+  if (ratios.length === 0) return
+
+  const scale = Math.min(...ratios)
   model.scale.setScalar(scale)
 
   // Re-measured after scaling rather than arithmetic on the old box: a model
@@ -142,13 +180,14 @@ export function upgradeModels(
     // to the placement — it describes the model, not where the user put it, so
     // it must survive the object being rotated.
     const yaw = Number(child.userData.modelYaw ?? 0)
+    const upAxis = child.userData.modelUpAxis === 'z' ? 'z' : 'y'
 
     pending.push(
       prototype(url).then((loaded) => {
         if (!loaded) return false
 
         const instance = loaded.clone(true)
-        fit(instance, size)
+        fit(instance, size, upAxis)
         if (yaw !== 0) {
           // Wrapped, so the correction turns the model about its own centre
           // *after* fitting has seated it. Rotating the fitted object directly

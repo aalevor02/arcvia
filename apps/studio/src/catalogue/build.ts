@@ -505,6 +505,10 @@ export function buildObject(object: PlacedObject, floorElevation: number): THREE
     // Only meaningful for a catalogue model. A per-placement `customUrl` is
     // somebody else's file and the catalogue has no idea which way it faces.
     group.userData.modelYaw = object.customUrl ? 0 : (item.model?.yaw ?? 0)
+    // An uploaded model gets the glTF default. The catalogue records the truth
+    // per asset, because a great many exports are Z-up and nothing in the file
+    // says which.
+    group.userData.modelUpAxis = object.customUrl ? 'y' : (item.model?.upAxis ?? 'y')
   }
 
   // plan (x, y) -> world (x, elevation, -y), the same mapping walls use.

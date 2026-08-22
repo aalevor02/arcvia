@@ -92,6 +92,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'wood',
     model: {
       url: '/models/dining-chair.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'MadeByYeshe',
       source:
@@ -235,6 +237,8 @@ export const CATALOGUE: CatalogueItem[] = [
     note: '5ft × 6ft8in',
     model: {
       url: '/models/bed-queen.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Francesco Coldesina',
       source:
@@ -270,6 +274,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'wood',
     model: {
       url: '/models/bedside.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'patriciu',
       source:
@@ -306,6 +312,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'wood',
     model: {
       url: '/models/wardrobe-small.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Joel.del.Val',
       source:
@@ -482,6 +490,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'white',
     model: {
       url: '/models/wc.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Ekbercg',
       source:
@@ -634,6 +644,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'white',
     model: {
       url: '/models/ceiling-light.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Mark Peters',
       source:
@@ -671,6 +683,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'metal',
     model: {
       url: '/models/wall-light.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'dibyaranjanswain.42005',
       source:
@@ -694,6 +708,8 @@ export const CATALOGUE: CatalogueItem[] = [
     // that is geometrically a rectangle.
     model: {
       url: '/models/rug.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'ChoboiAssets',
       source: 'https://sketchfab.com/3d-models/persian-carpet-4592468c03784f0d895876ec670de1cd',
@@ -765,6 +781,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'glass',
     model: {
       url: '/models/mirror.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'arch.lxt',
       source:
@@ -783,6 +801,8 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'fabric',
     model: {
       url: '/models/curtain.glb',
+      // Measured: its own proportions match the catalogue only when Z is up.
+      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Tesnime Ben Salah',
       source:
