@@ -70,6 +70,7 @@ def build_walls(
     walls,
     openings,
     height: float,
+    base_z: float = 0.0,
 ) -> dict:
     """
     Extrude walls, splitting each around the openings it hosts.
@@ -105,25 +106,25 @@ def build_walls(
                 continue
 
             if start - cursor > 0.01:
-                _segment(mesh, wall, cursor, start, 0.0, height)
+                _segment(mesh, wall, cursor, start, base_z, height)
                 pieces += 1
                 solids += 1
 
             head = hole.sill + hole.height
             if height - head > 0.01:
-                _segment(mesh, wall, start, end, head, height - head)
+                _segment(mesh, wall, start, end, base_z + head, height - head)
                 pieces += 1
                 lintels += 1
 
             if hole.sill > 0.01:
-                _segment(mesh, wall, start, end, 0.0, hole.sill)
+                _segment(mesh, wall, start, end, base_z, hole.sill)
                 pieces += 1
                 aprons += 1
 
             cursor = end
 
         if length - cursor > 0.01:
-            _segment(mesh, wall, cursor, length, 0.0, height)
+            _segment(mesh, wall, cursor, length, base_z, height)
             pieces += 1
             solids += 1
 
@@ -168,7 +169,8 @@ def build_slabs(mesh: MeshBuilder, spaces, base_z: float = 0.0) -> dict:
     return {"slabs": built, "thickness": SLAB_THICKNESS}
 
 
-def build_fixtures(mesh: MeshBuilder, placements, dims: dict) -> dict:
+def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
+                   base_z: float = 0.0) -> dict:
     """
     A box per identified fixture, at the catalogue's own dimensions.
 
@@ -205,7 +207,7 @@ def build_fixtures(mesh: MeshBuilder, placements, dims: dict) -> dict:
         bx = px + math.cos(rot) * w / 2
         by = py + math.sin(rot) * w / 2
 
-        mesh.add_box_from_segment(ax, ay, bx, by, d, h, base_z=base)
+        mesh.add_box_from_segment(ax, ay, bx, by, d, h, base_z=base_z + base)
         built += 1
 
     return {"fixtures": built, "skipped": skipped}

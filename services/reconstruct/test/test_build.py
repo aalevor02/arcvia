@@ -352,6 +352,36 @@ wmesh = MeshBuilder()
 wstats = build_walls(wmesh, walls, [window], height=2.7)
 ok("a window gains an apron below it", wstats["aprons"] == 1, str(wstats["aprons"]))
 
+# ── A storey has to be able to sit somewhere other than zero ────────────────
+# `storey0` is hardcoded through the engine and a house has floors. This is the
+# primitive that has to exist before that can change: the same walls, built at a
+# base. `build_slabs` already took a base_z; `build_walls` and `build_fixtures`
+# did not, so a second storey could not be placed even in principle.
+ground_mesh = MeshBuilder()
+build_walls(ground_mesh, walls, [], height=2.7)
+upper_mesh = MeshBuilder()
+build_walls(upper_mesh, walls, [], height=2.7, base_z=3.0)
+
+ground_z = [p[1] for p in ground_mesh.positions]   # glTF is Y-up: height is p[1]
+upper_z = [p[1] for p in upper_mesh.positions]
+ok("a storey built at a base has the same geometry",
+   len(ground_mesh.positions) == len(upper_mesh.positions))
+ok("shifted by exactly the base",
+   abs((min(upper_z) - min(ground_z)) - 3.0) < 1e-9
+   and abs((max(upper_z) - max(ground_z)) - 3.0) < 1e-9,
+   f"{min(upper_z):.3f}..{max(upper_z):.3f} vs {min(ground_z):.3f}..{max(ground_z):.3f}")
+ok("and it does not sink through its own floor",
+   min(upper_z) >= 3.0 - 1e-9, f"{min(upper_z):.3f}")
+
+# An opening's lintel has to rise with the storey too — a head height measured
+# from the wall's own base, not from the world.
+lintel_ground = build_walls(MeshBuilder(), walls, [window], height=2.7)
+lintel_upper = build_walls(MeshBuilder(), walls, [window], height=2.7, base_z=3.0)
+ok("openings survive being placed at a base",
+   lintel_ground["pieces"] == lintel_upper["pieces"]
+   and lintel_ground["lintels"] == lintel_upper["lintels"],
+   f"{lintel_ground['pieces']} vs {lintel_upper['pieces']}")
+
 unpaired_only = [w for w in walls]
 for w in unpaired_only:
     w.paired = False
