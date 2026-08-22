@@ -148,6 +148,38 @@ export const wallTypeById = (id: WallTypeId | undefined): WallType | undefined =
   id ? WALL_TYPES.find((type) => type.id === id) : undefined
 
 /**
+ * What a floor is finished in.
+ *
+ * ── Why these six ──────────────────────────────────────────────────────────
+ * They are the surfaces a residential drawing actually distinguishes between,
+ * and no more. Timber and tile cover most of the inside; stone is the counter-
+ * and-sill material that also appears as a floor in an entrance; concrete is a
+ * finish in its own right and the honest answer for a garage or a service yard;
+ * paving and grass are what the more-than-half of a site that is outdoors is
+ * made of.
+ *
+ * Deliberately not one entry per product. A finish picker with forty options is
+ * a specification tool, and this is a plan — the question it answers is "is this
+ * room tiled or timber", which changes how the room reads and what it costs.
+ */
+export type FloorFinish =
+  | 'floor-wood'
+  | 'floor-tile'
+  | 'stone'
+  | 'concrete'
+  | 'paving'
+  | 'grass'
+
+export const FLOOR_FINISHES: readonly { id: FloorFinish; name: string }[] = [
+  { id: 'floor-wood', name: 'Timber' },
+  { id: 'floor-tile', name: 'Tile' },
+  { id: 'stone', name: 'Stone' },
+  { id: 'concrete', name: 'Concrete' },
+  { id: 'paving', name: 'Paving' },
+  { id: 'grass', name: 'Grass' },
+]
+
+/**
  * A derived room. Never stored — recomputed from the graph.
  *
  * `id` is deterministic (built from the sorted vertex ids of the cycle) so that
@@ -175,6 +207,23 @@ export interface Floor {
   walls: Record<string, Wall>
   /** User-supplied room names, keyed by the derived room id. */
   roomNames: Record<string, string>
+  /**
+   * Floor finish per room, keyed by the derived room id.
+   *
+   * ── Why per room and not per floor ────────────────────────────────────────
+   * The finish was one setting for the whole scene, so a plan could be entirely
+   * timber or entirely tiled and nothing in between. Every real dwelling mixes
+   * them — a tiled bathroom off a timber bedroom is the normal case, not an
+   * edge one — and the room is the unit people choose a finish for.
+   *
+   * Keyed the same way `roomNames` is, and for the same reason stated there: a
+   * room is derived from the wall graph and has no identity of its own, so
+   * anything a person attaches to one is stored against the hash of its cycle.
+   * Edit an unrelated wall and the hash is unchanged, so the finish stays put.
+   *
+   * Absent means the floor's default, which is what every room had before this.
+   */
+  roomFinishes?: Record<string, FloorFinish>
   /**
    * Furniture, fittings, doors and windows placed on this floor.
    *

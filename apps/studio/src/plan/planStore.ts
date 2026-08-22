@@ -1,4 +1,4 @@
-import type { Floor, Plan, Underlay, Vec2, Wall } from './types'
+import type { Floor, FloorFinish, Plan, Underlay, Vec2, Wall } from './types'
 import { WALL_DEFAULTS } from './types'
 import { closestPointOnSegment, distance, segmentIntersection } from './geometry'
 import type { PlacedObject, Size } from '../catalogue/types'
@@ -425,6 +425,22 @@ export function nameRoom(plan: Plan, roomId: string, name: string): Plan {
     if (trimmed) roomNames[roomId] = trimmed
     else delete roomNames[roomId]
     return { ...floor, roomNames }
+  })
+}
+
+/**
+ * Set or clear a room's floor finish.
+ *
+ * Clearing restores the floor's default rather than storing the default as a
+ * value, so a project-wide change still reaches every room that was never given
+ * one of its own — the same reasoning as clearing a room's name.
+ */
+export function setRoomFinish(plan: Plan, roomId: string, finish: FloorFinish | null): Plan {
+  return withFloor(plan, (floor) => {
+    const roomFinishes = { ...(floor.roomFinishes ?? {}) }
+    if (finish) roomFinishes[roomId] = finish
+    else delete roomFinishes[roomId]
+    return { ...floor, roomFinishes }
   })
 }
 

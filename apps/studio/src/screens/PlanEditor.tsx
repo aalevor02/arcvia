@@ -16,6 +16,7 @@ import {
   loadPlan,
   moveVertex,
   nameRoom,
+  setRoomFinish,
   redo,
   removeFloor,
   removeWall,
@@ -33,15 +34,24 @@ import {
 } from '../plan/planStore'
 import { detectRooms, displayName, totalArea } from '../plan/rooms'
 import {
+  FLOOR_FINISHES,
   WALL_DEFAULTS,
   WALL_TYPES,
   wallTypeById,
+  type FloorFinish,
   type Plan,
   type Underlay,
   type Vec2,
   type WallTypeId,
 } from '../plan/types'
-import { formatArea, formatLength, parseLength, type UnitSystem } from '../lib/format'
+import {
+  formatArea,
+  formatLength,
+  parseLength,
+  readUnitPreference,
+  writeUnitPreference,
+  type UnitSystem,
+} from '../lib/format'
 import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
 import { assessDetection } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
@@ -97,7 +107,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
    * scope is frozen at first render. These keep it honest.
    */
   const toolRef = useRef<Tool>('select')
-  const unitsRef = useRef<UnitSystem>('imperial')
+  const unitsRef = useRef<UnitSystem>(readUnitPreference())
 
   const [scene, setScene] = useState<Scene | null>(null)
   const [history, setHistory] = useState<History>(() => initialHistory(emptyPlan()))
@@ -105,7 +115,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   // Select, because the first thing to do there is bring something in rather
   // than draw over an empty grid.
   const [tool, setTool] = useState<Tool>(start === 'draw' || !start ? 'wall' : 'select')
-  const [units, setUnits] = useState<UnitSystem>('imperial')
+  // Read once, lazily: the initialiser runs on every render otherwise, and
+  // this one touches localStorage.
+  const [units, setUnits] = useState<UnitSystem>(readUnitPreference)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [hint, setHint] = useState('Click to start a wall.')
   const [save, setSave] = useState<SaveState>('idle')
@@ -257,6 +269,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   useEffect(() => {
     unitsRef.current = units
     viewerRef.current?.setUnits(units)
+    // Remembered across projects and reloads. Choosing feet once should not
+    // have to be done again on the next drawing.
+    writeUnitPreference(units)
   }, [units])
   useEffect(() => viewerRef.current?.setSelection(selection), [selection])
   useEffect(() => viewerRef.current?.setProposal(proposal ?? []), [proposal])
@@ -766,6 +781,31 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                   }
                   onBlur={() => setHistory((h) => commit(h, h.present))}
                 />
+              </div>
+              <div className="field">
+                <label htmlFor="room-finish">Floor finish</label>
+                <select
+                  id="room-finish"
+                  value={floor.roomFinishes?.[selectedRoom.id] ?? ''}
+                  onChange={(e) =>
+                    apply((p) =>
+                      setRoomFinish(
+                        p,
+                        selectedRoom.id,
+                        (e.target.value || null) as FloorFinish | null,
+                      ),
+                    )
+                  }
+                >
+                  {/* Empty is not "none" — it is "whatever the project uses",
+                      so a project-wide change still reaches this room. */}
+                  <option value="">Project default</option>
+                  {FLOOR_FINISHES.map((finish) => (
+                    <option key={finish.id} value={finish.id}>
+                      {finish.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="stat">
                 <span className="muted">Area</span>

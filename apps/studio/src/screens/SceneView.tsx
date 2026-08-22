@@ -24,7 +24,7 @@ import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
-import type { Plan } from '../plan/types'
+import { FLOOR_FINISHES, type FloorFinish, type Plan } from '../plan/types'
 
 interface Props {
   plan: Plan
@@ -82,7 +82,14 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [exposure, setExposure] = useState(1)
   const [ceilings, setCeilings] = useState(false)
   const [walking, setWalking] = useState(false)
-  const [finish, setFinish] = useState<'floor-wood' | 'floor-tile'>('floor-wood')
+  /**
+   * The project default, used by every room that has not been given its own.
+   *
+   * Rooms carry their own finish on the floor (`Floor.roomFinishes`), so this
+   * is no longer "the floor finish" — it is the fallback, and changing it still
+   * reaches every room nobody has specified.
+   */
+  const [finish, setFinish] = useState<FloorFinish>('floor-wood')
   const [job, setJob] = useState<{
     status: string
     progress: number
@@ -630,14 +637,20 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         </section>
 
         <section>
-          <span className="eyebrow">Floor finish</span>
+          <span className="eyebrow">Default floor finish</span>
+          <p className="note" style={{ marginBottom: 6 }}>
+            Used by rooms with no finish of their own. Set one per room in the plan.
+          </p>
           <div className="segmented">
-            <button aria-pressed={finish === 'floor-wood'} onClick={() => setFinish('floor-wood')}>
-              Timber
-            </button>
-            <button aria-pressed={finish === 'floor-tile'} onClick={() => setFinish('floor-tile')}>
-              Tile
-            </button>
+            {FLOOR_FINISHES.map((option) => (
+              <button
+                key={option.id}
+                aria-pressed={finish === option.id}
+                onClick={() => setFinish(option.id)}
+              >
+                {option.name}
+              </button>
+            ))}
           </div>
           <p className="muted" style={{ fontSize: 11.5 }}>
             Whole-floor for now. Per-room finishes arrive with the material

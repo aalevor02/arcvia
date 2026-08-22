@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { wallTypeById } from './types'
-import type { Floor, Vec2, WallTypeId } from './types'
+import type { Floor, FloorFinish, Vec2, WallTypeId } from './types'
 import { detectRooms } from './rooms'
 import { distance, dot, normalise, sub } from './geometry'
 import { buildObjects } from '../catalogue/build'
@@ -38,7 +38,7 @@ export interface BuildOptions {
   ceilings?: boolean
   /** Floor finish. Per-room finishes are a materials-editor feature; this is
    *  the whole-floor default until that exists. */
-  floorFinish?: 'floor-wood' | 'floor-tile'
+  floorFinish?: FloorFinish
   /** Skirting boards around each room. On by default — see the build. */
   skirting?: boolean
 }
@@ -76,7 +76,15 @@ export function buildFloorGeometry(
    */
   const materialFor = (wall: { type?: WallTypeId }) =>
     surface(wallTypeById(wall.type)?.surface ?? 'wall')
-  const slabMaterial = surface(floorFinish)
+  /**
+   * The slab material for one room.
+   *
+   * Per room rather than per floor: a tiled bathroom off a timber bedroom is
+   * the normal case in a dwelling, and one setting for the whole scene could
+   * not say it. Falls back to the floor's default, which is what every room
+   * used before finishes could be set individually.
+   */
+  const slabFor = (roomId: string) => surface(floor.roomFinishes?.[roomId] ?? floorFinish)
   const ceilingMaterial = surface('ceiling')
   // Painted timber, not the floor finish: skirting that matches the floor
   // exactly disappears into it, which defeats the point of having it.
@@ -150,7 +158,7 @@ export function buildFloorGeometry(
     })
     shape.closePath()
 
-    const slab = extrudedSlab(shape, slabThickness, slabMaterial)
+    const slab = extrudedSlab(shape, slabThickness, slabFor(room.id))
     slab.position.y = floor.elevation - slabThickness
     slab.name = `slab:${room.id}`
     group.add(slab)
