@@ -261,6 +261,40 @@ undivided session.
 - **~44% wall pairing** on the villa. Some are genuinely single lines — railings,
   jali, compound walls — but not all of them.
 
+- **`solve/layerscan.py` picks the wrong layers for the villa's ground floor**,
+  and its own objective disagrees with its own outcome. Found 2026-08-22,
+  measured, unfixed. On frame 1 (`Ground Floor Plan`, bbox
+  `90.63,299.94 .. 111.44,315.04`):
+
+  | layers | rooms | named | largest |
+  |---|---|---|---|
+  | `A1 WALLS HIDDEN + A7 COMPOUND WALL` ← chosen | 5 | 4 | **274.84 m²** |
+  | `A1 WALLS HIDDEN + A5 FALSE CEILING` | **18** | **7** | 104.5 m² |
+
+  A 274 m² `LIVING / DINING` is a plan whose partitions did not close. The scan
+  optimises *named rooms closed*, so it should prefer the second — and `A5
+  FALSE CEILING` **is** in its shortlist for that frame (145 faces, verdict
+  `WALLS`). It evaluates it and rejects it.
+
+  **Two things ruled out**, so nobody repeats them:
+  - *Not* a greedy local optimum. Restarting the hill-climb from every candidate
+    seed changes nothing; the search reaches the same answer.
+  - *Not* a missing shortlist entry. `recommended()` returns
+    `['A1 WALLS HIDDEN', 'A5 FALSE CEILING', 'A5 FURN']` for that frame.
+
+  **The live hypothesis, not yet confirmed:** `fit_of` grades a layer set
+  *without* `add_perimeter`, while the pipeline builds *with* it. A set that
+  encloses badly on its own can enclose well once the envelope ring is added,
+  and the objective would never see it. That is the shared-basis trap one level
+  up — two measurements of the same quantity must share a basis, not just a
+  band. Confirm by running `fit_of` with and without the perimeter on this
+  frame before changing anything.
+
+  Ownership: `solve/layerscan.py` is unclaimed. Note it is genuinely
+  load-bearing — `Fit.score` deliberately excludes raw room count, and its
+  docstring records the measurement that settled that. Do not "fix" it by
+  adding room count back.
+
 ---
 
 ## 6. Traps that have cost real time — read before debugging anything
@@ -283,3 +317,34 @@ generalise beyond the CAD engine:
 4. **Never round-trip UTF-8 through PowerShell defaults, and never put a regex
    in a bash heredoc.** `\b` becomes a literal backspace with no warning,
    because backspace is a valid Python escape. Use the Write/Edit tools.
+
+5. **The browser and the worker read the same field, and only one of them is
+   wrong.** A scene stored `hdriUrl: '/env/midday.hdr'`. That is a perfectly
+   valid URL to a browser, so the studio previewed the sky and the picker looked
+   finished — while `resolveUrl` matched neither of its branches, returned the
+   string untouched, and the render worker resolved it against the drive root:
+   `Cannot read 'A:\env\midday.hdr'`. **Anything stored on a scene and consumed
+   by both halves can fail this way, and testing in the studio will never show
+   it.** Worse than the "declared but never used" family below, because here
+   half of it works beautifully. Pinned in `services/api/test/static-urls.mjs`.
+
+6. **This codebase is repeatedly one small producer short of a finished
+   feature.** Four instances found in one day: `Provenance.locked`/`suppressed`
+   declared in the schema and used nowhere; `ARCVIA_DONE:n/n` printed, captured
+   into the job record, and never compared; DXF entity handles present in every
+   file and discarded at ingest; and `hdriUrl` plumbed the entire length of the
+   product with nothing writing it, so `apply_environment()` took its `else`
+   branch on every render ever run. **Before building a feature, check whether
+   it is already built and merely unreachable.**
+
+7. **`A:\Assets\Hub` holds no skies.** All 301 HDRIs are categorised `indoor`
+   and none of Poly Haven's 297 `skies` were harvested — `harvest.mjs` says why,
+   and is right for a furnishing library: "700 of them is not a furnishing
+   library". It is exactly wrong for an architectural renderer, where the most
+   valuable environment is the sky outside the window. An interior lit by a
+   photograph of somebody's derelict bakery is plausible and wrong.
+
+8. **`apps/studio/dist` is an untracked local build** — gitignored, not in
+   `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
+   bundle. Search `src` only. (Do not go looking for it in git and conclude this
+   note is stale; the directory is real, it is just not tracked.)
