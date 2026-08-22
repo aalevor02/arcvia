@@ -1,5 +1,5 @@
 import type { Project } from '../types'
-import { h, area } from '../ui/dom'
+import { h, area, renderImg } from '../ui/dom'
 import { openLightbox } from './villa'
 
 export function homePage(project: Project): HTMLElement {
@@ -11,11 +11,23 @@ export function homePage(project: Project): HTMLElement {
     h(
       'section',
       { class: 'hero' },
-      h('img', {
-        src: 'renders/aerial-day.webp',
-        alt: `${project.name} seen from the air`,
-        fetchpriority: 'high',
-      }),
+      // The hero image is the PROJECT's own site plan, not a bundled literal.
+      // This was `renders/aerial-day.webp` — a hard-coded path into the app
+      // bundle, which ships only Casa Altinho's renders — so every composed
+      // project rendered a different client's hillside villas full-bleed above
+      // the fold, HTTP 200, captioned with the wrong developer's name.
+      // `sitePlan.image` is a complete path (`site/siteplan.webp`), used raw
+      // the same way `imageSmall` is in the master-plan teaser below — NOT a
+      // render slug, so it is not run through `renderImg`. When a project has
+      // no site plan the hero shows its copy over the section background rather
+      // than someone else's photograph.
+      project.sitePlan?.image
+        ? h('img', {
+            src: project.sitePlan.image,
+            alt: `${project.name} seen from the air`,
+            fetchpriority: 'high',
+          })
+        : false,
       h(
         'div',
         { class: 'hero-copy' },
@@ -151,7 +163,7 @@ export function homePage(project: Project): HTMLElement {
             return h(
               'a',
               { class: 'type-card', href: `#/villa/${type.id}` },
-              h('img', { src: `renders/${type.renders[0]}-card.webp`, alt: type.name, loading: 'lazy' }),
+              renderImg(type.renders[0], { alt: type.name, suffix: '-card', loading: 'lazy' }),
               h(
                 'div',
                 { class: 'body' },

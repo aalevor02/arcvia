@@ -2,7 +2,7 @@ import './styles.css'
 import { brand } from '@arcvia/brand'
 import bundled from './data/casa-altinho'
 import type { Project } from './types'
-import { h } from './ui/dom'
+import { h, renderImg } from './ui/dom'
 import { homePage } from './pages/home'
 import { masterPlanPage } from './pages/masterplan'
 import { villaPage } from './pages/villa'
@@ -264,7 +264,7 @@ function villaIndexPage(): HTMLElement {
           return h(
             'a',
             { class: 'type-card', href: `#/villa/${type.id}` },
-            h('img', { src: `renders/${type.renders[0]}-card.webp`, alt: type.name, loading: 'lazy' }),
+            renderImg(type.renders[0], { alt: type.name, suffix: '-card', loading: 'lazy' }),
             h(
               'div',
               { class: 'body' },

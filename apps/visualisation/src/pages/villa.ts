@@ -1,5 +1,5 @@
 import type { Project, Floor, Room } from '../types'
-import { h, area, dimension, squareMetres } from '../ui/dom'
+import { h, area, dimension, squareMetres, renderImg } from '../ui/dom'
 
 const KIND_ORDER: Record<NonNullable<Room['kind']>, number> = {
   habitable: 0,
@@ -108,7 +108,7 @@ export function villaPage(project: Project, typeId: string, highlightUnit?: stri
     h(
       'section',
       { class: 'villa-hero' },
-      h('img', { src: `renders/${heroSlug}.webp`, alt: type.name }),
+      renderImg(heroSlug, { alt: type.name }),
       h(
         'div',
         { class: 'caption' },

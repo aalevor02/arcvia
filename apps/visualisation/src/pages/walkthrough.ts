@@ -1,5 +1,5 @@
 import type { Project, VillaType } from '../types'
-import { h } from '../ui/dom'
+import { h, renderImg } from '../ui/dom'
 
 /**
  * The walkthrough route.
@@ -68,7 +68,7 @@ function pendingScene(project: Project, type: VillaType): HTMLElement {
     h(
       'section',
       { class: 'villa-hero' },
-      h('img', { src: `renders/${type.renders[0]}.webp`, alt: type.name }),
+      renderImg(type.renders[0], { alt: type.name }),
       h(
         'div',
         { class: 'caption' },

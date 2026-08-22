@@ -32,6 +32,27 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
+/**
+ * A render `<img>`, or nothing when there is no render.
+ *
+ * Every project-microsite image is a relative path into the app bundle
+ * (`renders/<slug>.webp`). A villa type with no renders produced
+ * `renders/undefined-card.webp` — a guaranteed 404 that shows as a broken-image
+ * icon on a client's page. Worse than absent, which is the rule `compose.ts`
+ * already states about imagery. This returns `false` when the slug is missing,
+ * and `h()` skips a `false` child — so the card simply has no image rather than
+ * a broken one. `alt` is still set on the real element for the screen-reader
+ * and no-image case.
+ */
+export function renderImg(
+  slug: string | undefined,
+  attrs: { alt: string; suffix?: string } & Attrs,
+): HTMLImageElement | false {
+  if (!slug) return false
+  const { alt, suffix = '', ...rest } = attrs
+  return h('img', { src: `renders/${slug}${suffix}.webp`, alt, ...rest })
+}
+
 export function append(parent: Node, children: Child[]): void {
   for (const child of children) {
     if (child === null || child === undefined || child === false) continue
