@@ -207,10 +207,26 @@ seconds per frame at `fast` (32 samples, 1280×720):
 implied nor the ~6 min a flat 16 s/frame would: **interiors dominate**, at
 2.3–3× an isometric, and there are sixteen of them.
 
-Two per-kind oddities, both re-measured clean: **a photoreal plan costs 10.8× a
-cgi plan** (the sky world is expensive on a top-down ortho where most of the
-frame is not building), and **exteriors are the cheapest real view** — which is
-what makes an orbit film affordable.
+**Run-to-run precision is ±10–13%**, and knowing that is what makes the table
+readable: the photoreal-vs-cgi plan gap (32.3 vs 3.0 s, **10.8×**) is far
+outside that band and is real; a 15.2-vs-16.6 difference is not. Two per-kind
+oddities, both re-measured clean: **a photoreal plan costs 10.8× a cgi plan**
+(the sky world is expensive on a top-down ortho where most of the frame is not
+building), and **exteriors are the cheapest real view** — which is what makes an
+orbit film affordable.
+
+**Cost is flat between 2k and 4k triangles; untested above that.** The same
+building at 2,076 and 4,148 tri renders in 16.6 vs 16.1 s isometric (0.97×) and
+9.5 vs 8.6 s exterior (0.91×) — doubling the geometry costs nothing measurable.
+So the interior premium is **light transport, not polygon count**, and the
+~13 min pass figure is robust to modest geometry changes.
+
+⚠ **Do not generalise that further than it goes.** 2k → 4k is a doubling of a
+trivially small number, and both are far below where Cycles becomes
+geometry-bound. A furnished scene with the asset hub wired in could be 100k–1M
+tri and this result says nothing whatever about it. It establishes that wiring
+the asset hub is not *automatically* a render-cost problem — **re-measure when a
+furnished scene exists.**
 
 **Film cost model:** frames × exterior cost. 36 frames (1.5 s) ≈ 8 min, 72
 frames ≈ 17 min, 120 frames (5 s) ≈ 28 min, at `fast`/`cgi`. Validated end to
@@ -225,11 +241,19 @@ saturated. Compute-bound *and* thrashing, so any number would have measured this
 box's memory pressure rather than the tier. Plan `ultra` as "hours per frame
 here" until measured on a quiet machine.
 
-⚠ **Concurrent rendering on this box inflates wall-clock by up to 2×.** Measured
-against a second Blender running: cad 41.7 → 20.9 s, sketch 36.3 → 22.5 s,
-photoreal exterior 25.1 → 14.3 s. **Check for another `blender` process before
-benching anything here**, and never run a render batch alongside asset
-conditioning.
+⚠ **Two things inflate render wall-clock ~2× on this box, and only one of them
+is another session.**
+
+1. **Concurrent rendering.** Measured against a second Blender: cad 41.7 →
+   20.9 s, sketch 36.3 → 22.5 s, photoreal exterior 25.1 → 14.3 s.
+2. **Free RAM below ~1 GB — paging alone, with nothing else rendering.** At
+   0.51 GB free, an m11 isometric took **34.1 s against its true 16.6 s**. Same
+   mechanism that made `ultra` unmeasurable.
+
+So the check before benching anything here is **`blender` processes AND free
+RAM**, not just the first. Both of the day's two bad-measurement episodes had
+this as the cause and only one of them involved another session. Never run a
+render batch alongside asset conditioning.
 
 Two things found while measuring, both open at the time of writing:
 
