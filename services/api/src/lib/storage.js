@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * Object storage.
@@ -171,11 +172,36 @@ export async function pathOf(key) {
  * separators on Windows, and symlinks. Resolving first and then confirming the
  * result is still under ROOT is the only version that holds.
  */
-function pathFor(key) {
-  const path = resolve(ROOT, key)
-  const root = ROOT.endsWith(sep) ? ROOT : ROOT + sep
-  return path === ROOT || path.startsWith(root) ? path : null
+function within(base, key) {
+  const path = resolve(base, key)
+  const root = base.endsWith(sep) ? base : base + sep
+  return path === base || path.startsWith(root) ? path : null
 }
+
+const pathFor = (key) => within(ROOT, key)
+
+/**
+ * Static assets that ship with the app instead of being uploaded.
+ *
+ * ── Why these need resolving at all ─────────────────────────────────────────
+ * `/env/midday.hdr` is a real URL to the browser: the studio serves its own
+ * `public/` directory, so the viewer loads it with no help from anybody. The
+ * render worker is not a browser. It gets whatever `resolveUrl` returns and
+ * hands it to `Path(...).resolve()`, and a root-relative URL is not a path.
+ *
+ * Without this entry `/env/midday.hdr` fell through unchanged, resolved against
+ * the *current drive root*, and arrived at the worker as `A:\env\midday.hdr` —
+ * which does not exist. The failure is split in a way that is genuinely hard to
+ * read: the studio previews the sky correctly, because that half went through
+ * the browser, and only the render fails.
+ *
+ * Resolved relative to this file rather than the working directory. The API is
+ * started from at least three places (the repo root, services/api, and the test
+ * harness) and a path built from `cwd` would be correct in some of them.
+ */
+const STATIC_ROOTS = new Map([
+  ['/env/', resolve(dirname(fileURLToPath(import.meta.url)), '../../../../apps/studio/public/env')],
+])
 
 /** A short opaque id, for keys that should not be content-addressed. */
 export const opaqueId = () => randomBytes(12).toString('hex')
@@ -198,6 +224,14 @@ export const opaqueId = () => randomBytes(12).toString('hex')
 export function resolveUrl(url) {
   if (!url) return null
   if (/^https?:\/\//i.test(url)) return url
+
+  // Same containment rule as uploads: resolve first, then confirm the result is
+  // still under the directory it claimed to be in. A caller getting null here
+  // should refuse the job rather than pass the worker something unexpected.
+  for (const [prefix, base] of STATIC_ROOTS) {
+    if (url.startsWith(prefix)) return within(base, url.slice(prefix.length))
+  }
+
   if (!url.startsWith(`${PUBLIC_PREFIX}/`)) return url
 
   return pathFor(url.slice(PUBLIC_PREFIX.length + 1))
