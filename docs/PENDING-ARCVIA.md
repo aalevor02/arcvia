@@ -26,6 +26,19 @@ SendMessage → aalev-35   (frame splitting, PDF backends, this document)
 If `aalev-35` is gone, message whoever is live. The ownership map in §1 is
 accurate as of writing and will drift.
 
+⚠ **Reply by `ListAgents` NAME, never by the `from` address.** An incoming
+message carries `from="uds:\\.\pipe\LOCAL\cc-msg-…"`, and the tooling tells you
+to copy it — **that is the trap.** Sending to that value returns
+`ENOINBOX: no-key`; sending to the plain `ListAgents` name (`aalev-35`, or
+`aalev-35 [ca1b85]`) arrives every time.
+
+This cost a whole session today. `aalev-35` sent eleven messages that all landed
+and received almost nothing back, because peers were replying to the `from`
+value. **Reachability is one-directional and peer names are per-session views** —
+two sessions can each be absent from the other's `ListAgents` while one can still
+send to the other. So: a silent peer is not a refusing peer. If something is
+blocking, route it through the user rather than reading silence as a decision.
+
 Two conventions that have already paid for themselves today:
 
 - **Commit mid-flight.** `3fc71bb` is titled *"Track the reconstruction engine,
@@ -221,11 +234,30 @@ and no unit test with a fake cache can show. Had it been false the symptom would
 have been "some walls upgraded", which reads as a loading race rather than a
 design error.
 
-⚠ **One obligation left, and it is small but real:** `creditsFor()` walks placed
-objects only, so a credited HDRI or surface is **silently dropped** from the
-credits. Everything shipped is CC0 so nobody is owed today — it is **one CC-BY
-asset away** from an unmet licence obligation on a published page. Needs an owner
-alongside whoever owns credits.
+✅ **FIXED — `5a4ff42`. And it was never the small latent gap described here.**
+
+This paragraph used to say *"everything shipped is CC0 so nobody is owed today —
+one CC-BY asset away from an unmet obligation"*. **That was true of the twenty
+curated assets and false about the product.** From `catalogue/items.ts`:
+
+| licence | models |
+|---|---|
+| CC Attribution 4.0 | **34** |
+| CC Attribution-ShareAlike 4.0 | 1 |
+| CC0 1.0 Public Domain | 3 |
+
+**35 of the 38 catalogue models require attribution, and every walkthrough this
+product has ever published showed none.** Not one asset away — already there,
+already published.
+
+**Every link in the chain existed and was written with care. Nothing joined
+them.** `view/index.astro:467` renders the credit list, with a comment reading
+*"Attribution. Present when it is owed, absent when it is not."*
+`scenes.js publicPayload` serves `credits`, commented *"Credits travel with the
+scene because the obligation does."* `catalogue/credits.ts` computes them, with
+13 assertions green throughout. Producers: **none** — and `credits` was absent
+from the PATCH allow-list, which *rejects* unknown fields, so the field was
+unreachable even if something had tried to write it.
 
 The original entry follows, kept because its measurements are still the reason
 the work was scoped the way it was. There is a `/asset-hub` skill for it.
@@ -586,6 +618,27 @@ generalise beyond the CAD engine:
    **Before building a feature, check whether it is already built and merely
    unreachable.** And when you consume someone else's declared field, check that
    it is populated before designing around it.
+
+   **A distinct and nastier sub-shape: written and read, but by nobody to each
+   other.** `hdriUrl` was a complete consumer with no producer. `credits` was the
+   mirror image — a complete *producer* (`catalogue/credits.ts`, 13 assertions
+   green) and a complete *consumer* (`view/index.astro:467`, which renders the
+   list and explains in a comment why it must), joined by nothing, with the field
+   not even in the PATCH allow-list. **Both render a perfectly good page while
+   quietly not doing the thing.** Two complete halves are not evidence of a
+   working feature; only a test that crosses the seam is.
+
+   And when you write that test, **assert PRESENCE, not correctness.** The
+   failure state here is a credit list that is merely *shorter* than the licences
+   require — which is exactly how this stayed open with 13 green tests sitting
+   on it.
+
+   One more, learned closing it: **the identity of an obligation is the SOURCE,
+   not the file generated from it.** Keying surface credits on the colour-map URL
+   credited one author twice for one asset, because `wall` and `ceiling` are both
+   Plaster001 but the ingest tool writes one file set per surface ID. Models keep
+   their own URL — two GLBs are two assets even when one person made both.
+   Nothing at runtime would ever have reported the difference.
 
 7. **`A:\Assets\Hub` holds no skies.** All 301 HDRIs are categorised `indoor`
    and none of Poly Haven's 297 `skies` were harvested — `harvest.mjs` says why,
