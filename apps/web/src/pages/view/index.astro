@@ -566,13 +566,40 @@ const title = 'Walkthrough'
         const credits = scene.credits ?? []
         if (credits.length > 0) {
           els.creditsToggle.hidden = false
-          els.creditList.innerHTML = credits
-            .map(
-              (credit: Credit) =>
-                `<li><a href="${credit.source}" target="_blank" rel="noreferrer">${credit.author}</a>` +
-                `<span class="lic"> — ${credit.licence}</span></li>`,
-            )
-            .join('')
+          // ── Built as nodes, never as an HTML string ──────────────────────
+          // credit.author / .source / .licence are user-supplied: `credits` is
+          // on the scene PATCH allow-list with no schema, and publicPayload
+          // returns them verbatim to any visitor. Interpolated into innerHTML,
+          // an author of `<img src=x onerror=…>` was arbitrary JavaScript on
+          // the developer's own branded domain — the same origin that stores
+          // the bearer token — firing on load even with the panel hidden
+          // (`display:none` does not stop `onerror`). This was the only
+          // innerHTML on the page; every other user string here already uses
+          // textContent, and this now matches. `href` is set only for a real
+          // http(s) URL, so a `javascript:` source cannot become a live link.
+          els.creditList.replaceChildren(
+            ...credits.map((credit: Credit) => {
+              const li = document.createElement('li')
+              const source = String(credit.source ?? '')
+              if (/^https?:\/\//i.test(source)) {
+                const a = document.createElement('a')
+                a.href = source
+                a.target = '_blank'
+                a.rel = 'noreferrer'
+                a.textContent = credit.author ?? ''
+                li.appendChild(a)
+              } else {
+                // No safe URL — show the name as plain text rather than a link
+                // to nowhere or to something dangerous.
+                li.textContent = credit.author ?? ''
+              }
+              const lic = document.createElement('span')
+              lic.className = 'lic'
+              lic.textContent = ` — ${credit.licence ?? ''}`
+              li.appendChild(lic)
+              return li
+            }),
+          )
           els.creditsToggle.addEventListener('click', () => {
             const open = els.credits.hasAttribute('hidden')
             els.credits.toggleAttribute('hidden', !open)

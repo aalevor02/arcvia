@@ -163,6 +163,19 @@ export async function registerSceneRoutes(app) {
     const patch = Object.fromEntries(
       Object.entries(request.body ?? {}).filter(([k]) => allowed.includes(k)),
     )
+
+    // ── Defence in depth on the one field that reaches a client verbatim ─────
+    // `credits` is published unchanged to unauthenticated visitors and rendered
+    // on the walkthrough page. The page now builds it with textContent so a
+    // hostile value is inert there — but a value that cannot be stored cannot
+    // be served to a page that later regresses, so the fields are coerced to
+    // plain strings and length-capped here too. Not a schema, just a floor:
+    // anything that is not an object with string-ish fields is dropped rather
+    // than trusted.
+    if ('credits' in patch) {
+      patch.credits = normaliseCredits(patch.credits)
+    }
+
     patch.updatedAt = new Date().toISOString()
 
     await spend(request.auth.userId, 'sceneSave', { sceneId: scene.id })
@@ -429,6 +442,24 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
+}
+
+/**
+ * Coerce a credits list to plain, bounded strings.
+ *
+ * Attribution is three text fields per model — author, source, licence. This
+ * keeps exactly those, as strings, capped at a length no real credit reaches.
+ * Nothing here makes the value safe to put in innerHTML — the page must still
+ * treat it as text — but it stops a script string being stored at all, which
+ * is the whole point of a second line.
+ */
+function normaliseCredits(value) {
+  if (!Array.isArray(value)) return []
+  const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, 300)
+  return value
+    .filter((c) => c && typeof c === 'object')
+    .map((c) => ({ author: str(c.author), source: str(c.source), licence: str(c.licence) }))
+    .slice(0, 200)
 }
 
 /**
