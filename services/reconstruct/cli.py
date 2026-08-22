@@ -717,6 +717,37 @@ def reconstruct(
             "fixtures": fixtures,
         },
     }
+
+    # ---- Can these rooms actually be used? ---------------------------------
+    # `solve/clearance.py` has been complete and working for some time, with 25
+    # assertions on it, and was reachable only by running a separate CLI command
+    # against a model somebody had already built. It appears in no API route, in
+    # no `building.json`, and nowhere in the studio.
+    #
+    # That is the same shape as four other things found in this codebase this
+    # week — a finished producer with nothing consuming it — and it is the most
+    # expensive instance, because clearance is the one question a floor plan
+    # cannot answer by looking at it. On this villa it finds 13 things,
+    # including two beds overlapping, a WC with no clear floor in front of it,
+    # and four rooms with no door into them at all.
+    #
+    # Computed here rather than left to the caller because it needs the
+    # catalogue's dimensions, which is exactly what the fixtures were given for.
+    # Cheap: geometry over the fixture list, ~19 shapes on this model.
+    try:
+        from solve import clearance as cl
+
+        issues = cl.check(model, CATALOGUE_DIMS)
+        model["clearance"] = {
+            "summary": cl.summarise(issues),
+            "issues": [i.as_dict() for i in issues],
+        }
+    except Exception as error:  # pragma: no cover - never fail a build for this
+        # A model is still a model without its clearance report, and refusing to
+        # write one because an advisory check raised would lose the expensive
+        # half of the work. Recorded rather than swallowed.
+        model["clearance"] = {"error": f"{type(error).__name__}: {error}"}
+
     (out / f"{source.stem}.building.json").write_text(
         json.dumps(model, indent=2), encoding="utf-8"
     )
@@ -838,6 +869,27 @@ def _print_build(model: dict) -> None:
                 continue
             tag = "!!" if c["level"] == "blocking" else " !"
             print(f"      {tag} {c['name']}: {c['message']}")
+
+    # Clearance is advisory and never blocks, but it answers the one question a
+    # floor plan cannot be looked at to answer — whether the rooms can actually
+    # be used — so it is printed rather than left in the JSON for somebody to go
+    # and find. The full findings are in `clearance.issues`.
+    clear = model.get("clearance") or {}
+    if clear.get("error"):
+        print(f"\nCLEARANCE  not computed: {clear['error']}")
+    elif clear.get("summary"):
+        s = clear["summary"]
+        if s["total"]:
+            kinds = ", ".join(f"{k}={n}" for k, n in s["byKind"].items())
+            print(f"\nCLEARANCE  {s['total']} findings "
+                  f"({s['blocking']} blocking, {s['tight']} tight, "
+                  f"{s['notes']} notes)")
+            print(f"           {kinds}")
+            for issue in clear["issues"]:
+                if issue.get("severity") == "blocking":
+                    print(f"        !! {issue.get('message', '')[:96]}")
+        else:
+            print("\nCLEARANCE  nothing to report")
 
     g = model["glb"]
     print(f"\nGLB      {g['path']}")
