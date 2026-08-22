@@ -10,6 +10,7 @@ import {
   addFloor,
   addWall,
   commit,
+  commitFrom,
   duplicateFloor,
   emptyPlan,
   initialHistory,
@@ -160,6 +161,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
    */
   const planRef = useRef(plan)
   planRef.current = plan
+  /** The plan the server last acknowledged, for the unmount flush. */
+  const lastSavedRef = useRef<Plan | null>(null)
+  const sceneIdRef = useRef<string | null>(null)
 
   // ---- Load ----------------------------------------------------------------
   useEffect(() => {
@@ -168,7 +172,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       .then((loaded) => {
         if (cancelled) return
         setScene(loaded)
-        setHistory(initialHistory(loadPlan(loaded.plan)))
+        sceneIdRef.current = loaded.id
+        const initial = loadPlan(loaded.plan)
+        lastSavedRef.current = initial
+        setHistory(initialHistory(initial))
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Could not open this project.'),
@@ -186,9 +193,33 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     setSave('dirty')
   }, [])
 
+  /**
+   * The state the current gesture started from.
+   *
+   * Captured on the FIRST live frame and spent by `finishGesture`. Without it
+   * the pre-drag plan exists nowhere once `applyLive` has replaced `present`,
+   * and gesture-end used to call `commit(h, h.present)` — a comparison of
+   * present with itself, a guaranteed no-op. No drag ever reached the undo
+   * stack; Ctrl+Z after moving a wall deleted the action before the move.
+   */
+  const gestureBaseRef = useRef<Plan | null>(null)
+
   const applyLive = useCallback((fn: (plan: Plan) => Plan) => {
-    setHistory((h) => ({ ...h, present: fn(h.present) }))
+    setHistory((h) => {
+      if (gestureBaseRef.current === null) gestureBaseRef.current = h.present
+      // `future` cleared, exactly as `commit` clears it: editing after an undo
+      // abandons the branch. Spreading it through kept redo alive pointing at
+      // a state the user had already edited away from — and autosave would
+      // then happily persist the resurrected branch.
+      return { ...h, present: fn(h.present), future: [] }
+    })
     setSave('dirty')
+  }, [])
+
+  /** Close the open gesture, recording one undo entry for the whole drag. */
+  const finishGesture = useCallback(() => {
+    setHistory((h) => commitFrom(h, gestureBaseRef.current))
+    gestureBaseRef.current = null
   }, [])
 
   // ---- Canvas lifecycle ----------------------------------------------------
@@ -238,7 +269,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         ),
       onDeleteWall: (id) => apply((p) => removeWall(p, id)),
       onMoveVertex: (id, to) => applyLive((p) => moveVertex(p, id, to)),
-      onCommit: () => setHistory((h) => commit(h, h.present)),
+      onCommit: () => finishGesture(),
       onCalibrate: (from, to) => setCalibration({ from, to }),
       onPlaceObject: (itemId, at, rotation, wallId) =>
         apply((p) => addObject(p, { item: itemId, position: at, rotation, wallId })),
@@ -322,9 +353,17 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     // user pauses.
     const timer = setTimeout(async () => {
       setSave('saving')
+      // What THIS write carries. The completion below must judge itself
+      // against it: on a fast connection the response can land after a newer
+      // edit re-armed its own timer, and setting 'saved' then re-runs this
+      // effect, whose cleanup tears that newer timer down — the newer edit is
+      // never written and the UI says Saved. Found by the audit; the fix is
+      // that a save only claims 'saved' for the plan it actually sent.
+      const sent = plan
       try {
-        await updateScene(scene.id, { plan })
-        setSave('saved')
+        await updateScene(scene.id, { plan: sent })
+        lastSavedRef.current = sent
+        setSave(planRef.current === sent ? 'saved' : 'dirty')
       } catch (err) {
         setSave('error')
         setError(err instanceof Error ? err.message : 'Could not save.')
@@ -334,10 +373,34 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     return () => clearTimeout(timer)
   }, [save, plan, scene])
 
-  // Warn before losing unsaved work. Only while genuinely dirty — a beforeunload
-  // handler that always fires trains people to click through it.
+  /**
+   * Flush the plan when the editor unmounts with unsaved work.
+   *
+   * "Back to projects" is a pushState navigation — beforeunload never fires —
+   * and it used to land inside the autosave debounce and simply discard the
+   * edit. Deliberately its own unmount-only effect rather than the autosave
+   * cleanup, which runs on every keystroke.
+   *
+   * Fire-and-forget: the component is gone, so there is nowhere to report a
+   * failure — but a write that usually lands beats a write that was never made.
+   */
   useEffect(() => {
-    if (save !== 'dirty' && save !== 'saving') return
+    return () => {
+      const id = sceneIdRef.current
+      if (id && planRef.current !== lastSavedRef.current) {
+        void updateScene(id, { plan: planRef.current }).catch(() => {})
+      }
+    }
+  }, [])
+
+  // Warn before losing unsaved work.
+  //
+  // Admits everything EXCEPT the states where none exists. This used to list
+  // the states where work exists instead — 'dirty' and 'saving' — and the list
+  // was wrong: after a FAILED save the state is 'error', which is precisely
+  // when unsaved work exists, and the guard disarmed.
+  useEffect(() => {
+    if (save === 'saved' || save === 'idle') return
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
@@ -469,6 +532,38 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const selectedWall = selection?.kind === 'wall' ? floor.walls[selection.id] : null
   const selectedObject =
     selection?.kind === 'object' ? (floor.objects?.[selection.id] ?? null) : null
+
+  /**
+   * Nothing interactive until the scene has actually arrived.
+   *
+   * The canvas used to mount immediately, wall tool pre-armed, while getScene
+   * was still in flight — and the load's `setHistory(initialHistory(...))`
+   * then replaced whatever the user had already drawn. On a slow connection
+   * that is fifteen seconds of drawing, silently discarded by the screen's own
+   * loading code. A blank grid that accepts input it will throw away is worse
+   * than a spinner.
+   */
+  if (!scene) {
+    return (
+      <div className="editor">
+        <header className="topbar">
+          <button className="btn" onClick={onBack}>
+            ← Projects
+          </button>
+          <strong style={{ fontSize: 14 }}>{error ? 'Could not open this project' : 'Loading…'}</strong>
+        </header>
+        <div className="editor-body" style={{ display: 'grid', placeItems: 'center' }}>
+          {error ? (
+            <p className="alert alert-error" role="alert">
+              {error}
+            </p>
+          ) : (
+            <p className="muted">Opening the plan…</p>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="editor">
@@ -779,7 +874,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                   onChange={(e) =>
                     applyLive((p) => nameRoom(p, selectedRoom.id, e.target.value))
                   }
-                  onBlur={() => setHistory((h) => commit(h, h.present))}
+                  onBlur={finishGesture}
                 />
               </div>
               <div className="field">

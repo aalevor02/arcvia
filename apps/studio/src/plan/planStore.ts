@@ -683,6 +683,31 @@ export function commit(history: History, plan: Plan): History {
   }
 }
 
+/**
+ * Record a state that was reached through live, uncommitted edits.
+ *
+ * ── Why `commit` cannot do this job ─────────────────────────────────────────
+ * A drag applies its frames through `applyLive`, which replaces `present`
+ * sixty times a second without touching `past`. When the gesture ends, the
+ * pre-gesture state exists nowhere but in whatever the caller saved — so
+ * `commit(history, history.present)` at gesture end compares present with
+ * itself and is a GUARANTEED no-op. Both gesture-end call sites did exactly
+ * that, which meant no drag ever created an undo entry: one Ctrl+Z after
+ * moving a wall deleted the action BEFORE the move, and the move survived.
+ *
+ * This takes the state the gesture started from and pushes THAT. If the
+ * gesture ended where it began, nothing is recorded — releasing a wall where
+ * it was is not an action a user expects Ctrl+Z to revisit.
+ */
+export function commitFrom(history: History, before: Plan | null): History {
+  if (!before || before === history.present) return history
+  return {
+    past: [...history.past, before].slice(-HISTORY_LIMIT),
+    present: history.present,
+    future: [],
+  }
+}
+
 export function undo(history: History): History {
   if (history.past.length === 0) return history
   const previous = history.past[history.past.length - 1]
