@@ -1,4 +1,4 @@
-import { db } from '../store.js'
+import { db, nanoid } from '../store.js'
 import { requireAuth, hashPassword, verifyPassword } from '../lib/auth.js'
 import { spend } from '../lib/credits.js'
 
@@ -185,7 +185,15 @@ export async function registerSceneRoutes(app) {
       return reply.status(409).send({ message: 'Save the scene before publishing.' })
     }
 
-    const slug = scene.publishedSlug ?? slugify(scene.name)
+    // A slug nobody ELSE holds — same rule, and same reasoning, as
+    // publications.js. This used to be `slugify(scene.name)` with no check at
+    // all, and `/public/:slug` resolves by first match in the collection: two
+    // users who both named a scene "Living Room" shared `/view/living-room/`,
+    // and whichever published FIRST owned it. The second user was handed that
+    // URL as their own, printed it, and their client opened somebody else's
+    // project. A republish keeps the slug it already has, because the link may
+    // already be on paper.
+    const slug = scene.publishedSlug ?? (await uniqueSceneSlug(scene.name, scene.id))
     const updated = await db.update('scenes', scene.id, {
       published: true,
       publishedSlug: slug,
@@ -421,4 +429,28 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
+}
+
+/**
+ * A published slug no OTHER scene holds. Mirrors publications.js exactly,
+ * because it is the same promise: a published URL outlives the record — it
+ * goes in emails and on printed material — so two scenes with the same name
+ * must not race for the same address and resolve by whoever published first.
+ *
+ * `|| 'scene'` matters on its own: a name that is all punctuation slugifies
+ * to the empty string, and an empty publishedSlug is the URL `/view//` — a
+ * link that never worked, handed out as if it did.
+ */
+async function uniqueSceneSlug(name, selfId) {
+  const taken = new Set(
+    (await db.find('scenes', (s) => s.id !== selfId)).map((s) => s.publishedSlug).filter(Boolean),
+  )
+  const root = slugify(name) || 'scene'
+  if (!taken.has(root)) return root
+
+  for (let n = 2; n < 500; n++) {
+    const candidate = `${root}-${n}`
+    if (!taken.has(candidate)) return candidate
+  }
+  return `${root}-${nanoid(6).toLowerCase()}`
 }
