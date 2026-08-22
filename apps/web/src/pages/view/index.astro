@@ -331,17 +331,36 @@ const title = 'Walkthrough'
             event.preventDefault()
             error.textContent = ''
 
-            const attempt = await fetch(
-              `${api}/scenes/public/${encodeURIComponent(slug)}/unlock`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: input.value }),
-              },
-            )
+            // The success path used to `await attempt.json()` with no guard, so
+            // a network failure or a malformed 200 threw out of this async
+            // listener into nothing: the visitor pressed Open with the right
+            // code from their email and NOTHING happened — no error, no
+            // progress, indistinguishable from a broken button. A CORS
+            // misconfiguration triggers exactly this, since the unlock POST
+            // preflights while the initial GET did not. Every path now writes
+            // something the visitor can read.
+            let attempt: Response
+            try {
+              attempt = await fetch(
+                `${api}/scenes/public/${encodeURIComponent(slug)}/unlock`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ code: input.value }),
+                  signal: AbortSignal.timeout(15_000),
+                },
+              )
+            } catch {
+              error.textContent = 'Could not reach the server. Check your connection and try again.'
+              return
+            }
 
             if (attempt.ok) {
-              const body = await attempt.json()
+              const body = await attempt.json().catch(() => null)
+              if (!body || !body.scene) {
+                error.textContent = 'The walkthrough could not be opened. Please reload the page.'
+                return
+              }
               gate.hidden = true
               els.status.classList.remove('gone')
               resolve(body.scene)
@@ -361,15 +380,43 @@ const title = 'Walkthrough'
         const slug = slugFromLocation()
         if (!slug) return fail('No walkthrough specified', 'This link is missing its scene.')
 
-        const response = await fetch(`${api}/scenes/public/${encodeURIComponent(slug)}`)
-        if (!response.ok) {
+        // ── A fetch with no timeout can hang this page forever ───────────────
+        // `await fetch(...)` with no signal neither resolves nor rejects if the
+        // server accepts the connection and never replies — a wedged proxy, a
+        // dead backend behind a live load balancer. The page then sits on
+        // "Fetching the scene…" indefinitely, and the module-load watchdog
+        // cannot help because the module DID load. So: a 15 s deadline, and a
+        // try/catch that turns a network failure into a screen a visitor can
+        // act on rather than a spinner that never stops.
+        let response: Response
+        try {
+          response = await fetch(`${api}/scenes/public/${encodeURIComponent(slug)}`, {
+            signal: AbortSignal.timeout(15_000),
+          })
+        } catch {
           return fail(
-            'Walkthrough not found',
-            'The link may be wrong, or the scene may have been unpublished.',
+            'Could not reach the walkthrough',
+            'The server did not respond. Check your connection and reload the page.',
           )
         }
+        if (!response.ok) {
+          // 5xx is the server failing, not a wrong link — telling a client with
+          // a correct link that it "may be wrong" sends them to argue with the
+          // developer over nothing.
+          return response.status >= 500
+            ? fail('The walkthrough is temporarily unavailable', 'Please try again in a few minutes.')
+            : fail(
+                'Walkthrough not found',
+                'The link may be wrong, or the scene may have been unpublished.',
+              )
+        }
 
-        let { scene } = await response.json()
+        let scene
+        try {
+          ;({ scene } = await response.json())
+        } catch {
+          return fail('The walkthrough could not be read', 'The scene data was malformed. Please reload.')
+        }
 
         // ---- Gated scenes ---------------------------------------------------
         // A protected scene arrives with its name and nothing that renders it,
