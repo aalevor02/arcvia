@@ -347,6 +347,15 @@ def reconstruct(
         if named:
             frame.title = named[0].text
 
+    # ---- Are any of these storeys of one building? -------------------------
+    # Reported, not acted on. `storey0` is still hardcoded downstream, so this
+    # does not yet change what gets built — but the question is now ANSWERED and
+    # recorded, and a sheet holding one building with two floors no longer looks
+    # identical to a sheet holding two buildings.
+    from solve.storeys import register_storeys
+
+    storeys = register_storeys(frames, rise=height + 0.3)
+
     def _labels_in(a, b, c, d):
         return [
             lb for lb in blk.room_labels(doc, scale, (ox, oy))
@@ -506,6 +515,7 @@ def reconstruct(
         # pairs to 5 walls, or a layer choice that fragments a partitions-only
         # plan — which produces a bill of quantities for less building than the
         # client drew. This is the number that moves when that happens.
+        "storeys": storeys.as_dict(),
         "wallsTotal": len(all_walls),
         "wallsUnframed": len(all_walls) - sum(len(f.wall_indices) for f in frames),
         "framingNote": framing_note or None,
@@ -580,6 +590,17 @@ def _print_build(model: dict) -> None:
     # `if model["frames"]` skipped this block entirely on an empty list, so a
     # sheet whose drawings all fell below the wall floor produced output
     # indistinguishable from a clean single-drawing file.
+    # A sheet holding one building with two floors used to look exactly like a
+    # sheet holding two buildings. It no longer does — and the refusals matter
+    # as much as the stacks, because "we could not tell" is a different state
+    # from "there is nothing here".
+    storey_report = model.get("storeys") or {}
+    for stack in storey_report.get("stacks", []):
+        names = ", ".join(f"{s['title']} (z {s['baseZ']:+.1f})" for s in stack)
+        print(f"STOREYS  {len(stack)} storeys of ONE building: {names}")
+    for refusal in storey_report.get("refusals", []):
+        print(f"STOREYS  ? frames {refusal['frames']}: {refusal['reason']}")
+
     if model.get("framingNote"):
         print(f"       ! {model['framingNote']}")
     unframed = model.get("wallsUnframed") or 0
