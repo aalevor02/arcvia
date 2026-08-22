@@ -148,6 +148,34 @@ class Verdict:
         }
 
 
+def _is_outdoor(space) -> bool:
+    """
+    Is this space outside the building?
+
+    Delegates to the schedule's own test rather than repeating it. `kind` alone
+    is not enough and neither is the name: this villa has an OFFICE PATIO whose
+    kind is "study" and an "Enclosed Balcony" whose kind is "outdoor", so the
+    two signals disagree in both directions. Classifying on kind alone puts
+    27 m2 of patio inside the building.
+
+    Delegating matters more than the rule. The bill and the room schedule split
+    indoor from outdoor with this exact predicate, and an area totalled here
+    against a cost computed there must not be able to disagree about what a room
+    is — which is the same shared-basis failure that produced two different
+    duplication measures earlier in this project.
+
+    Imported inside the function: `solve` is the lower layer and importing
+    `quantify` at module scope would invert that, for a predicate only two
+    checks need.
+    """
+    from quantify.schedules import _is_outdoor as classify
+
+    return classify({
+        "kind": getattr(space, "kind", "") or "",
+        "name": getattr(space, "name", "") or "",
+    })
+
+
 def check(
     *,
     input_segments: int,
@@ -286,14 +314,36 @@ def check(
     # model look abnormal. See hypothesise/perimeter.py.
     if spaces and walls:
         floor = sum(s.area for s in spaces)
+        indoor_floor = sum(s.area for s in spaces if not _is_outdoor(s))
         billable = sum(w.length - getattr(w, "duplicate", 0.0) for w in walls)
         if floor > 5:
             ratio = billable / floor
             lo, hi = WALL_RUN_BAND
             level = "info" if lo <= ratio <= hi else "warning"
+
+            # Say which floor. The band was calibrated against a denominator
+            # that includes everything the solver called a room, and on this
+            # villa 50.5% of that is lawn, pool, patio and balcony — so 1.21
+            # reads as a comfortable pass while the indoor figure is 2.53.
+            #
+            # Both are reported rather than one being swapped in, because
+            # neither is the whole answer: the numerator cannot be split to
+            # match. Attributing wall run to the spaces it bounds needs
+            # `Space.boundedBy`, which is present on every space and populated
+            # on none. Until it is, an indoor-only denominator against an
+            # all-walls numerator is a ratio between two different buildings —
+            # exactly the mismatch this check exists to catch, introduced by
+            # the fix for it.
+            outdoor_share = (1 - indoor_floor / floor) if floor else 0.0
+            detail = ""
+            if outdoor_share > 0.05 and indoor_floor > 1:
+                detail = (f" ({billable / indoor_floor:.2f} against indoor floor "
+                          f"alone; {outdoor_share * 100:.0f}% of the floor here "
+                          "is outdoor)")
+
             v.checks.append(Check(
                 "wall-run-per-area", level,
-                f"{ratio:.2f} m of wall per m2 of floor"
+                f"{ratio:.2f} m of wall per m2 of floor{detail}"
                 + ("" if level == "info" else
                    f" — outside the {lo}-{hi} band real buildings occupy. Either "
                    "walls are being counted twice or rooms are not all closing."),
@@ -311,7 +361,7 @@ def check(
     # correct envelope excludes the lawn, and on this villa it does, getting 7
     # of 8 outdoor labels right. It is the indoor half it fails.
     ring = [w for w in walls if getattr(w, "layer", "") == DERIVED_PERIMETER]
-    indoor = [s for s in spaces if getattr(s, "kind", "") != "outdoor"]
+    indoor = [s for s in spaces if not _is_outdoor(s)]
     if ring and indoor:
         from shapely.geometry import LineString, Polygon
         from shapely.ops import polygonize, unary_union
