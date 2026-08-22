@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, unlink } from 'node:fs/promises'
 import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { db } from '../store.js'
@@ -479,6 +479,20 @@ async function publish(outputPath, job) {
   const stored = await put(bytes, contentType, {
     prefix: `renders/${job.ownerId}`,
   })
+
+  // ── Delete the temp render once it is safely in content-addressed storage ─
+  // `put()` copied the bytes into their durable, hashed key; this `outputPath`
+  // is the worker's scratch output and nothing reads it again. Left behind, it
+  // was a full-size byte-identical orphan per render, forever — measured on
+  // this repo at .data/renders full of duplicates of the uploads. Removed only
+  // AFTER put() returns, so a failed copy still leaves the evidence, and
+  // best-effort because a missing temp is the desired end state anyway.
+  //
+  // NOTE: the multi-view path's per-view PNGs live under job.spec.outDir and
+  // are the resume cache render_views.py checks (a view whose file exists is
+  // skipped on retry). Those are deliberately NOT swept here — sweeping the
+  // outDir needs to preserve resume semantics and is a separate change.
+  await unlink(outputPath).catch(() => {})
 
   return stored.url
 }

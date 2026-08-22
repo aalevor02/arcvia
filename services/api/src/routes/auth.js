@@ -345,7 +345,16 @@ export async function registerAuthRoutes(app) {
     }
 
     const otp = generateOtp()
-    await db.update('users', user.id, { phone, otp })
+    // ── Changing the number un-verifies it ───────────────────────────────────
+    // Writing the new `phone` while leaving `phoneVerified` at its old `true`
+    // let a verified user point the field at a stranger's number: /otp/verify
+    // short-circuits on the stale flag before the code is even compared, so
+    // `000000` returned {verified:true} for a number that never consented.
+    // Nothing reads phoneVerified today, so the live damage is a wasted SMS and
+    // a wrong field — but it becomes real the day anything trusts it, and the
+    // fix is one clause: verified survives only if the number did not change.
+    const phoneVerified = phone === user.phone && Boolean(user.phoneVerified)
+    await db.update('users', user.id, { phone, otp, phoneVerified })
 
     const { devCode } = await deliverOtp(app, phone, otp.code)
 

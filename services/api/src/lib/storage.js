@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -93,12 +93,32 @@ export async function put(buffer, contentType, { prefix = '' } = {}) {
 
   await mkdir(dirname(path), { recursive: true })
 
-  // Skip the write if the identical bytes are already there. Cheap, and it
-  // keeps mtimes stable so a re-upload does not look like a change.
+  // ── Skip only a COMPLETE match, and write atomically ─────────────────────
+  // The key is content-addressed, so an existing file of the RIGHT SIZE is the
+  // identical bytes — skip it, cheap, and mtimes stay stable so a re-upload
+  // does not look like a change. But `stat` succeeds for a HALF-written file
+  // too: an earlier upload SIGKILLed mid-write (docker stop, OOM, ENOSPC) left
+  // a truncated file, and this used to skip past it and answer 201 with the
+  // full byte count. `uploads.js` then served those short bytes under
+  // `Cache-Control: immutable`, and every re-upload of the same drawing hashed
+  // to the same key and was skipped again — the architect re-uploads to fix it,
+  // is told it worked, and gets the identical failure with no way to purge.
+  //
+  // So the skip is gated on size, and the write goes to a sibling `.tmp` then
+  // renames over — atomic on one volume, so a crash mid-write leaves the tmp
+  // file, never a torn key. `store.js` uses the same pattern for the database.
+  let complete = false
   try {
-    await stat(path)
+    const info = await stat(path)
+    complete = info.size === buffer.length
   } catch {
-    await writeFile(path, buffer)
+    complete = false
+  }
+
+  if (!complete) {
+    const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`
+    await writeFile(tmp, buffer)
+    await rename(tmp, path)
   }
 
   return { key, url: `${PUBLIC_PREFIX}/${key}`, bytes: buffer.length, contentType }
