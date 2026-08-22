@@ -229,7 +229,32 @@ export function resolveUrl(url) {
   // still under the directory it claimed to be in. A caller getting null here
   // should refuse the job rather than pass the worker something unexpected.
   for (const [prefix, base] of STATIC_ROOTS) {
-    if (url.startsWith(prefix)) return within(base, url.slice(prefix.length))
+    if (!url.startsWith(prefix)) continue
+
+    const path = within(base, url.slice(prefix.length))
+
+    // ── Why a miss here has to be loud ──────────────────────────────────────
+    // Returning null is correct — it is what a traversal attempt should get —
+    // but null then flows to `render.js:216` as `hdriUrl: null`, and the worker
+    // reads that as "no environment" and renders happily with its default sky.
+    // So a rejected path, a typo, or a deployment where this directory simply
+    // is not present all produce a successful render that is quietly missing
+    // the thing the user picked.
+    //
+    // That is the same shape as the bug this branch was added to fix: the
+    // studio previewed the sky, the render did not have it, and nothing said
+    // so. Fixing it with a second silent failure would be a poor trade.
+    //
+    // A warning rather than a throw, because the render is still worth having.
+    // The user chose an environment and should be told it did not arrive; they
+    // should not lose the job over it.
+    if (path === null) {
+      console.warn(
+        `[storage] "${url}" is under ${prefix} but does not resolve inside it. ` +
+          'The render will proceed with no environment.',
+      )
+    }
+    return path
   }
 
   if (!url.startsWith(`${PUBLIC_PREFIX}/`)) return url
