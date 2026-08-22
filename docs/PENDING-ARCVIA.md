@@ -73,14 +73,76 @@ Two conventions that have already paid for themselves today:
 
 ## 1. Who owns what, as of 2026-08-22
 
-| Area | Session |
+**ALL FIVE SESSIONS HAVE CLOSED. Nothing below is owned. The table is history —
+it tells you who wrote what, and therefore whose reasoning is in which commit
+message, and nothing more.**
+
+| Area | Written by |
 |---|---|
-| `solve/frames.py` | aalev-35 |
-| `services/floorplan-ai/` PDF backends | aalev-35 |
-| `hypothesise/`, `solve/{verify,spaces,clearance}.py`, `render/` | aalev-f3 |
-| `quantify/`, `apps/studio`, API routes, `floorplan-ai` generally | aalev-51 |
-| `tools/asset-ingest/`, the asset curation | aalev-1b |
-| **Everything in §3 below** | **nobody** |
+| `solve/frames.py`, `solve/storeys.py`, `classify/units.py`, `cli.py` | aalev-35 |
+| `hypothesise/`, `solve/{verify,spaces,clearance}.py`, `build/`, `render/`, `render-worker/` | aalev-f3 |
+| `quantify/`, API routes, `daylight/` | aalev-51 |
+| `tools/asset-ingest/`, the asset curation, `apps/studio` surfaces + environments | aalev-1b |
+| render bench, film, bake measurement (nothing written in-repo) | aalev-66 |
+
+### ⚠ Corrections that supersede what follows
+
+Landed after most of this document was written. Where they conflict, these win.
+
+1. **The sheet border was eating real wall faces — `6ea3fea`, the largest defect
+   anyone found.** `pair_faces` processed longest-first, and on an architect's
+   sheet the longest linework is the **drawing border**. It consumed real wall
+   faces and produced two phantom walls among the villa's thickest (13.40 m at
+   t=0.291, 10.49 m at t=0.443) while the genuine 0.230 m west wall was **absent
+   from the model entirely**. Now ordered by gap — two faces of a wall are
+   separated by a wall thickness, which is the definition.
+   **Any villa figure predating it is stale.** Current: **129 walls, 474.19 m
+   built / 316.64 m billable, 22 rooms, 263.78 m²**, envelope coverage 46% → 86%,
+   bill ₹997,755 → ₹957,376.
+
+2. **Black pockets are SOLVED — `6f0d685`. It is z-fighting, not darkness**, and
+   it was three bugs, not one. One control killed the whole "sealed geometry"
+   account: a box strictly *inside* another box renders **0 black pixels** —
+   a sealed lightless volume is invisible, not black. See `HANDOFF-POCHE.md` §3,
+   which is now corrected.
+
+3. **The lightmap's 25% atlas waste should NOT be "fixed" by a 3×1 strip.** The
+   UV transform scales u and v by the same factor, which is what keeps texel
+   density isotropic; a non-square cell needs a per-axis scale, so effective
+   resolution per object falls from (1/2)² to (1/3)². **Coverage rises to 100%
+   and usable resolution drops by more than the 25% recovered.** The cure is
+   area-weighted packing. Also: the 40.5/21.7/11.3% coverage figures are not
+   comparable across sizes — a fixed 8-texel margin dilates each island by a
+   constant band. True coverage is ~11%.
+
+4. **Never read the villa's `wall-run-per-area` of 1.20 as a clean pass.** That
+   check divided by the sum of *all* spaces, and **51% of the villa's denominator
+   is lawn, pool, patio and balcony**. The indoor figure is 2.43. Fixed in
+   `a5bea89`, which now reports both bases and states the outdoor share.
+
+5. **Do NOT remove the layer from `merge_collinear`'s bucket key.** It looks like
+   an obvious win — 10.7–21.0 m of duplicate linework — and on the real pipeline
+   it takes run 458.84 → 221.06 m and rooms 23 → 10. **It deletes 52% of the
+   model.** Faces sharing a line across two layers frequently have different
+   extents along it, so merging yields over-long faces that pair against the
+   wrong partners.
+
+6. **`raw` is now the one unguarded render style**, deliberately — flat world
+   plus emission returns each surface's own colour regardless of facing, so a
+   uniform near-white frame is its correct output. It matters if AOV work
+   resumes.
+
+7. **`Space.boundedBy` is present on every space and populated on none.** It is
+   the missing link under three separate checks: why wall run cannot be attributed
+   to the rooms it bounds, why `wall-run-per-area` must report two bases instead
+   of one, and why indoor/outdoor cannot be resolved geometrically.
+   **The biggest single unlock left in the engine.**
+
+8. **Indoor/outdoor needs name AND kind — neither alone works, and they disagree
+   in both directions.** `OFFICE PATIO` has kind `study` (indoor) and is outdoor
+   by name; `Enclosed Balcony` has kind `outdoor`. Use
+   `quantify/schedules.py::_is_outdoor`. More than half the villa site is
+   outdoor: 125.11 m² indoor against 127.64 m² outdoor.
 
 ⚠ **This table is what sessions told me, not what the repo says, and it has
 already been wrong once.** `packages/` is absent from it entirely — and
@@ -611,7 +673,16 @@ generalise beyond the CAD engine:
     separately and **loudly**: per-file results only mean anything once the root
     check has passed.
 
-15. **`apps/studio/dist` is an untracked local build** — gitignored, not in
+15. **A passing test against the wrong build is indistinguishable from a passing
+    test.** A stale server held port 8787, so a whole round of "verified against
+    the running server" ran against a build from *before* the refactor being
+    verified. Cost an hour. If you verify against a live API, check what is
+    actually listening: `netstat -ano | grep 8787`, then
+    `wmic process where "ProcessId=N" get CommandLine`. And note `--watch`
+    restarts the server whenever *any* session edits a repo file, which produced
+    two `ECONNRESET` failures that looked exactly like real bugs.
+
+16. **`apps/studio/dist` is an untracked local build** — gitignored, not in
    `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
    bundle. Search `src` only. (Do not go looking for it in git and conclude this
    note is stale; the directory is real, it is just not tracked.)

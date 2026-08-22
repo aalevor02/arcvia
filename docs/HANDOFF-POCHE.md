@@ -120,9 +120,51 @@ render         isometric cutaway, ~1 min, 720p/32 samples, CPU
   **All GLBs on disk predate this.** Regenerate — see §0.
 
 ### OPEN
-- **Black pockets in lit renders.** Re-tested after the winding fix on 2026-08-22.
-  **The winding fix did not clear them, and six hypotheses are now eliminated with
-  evidence.** Do not re-test these:
+- ~~**Black pockets in lit renders.**~~ **SOLVED — `6f0d685`. It is Z-FIGHTING,
+  not darkness, and the account below is REFUTED. Read this before the table.**
+
+  The conclusion this section reached — *"those surfaces receive light from no
+  direction at all, so the camera is seeing the interior of sealed geometry"* —
+  is wrong, and one control killed it:
+
+  | control | black px |
+  |---|---|
+  | two exactly coincident boxes | **14,275** |
+  | box strictly INSIDE another box | **0** |
+  | 50 mm air slit | 0 |
+  | flush butt joint, opposed faces | 0 |
+  | 0.3 mm clearance, no shared plane | 0 |
+
+  **A sealed lightless volume is invisible, not black.** So the sealed-geometry
+  account, the missing-roof account, and the sealed-sandwich account all fall
+  together. Inverted normals are excluded too: zero of 124 boxes have negative
+  signed volume.
+
+  The cause is coincident faces from `add_perimeter`'s derived ring lying exactly
+  on the walls it retraces. The fix is 2 mm of clearance on ring segments, **not
+  deletion**:
+
+  | | black px |
+  |---|---|
+  | as built | 12,119 |
+  | ring 2 mm thinner and shorter | **513** |
+  | ring not built at all | 505 |
+
+  Below the no-ring baseline while keeping all 57 ring segments, 23 rooms and
+  1,848 triangles — so the envelope survives, which is the whole reason
+  `add_perimeter` is not optional.
+
+  **And it was at least three bugs, not one.** On the fixed model: `interior-6`
+  measures 0.00% (was 3.774%, cured here); `interior-16` 1.03% (survives);
+  `interior-17` is *lighting*, swinging 20.15% photoreal → 0.10% cgi. That is why
+  six hypotheses died against it — they were each tested against a mixture.
+
+  The table below is **kept, not deleted**, because every row in it is still a
+  true measurement and re-running any of them would still be wasted time. What
+  changed is the conclusion drawn from them. Six correct eliminations pointed at
+  a wrong answer because the thing being eliminated was three different things.
+
+  Historical, and still true as measurements:
 
   | Ruled out | How |
   |---|---|

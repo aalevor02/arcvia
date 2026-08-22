@@ -171,8 +171,13 @@ Verify still judges the graph, or it would pass walls that enclose nothing.
   gap. **Fixed** — `solve/frames.py` now cuts a frame on an axis-projection
   channel no wall crosses. See its docstring and the traps list in HANDOFF-POCHE.
 
-  Villa now: 146 walls, **459.09 m** (was 901.06), 23 rooms **252.76 m²** (was
-  505.4), VERIFY PASS. `frames[0]` is unchanged on all six other real DXFs.
+  Villa now: **129 walls, 474.19 m built / 316.64 m billable, 22 rooms,
+  263.78 m²** (was 303 walls, 901.06 m, 41 rooms, 505.4 m²). `frames[0]` is
+  unchanged on all six other real DXFs.
+
+  ⚠ **Any villa figure predating `6ea3fea` is stale**, including the 146 walls /
+  459.09 m / 305.15 m billable / 23 rooms / 252.76 m² that this paragraph used
+  to quote. The sheet border was consuming real wall faces — see §4a.
 
   **2. `add_perimeter` does double-count, and it is the larger defect.**
   **FIXED in `ec39fc1`.** `add_perimeter` derives the envelope by closing on
@@ -184,8 +189,8 @@ Verify still judges the graph, or it would pass walls that enclose nothing.
 
   The fix marks the overlap rather than removing it: walls carry a `duplicate`
   length, the summary carries `totalLength` / `billableLength` /
-  `duplicateLength`, and `boq.py` charges on billable. Villa: 459.09 m built,
-  **305.15 m billable**, 153.94 m duplicate.
+  `duplicateLength`, and `boq.py` charges on billable. Villa (post-`6ea3fea`):
+  **474.19 m built, 316.64 m billable**.
 
   **DO NOT "fix" this by tuning `CLOSE_RADIUS`.** It looks like the obvious
   lever and it destroys the model. On a drawing whose exterior is unpaired
