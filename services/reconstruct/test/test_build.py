@@ -699,5 +699,59 @@ ok("the nearest of several walls wins",
 ok("no walls at all is far away, not an error", wall_gap(0.0, 0.0, []) > 1e6)
 
 
+# ---------------------------------------------------------------------------
+# layerscan grades on the basis the pipeline builds on
+#
+# `fit_of` used to stop at `join_corners` while `cli.py` goes on to call
+# `add_perimeter` before detecting rooms — so the selector ranked layer sets by
+# how well they enclose ON THEIR OWN and handed the winner to a stage that
+# encloses them differently. On the villa that changed which layers were picked.
+#
+# The geometry below is the whole argument in miniature: two partitions that
+# close nothing by themselves and three rooms once the envelope is there.
+# ---------------------------------------------------------------------------
+
+print("\n-- layerscan shares the pipeline's basis --")
+
+from classify.elements import classify_room  # noqa: E402
+from ingest.blocks import RoomLabel as _RoomLabel  # noqa: E402
+from solve import layerscan as _ls  # noqa: E402
+
+
+def _hwall(y, x0, x1):
+    return [Face(x0, y - T / 2, x1, y - T / 2, "W"), Face(x0, y + T / 2, x1, y + T / 2, "W")]
+
+
+def _vwall(x, y0, y1):
+    return [Face(x - T / 2, y0, x - T / 2, y1, "P"), Face(x + T / 2, y0, x + T / 2, y1, "P")]
+
+
+# Three bays, west end closed, EAST END OPEN. The missing side is 1.8 m, inside
+# the 2 x CLOSE_RADIUS the envelope bridges — so the wall network implies a
+# building the walls themselves do not close. That is an open plan in miniature,
+# and it is the situation `add_perimeter` exists for.
+_OPEN = (
+    _hwall(0.0, 0.0, 12.0) + _hwall(1.8, 0.0, 12.0) + _vwall(0.0, 0.0, 1.8)
+    + _vwall(4.0, 0.0, 1.8) + _vwall(8.0, 0.0, 1.8)
+)
+_LABELS = [
+    _RoomLabel(x=2.0, y=0.9, text="LIVING"),
+    _RoomLabel(x=6.0, y=0.9, text="DINING"),
+    _RoomLabel(x=10.0, y=0.9, text="KITCHEN"),
+]
+_grade = lambda **kw: _ls.fit_of(_OPEN, _LABELS, [], classify_room, lambda _n: None, **kw)
+
+_bare = _grade(perimeter=False)
+_ringed = _grade(perimeter=True)
+
+ok("without the envelope the open bay does not close",
+   _bare.rooms == 2 and _bare.named == 2, f"{_bare.rooms} rooms, {_bare.named} named")
+ok("with it, the third room appears",
+   _ringed.rooms == 3 and _ringed.named == 3, f"{_ringed.rooms} rooms, {_ringed.named} named")
+ok("so the SAME layer set grades differently on the two bases — the whole bug",
+   _ringed.score > _bare.score, f"{_ringed.score} vs {_bare.score}")
+ok("and the default is the basis cli.py builds on", _grade().rooms == _ringed.rooms)
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

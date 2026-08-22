@@ -643,18 +643,33 @@ undivided session.
   - *Not* a missing shortlist entry. `recommended()` returns
     `['A1 WALLS HIDDEN', 'A5 FALSE CEILING', 'A5 FURN']` for that frame.
 
-  **The live hypothesis, not yet confirmed:** `fit_of` grades a layer set
-  *without* `add_perimeter`, while the pipeline builds *with* it. A set that
-  encloses badly on its own can enclose well once the envelope ring is added,
-  and the objective would never see it. That is the shared-basis trap one level
-  up — two measurements of the same quantity must share a basis, not just a
-  band. Confirm by running `fit_of` with and without the perimeter on this
-  frame before changing anything.
+  ✅ **CONFIRMED AND FIXED.** The hypothesis recorded here was right: `fit_of`
+  graded a layer set *without* `add_perimeter` while the pipeline builds *with*
+  it, so the selector ranked sets by how well they enclose **on their own** and
+  handed the winner to a stage that encloses them differently. `fit_of` now
+  takes `perimeter=True` by default. `test/_probe_layerscan.py` is the tool that
+  settled it — it grades every layer pair on both bases, per frame, and prints
+  where the winner flips. Keep it; it answers this question for any drawing.
 
-  Ownership: `solve/layerscan.py` is unclaimed. Note it is genuinely
-  load-bearing — `Fit.score` deliberately excludes raw room count, and its
-  docstring records the measurement that settled that. Do not "fix" it by
-  adding room count back.
+  Measured on the villa, the same set on the two bases:
+
+  | | rooms | named |
+  |---|---|---|
+  | `A1 WALLS HIDDEN + A5 FALSE CEILING` | 4 | 2 |
+  | ...with the perimeter | **15** | **12** |
+
+  The winner changed outright on 2 of 5 annotated frames — `('0','A1 WALLS')`
+  → `('0','A6 PLUMBING')` took one frame from 3 rooms/2 named to 10/8.
+
+  Result on the ground floor: `A7 COMPOUND WALL` is no longer selected
+  (`A5 FURN` is), rooms 21 → 23, and **`BED ROOM` 31.35 m² → 24.18 m²** against
+  the 24.00 recorded below. Regression-checked against the other drawings:
+  `PLANS_FOR_3D` is bit-identical, `ALL PLANS` yields no rooms on either basis
+  (it is broken for another reason — see the frame-selection entry).
+
+  ⚠ Still true and still load-bearing: `Fit.score` deliberately excludes raw
+  room count, and its docstring records the measurement that settled that. Do
+  not "fix" anything here by adding room count back.
 
 ---
 

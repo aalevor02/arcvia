@@ -179,7 +179,8 @@ class Fit:
         }
 
 
-def fit_of(faces, labels, placements, classify_room, guess_item) -> Fit:
+def fit_of(faces, labels, placements, classify_room, guess_item,
+           perimeter: bool = True) -> Fit:
     """
     Grade a layer set against what the architect actually annotated.
 
@@ -201,11 +202,40 @@ def fit_of(faces, labels, placements, classify_room, guess_item) -> Fit:
     """
     from hypothesise import openings as op
     from hypothesise.pair import join_corners, pair_faces
+    from hypothesise.perimeter import add_perimeter
     from solve.spaces import detect_spaces
 
     walls = join_corners(pair_faces(faces))
     if len(walls) < 4:
         return Fit(len(walls), 0, 0, 0, len(placements))
+
+    # ── Grade the building the pipeline will actually build ─────────────────
+    # This used to stop at `join_corners` while `cli.py` goes on to call
+    # `add_perimeter` before detecting rooms. So the selector was ranking layer
+    # sets by how well they enclose ON THEIR OWN, and then handing the winner to
+    # a stage that encloses them differently.
+    #
+    # That is not a small difference, because the envelope is what closes the
+    # largest space in a modern house — `hypothesise/perimeter.py` exists for
+    # exactly that reason. Measured on the villa, the same layer set:
+    #
+    #     A1 WALLS HIDDEN + A5 FALSE CEILING    4 rooms,  2 named
+    #                       ...with perimeter  15 rooms, 12 named
+    #
+    # A set that encloses badly alone can enclose well once the ring is added,
+    # and the objective never saw it. On 2 of the 5 annotated frames of the
+    # villa the winner changes outright once both are measured the same way:
+    #
+    #     frame 3   ('0',)              ->  ('0', 'A5 FURN')
+    #     frame 4   ('0', 'A1 WALLS')   ->  ('0', 'A6 PLUMBING')
+    #               3 rooms / 2 named       10 rooms / 8 named
+    #
+    # This is the shared-basis rule that `solve/verify.py` already carries one
+    # level up: two measurements of the same quantity must share a basis, not
+    # merely a band. `perimeter=False` is kept so the difference stays
+    # measurable rather than becoming folklore.
+    if perimeter:
+        walls = add_perimeter(walls)
 
     lo, hi = ROOM_AREA
     spaces = [
