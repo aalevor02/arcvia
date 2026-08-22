@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SceneViewer } from '@arcvia/viewer'
+import { uploadImage } from '../lib/api'
 import {
   slugId,
   upsertView,
@@ -195,6 +196,58 @@ export default function PresentationPanel({
             }
             style={{ display: 'block', width: '100%', height: 30, marginTop: 4 }}
           />
+        </label>
+
+        {/*
+          The developer's logo, shown on the published page's top bar.
+
+          ── The missing producer, again ──────────────────────────────────
+          The published page has rendered `branding.logoUrl` since hotspots
+          landed, and nothing anywhere could set it — the same shape as
+          `hdriUrl` and `scene.credits`: a complete consumer, no producer.
+          This is the producer. The file goes through the same upload route
+          as floor plans, so the page serves it from the API like everything
+          else it shows.
+        */}
+        <label style={{ display: 'block', fontSize: 11.5, marginTop: 8 }}>
+          Developer logo
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              void uploadImage(file, file.name)
+                .then((stored) =>
+                  onChange({
+                    ...presentation,
+                    branding: { ...(branding ?? {}), logoUrl: stored.url },
+                  }),
+                )
+                .catch(() => {
+                  /* the save indicator already reports failed writes */
+                })
+            }}
+            style={{ display: 'block', marginTop: 4, width: '100%' }}
+          />
+          {branding?.logoUrl ? (
+            <span className="note" style={{ display: 'block', marginTop: 2 }}>
+              Logo set.{' '}
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: '2px 8px', fontSize: 11 }}
+                onClick={() =>
+                  onChange({
+                    ...presentation,
+                    branding: { ...(branding ?? {}), logoUrl: undefined },
+                  })
+                }
+              >
+                Remove
+              </button>
+            </span>
+          ) : null}
         </label>
 
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
