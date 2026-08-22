@@ -260,6 +260,23 @@ wall or throws away the detector's measured thickness.
 
 ## 5. Traps — every one of these cost real time
 
+**Determinism**
+- **A `set` of layer-name STRINGS made the same drawing quote differently on every
+  run.** Two consecutive `reconstruct --storeys` of one file, same code, nothing
+  changed between them: `148 walls / 260.3 m²` then `147 / 259.4`. Python
+  randomises string hashing per process, `pool = [f for name in selected ...]`
+  iterated a `set[str]`, and pairing and corner-joining are order-sensitive.
+  Fixed by `sorted(selected)` (`cli.py`, commit `d82c34e`).
+  - **`PYTHONHASHSEED=0` is the diagnostic, never the fix** — three runs agree
+    under it whether or not the bug is still there, so pinning it hides the
+    dependency. Use it to *confirm* hash-order sensitivity, then go and remove it.
+  - An earlier session concluded the engine was deterministic after testing five
+    hash seeds. That test used the **single-frame** path; this is in the
+    multi-storey one. "Deterministic" is a claim about a code path, not an engine.
+  - The line below the bug already called `sorted(selected)` for the *report*.
+    When you find ordering made deterministic for display, check the data it
+    describes.
+
 **CAD**
 - LibreDWG **0.13.3 silently drops model space**: valid file, ~2,993 block entities,
   empty drawing, no error. 0.14 gives 26,194. Assert model space *specifically*.
