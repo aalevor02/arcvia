@@ -233,13 +233,28 @@ frames ≈ 17 min, 120 frames (5 s) ≈ 28 min, at `fast`/`cgi`. Validated end t
 end: 36 frames → 143 KB h264, `ARCVIA_DONE:36/36`, 0 invalid, loop-closure delta
 0.73 (seamless 360°).
 
-⚠ **`ultra` is not measurable on this machine, and that is the finding.** On the
-*cheapest* view (cgi plan, 3.0 s at `fast`, nominal 64× ≈ 190 s expected) it ran
-past 570 s and was stopped at 8,656 CPU-seconds with no frame. Diagnostics: ~400
-MB paged out mid-render, 2,353 pages/sec, 0.81 GB of 15.7 GB free, all 16 cores
-saturated. Compute-bound *and* thrashing, so any number would have measured this
-box's memory pressure rather than the tier. Plan `ultra` as "hours per frame
-here" until measured on a quiet machine.
+**`ultra` is ~8–13× `fast` for exterior views** — 79–201 s per frame at
+2560×1440, mean 133 s, all valid. Treat that as an **upper bound**: the four
+frames rose 79 → 119 → 201 s across identical work, which is the box degrading
+under memory pressure during the run, not the tier getting more expensive. The
+best frame at 79.2 s is ~7.8× `fast`, the same ratio as `standard`, so the true
+figure is nearer 80 s.
+
+⚠ **The `ultra` PLAN view is the exception and it is unexplained.** It ran 694 s
+and never produced a frame, while ultra exteriors completed in 79–201 s each.
+That lines up with something already measured at `fast`: **a photoreal plan
+costs 10.8× a cgi plan**, and cgi plan is the *cheapest* view at `fast` (3.0 s)
+yet the only kind that failed to finish at `ultra`. Orthographic top-down views,
+where most of the frame is not building, are **pathological in a way no other
+kind is**. Measure plan views separately; do not assume they scale.
+
+*(This paragraph previously said "ultra is not measurable here, plan as hours per
+frame". That was wrong. The process was killed and the conclusion written from
+the diagnostics taken while it ran — but the bench kept going and rendered four
+valid ultra frames that sat on disk for twenty minutes with timestamps on them.
+The memory-pressure figures were all real; "the box was struggling" was true;
+"therefore ultra is unmeasurable" did not follow. A real measurement quoted past
+what it established, which is the error this document keeps recording.)*
 
 ⚠ **Two things inflate render wall-clock ~2× on this box, and only one of them
 is another session.**

@@ -400,103 +400,146 @@ def reconstruct(
             and b - 1 <= q["position"]["y"] <= d + 1
         ]
 
-    labels = _labels_in(x0, y0, x1, y1)
-    in_frame = _blocks_in(x0, y0, x1, y1)
-
-    # ---- Second pass: choose the layers for THIS frame ---------------------
-    # The first pass used the conservative name heuristic, which is plan-only
-    # and so lands on the right part of the sheet even when it misses most of
-    # the walls. That frame now scopes the layer search — which is what excludes
-    # the elevation layers by geometry rather than by name.
-    layer_choice = None
-    if auto_layers and not layers:
-        from solve import layerscan
-
-        within: dict[str, list] = {}
-        for seg in reading["_segments"]:
-            face = Face(
-                ax=(seg.x1 - ox) * scale, ay=(seg.y1 - oy) * scale,
-                bx=(seg.x2 - ox) * scale, by=(seg.y2 - oy) * scale, layer=seg.layer,
-            )
-            if (min(face.ax, face.bx) >= x0 - 1 and max(face.ax, face.bx) <= x1 + 1
-                    and min(face.ay, face.by) >= y0 - 1 and max(face.ay, face.by) <= y1 + 1):
-                within.setdefault(seg.layer, []).append(face)
-
-        shortlist = layerscan.recommended(layerscan.scan(within)) | (chosen & set(within))
-        selected, trace = layerscan.select_within_frame(
-            within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
-        )
-        if selected:
-            pool = [f for name in selected for f in within[name]]
-            walls = join_corners(pair_faces(pool))
-            chosen = selected
-            layer_choice = {"selected": sorted(selected), "trace": trace}
-
-    # ---- Re-scope annotations to where the walls actually are ---------------
-    # The frame bbox comes from the bootstrap pass and is deliberately generous.
-    # Blocks inside it but far outside the wall extent are not part of the
-    # building: on one real drawing, 16 of 28 door blocks sat in a 6 x 3 m
-    # corner with no walls anywhere near them — a door SCHEDULE, a legend of
-    # door types. Counting those as doors we failed to place made the verify
-    # gate block a model that was fine.
+    # ── One storey, end to end ──────────────────────────────────────────────
+    # Extracted so it can run more than once. `storey0` is hardcoded through the
+    # engine and a house has floors; running this per storey is the remaining
+    # half of that work.
     #
-    # The wall extent is the honest boundary: annotation that belongs to the
-    # building sits on the building.
-    if walls:
-        wx0 = min(min(w.ax, w.bx) for w in walls)
-        wx1 = max(max(w.ax, w.bx) for w in walls)
-        wy0 = min(min(w.ay, w.by) for w in walls)
-        wy1 = max(max(w.ay, w.by) for w in walls)
-        x0, y0, x1, y1 = wx0, wy0, wx1, wy1
+    # Extracted FIRST, changing nothing, and proved byte-identical on all seven
+    # real drawings before anything loops it. A refactor that is not proven
+    # identical is a refactor that has silently changed the building — and every
+    # failure in this engine produces a building rather than an error.
+    #
+    # Nested rather than top-level on purpose: it closes over the reading, the
+    # document, the block placements and the scale, all of which are per-SHEET.
+    # Only the walls, the bbox and the base are per-storey.
+    def _solve_frame(frame_walls, bbox, base_z: float = 0.0) -> dict:
+        x0, y0, x1, y1 = bbox
+        walls = frame_walls
+        chosen_here = set(chosen)
+
         labels = _labels_in(x0, y0, x1, y1)
         in_frame = _blocks_in(x0, y0, x1, y1)
 
-    # ---- The envelope ------------------------------------------------------
-    # A partitions-only plan encloses almost nothing, because the largest space
-    # in a modern house is open plan and bounded by the building rather than by
-    # interior walls. See hypothesise/perimeter.py.
-    if with_perimeter:
-        walls = add_perimeter(walls)
+        # ---- Second pass: choose the layers for THIS frame ---------------------
+        # The first pass used the conservative name heuristic, which is plan-only
+        # and so lands on the right part of the sheet even when it misses most of
+        # the walls. That frame now scopes the layer search — which is what excludes
+        # the elevation layers by geometry rather than by name.
+        layer_choice = None
+        if auto_layers and not layers:
+            from solve import layerscan
 
-    wall_stats = summarise(walls)
-    wall_stats["perimeter"] = perimeter_summary(walls)
+            within: dict[str, list] = {}
+            for seg in reading["_segments"]:
+                face = Face(
+                    ax=(seg.x1 - ox) * scale, ay=(seg.y1 - oy) * scale,
+                    bx=(seg.x2 - ox) * scale, by=(seg.y2 - oy) * scale, layer=seg.layer,
+                )
+                if (min(face.ax, face.bx) >= x0 - 1 and max(face.ax, face.bx) <= x1 + 1
+                        and min(face.ay, face.by) >= y0 - 1 and max(face.ay, face.by) <= y1 + 1):
+                    within.setdefault(seg.layer, []).append(face)
 
-    # ---- Rooms -------------------------------------------------------------
-    rooms = sp.detect_spaces(walls, labels=labels, classify_room=classify_room)
-    room_stats = sp.summarise(rooms)
-
-    holes, unhosted = op.from_sized_blocks(in_frame, walls, kernel.guess_item)
-    holes = op.dedupe(holes)
-    opening_stats = op.summarise(holes, unhosted)
-
-    fixtures: list[dict] = []
-    if with_fixtures:
-        footprints = blk.block_footprints(doc, scale)
-        for placement in in_frame:
-            w, d = footprints.get(placement["block"], (0.0, 0.0))
-            px, py = placement["position"]["x"], placement["position"]["y"]
-            room = next(
-                (r.name for r in rooms
-                 if _inside(px, py, r.loop)), None
+            shortlist = layerscan.recommended(layerscan.scan(within)) | (chosen_here & set(within))
+            selected, trace = layerscan.select_within_frame(
+                within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
             )
-            verdict = classify_footprint(
-                width=w, depth=d, block=placement["block"], layer=placement["layer"],
-                room_name=room, against_wall=False, guess_item=kernel.guess_item,
-            )
-            fixtures.append({
-                "block": placement["block"], "position": placement["position"],
-                "rotation": placement["rotation"], "room": room,
-                # Kept because the plan drawing needs it and re-measuring means
-                # reopening the DXF. It is also the evidence behind the verdict.
-                "footprint": {"w": round(w, 3), "d": round(d, 3)},
-                **verdict.as_dict(),
-            })
+            if selected:
+                pool = [f for name in selected for f in within[name]]
+                walls = join_corners(pair_faces(pool))
+                chosen_here = selected
+                layer_choice = {"selected": sorted(selected), "trace": trace}
 
-    # ---- Meshes ------------------------------------------------------------
-    wall_mesh, floor_mesh, fixture_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
-    wall_build = build_walls(wall_mesh, walls, holes, height)
-    slab_build = build_slabs(floor_mesh, rooms)
-    fixture_build = build_fixtures(fixture_mesh, fixtures, CATALOGUE_DIMS)
+        # ---- Re-scope annotations to where the walls actually are ---------------
+        # The frame bbox comes from the bootstrap pass and is deliberately generous.
+        # Blocks inside it but far outside the wall extent are not part of the
+        # building: on one real drawing, 16 of 28 door blocks sat in a 6 x 3 m
+        # corner with no walls anywhere near them — a door SCHEDULE, a legend of
+        # door types. Counting those as doors we failed to place made the verify
+        # gate block a model that was fine.
+        #
+        # The wall extent is the honest boundary: annotation that belongs to the
+        # building sits on the building.
+        if walls:
+            wx0 = min(min(w.ax, w.bx) for w in walls)
+            wx1 = max(max(w.ax, w.bx) for w in walls)
+            wy0 = min(min(w.ay, w.by) for w in walls)
+            wy1 = max(max(w.ay, w.by) for w in walls)
+            x0, y0, x1, y1 = wx0, wy0, wx1, wy1
+            labels = _labels_in(x0, y0, x1, y1)
+            in_frame = _blocks_in(x0, y0, x1, y1)
+
+        # ---- The envelope ------------------------------------------------------
+        # A partitions-only plan encloses almost nothing, because the largest space
+        # in a modern house is open plan and bounded by the building rather than by
+        # interior walls. See hypothesise/perimeter.py.
+        if with_perimeter:
+            walls = add_perimeter(walls)
+
+        wall_stats = summarise(walls)
+        wall_stats["perimeter"] = perimeter_summary(walls)
+
+        # ---- Rooms -------------------------------------------------------------
+        rooms = sp.detect_spaces(walls, labels=labels, classify_room=classify_room)
+        room_stats = sp.summarise(rooms)
+
+        holes, unhosted = op.from_sized_blocks(in_frame, walls, kernel.guess_item)
+        holes = op.dedupe(holes)
+        opening_stats = op.summarise(holes, unhosted)
+
+        fixtures: list[dict] = []
+        if with_fixtures:
+            footprints = blk.block_footprints(doc, scale)
+            for placement in in_frame:
+                w, d = footprints.get(placement["block"], (0.0, 0.0))
+                px, py = placement["position"]["x"], placement["position"]["y"]
+                room = next(
+                    (r.name for r in rooms
+                     if _inside(px, py, r.loop)), None
+                )
+                verdict = classify_footprint(
+                    width=w, depth=d, block=placement["block"], layer=placement["layer"],
+                    room_name=room, against_wall=False, guess_item=kernel.guess_item,
+                )
+                fixtures.append({
+                    "block": placement["block"], "position": placement["position"],
+                    "rotation": placement["rotation"], "room": room,
+                    # Kept because the plan drawing needs it and re-measuring means
+                    # reopening the DXF. It is also the evidence behind the verdict.
+                    "footprint": {"w": round(w, 3), "d": round(d, 3)},
+                    **verdict.as_dict(),
+                })
+
+        # ---- Meshes ------------------------------------------------------------
+        wall_mesh, floor_mesh, fixture_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
+        wall_build = build_walls(wall_mesh, walls, holes, height)
+        slab_build = build_slabs(floor_mesh, rooms)
+        fixture_build = build_fixtures(fixture_mesh, fixtures, CATALOGUE_DIMS)
+
+        return {
+            "walls": walls, "rooms": rooms, "holes": holes,
+            "unhosted": unhosted, "fixtures": fixtures,
+            "chosen": chosen_here, "layerChoice": layer_choice,
+            "wallStats": wall_stats, "roomStats": room_stats,
+            "openingStats": opening_stats,
+            "meshes": (wall_mesh, floor_mesh, fixture_mesh),
+            "builds": (wall_build, slab_build, fixture_build),
+        }
+
+    storey = _solve_frame(walls, (x0, y0, x1, y1))
+    walls = storey["walls"]
+    rooms = storey["rooms"]
+    holes = storey["holes"]
+    unhosted = storey["unhosted"]
+    fixtures = storey["fixtures"]
+    chosen = storey["chosen"]
+    layer_choice = storey["layerChoice"]
+    wall_stats = storey["wallStats"]
+    room_stats = storey["roomStats"]
+    opening_stats = storey["openingStats"]
+    wall_mesh, floor_mesh, fixture_mesh = storey["meshes"]
+    wall_build, slab_build, fixture_build = storey["builds"]
+
 
     meshes = {"storey0_walls": wall_mesh, "storey0_floors": floor_mesh}
     if fixture_build["fixtures"]:
