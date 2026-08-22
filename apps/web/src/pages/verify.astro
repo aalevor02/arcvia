@@ -49,6 +49,7 @@ import Base from '../layouts/Base.astro'
 
 <script>
   import { verifyOtp, sendOtp, DEV_CODE_KEY } from '../lib/auth'
+  import { openStudioUrl } from '../lib/links'
   import { getUser } from '../lib/api'
 
   const form = document.getElementById('otp-form') as HTMLFormElement | null
@@ -102,7 +103,7 @@ import Base from '../layouts/Base.astro'
     try {
       await verifyOtp(code)
       sessionStorage.removeItem(DEV_CODE_KEY)
-      window.location.href = '/welcome/'
+      window.location.href = openStudioUrl()
     } catch (err) {
       say(err instanceof Error ? err.message : 'That code did not work.')
       if (submit) {
@@ -117,7 +118,7 @@ import Base from '../layouts/Base.astro'
     try {
       const result = await sendOtp()
       if (result.alreadyVerified) {
-        window.location.href = '/welcome/'
+        window.location.href = openStudioUrl()
         return
       }
       say('New code sent.', true)
