@@ -427,6 +427,18 @@ const title = 'Walkthrough'
             () => viewer.modelRoot,
             absolute,
             () => viewer.requestRender(),
+            {
+              // The summary PDF: the frame on screen, the choices that applied,
+              // and the attribution for everything shipped. `snapshot` renders
+              // and reads in one task, which is what makes capture work without
+              // preserveDrawingBuffer.
+              title: scene.name ?? 'Walkthrough',
+              capture: () => viewer.snapshot({ width: 1200 }),
+              credits: (scene.credits ?? []).map(
+                (credit: { author: string; licence: string }) =>
+                  `${credit.author} (${credit.licence})`,
+              ),
+            },
           )
         }
 

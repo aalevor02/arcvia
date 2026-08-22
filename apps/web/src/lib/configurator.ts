@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
+import { buildSummaryPdf } from './pdf'
+
 /**
  * The client-side configurator: switching finishes on a published walkthrough.
  *
@@ -237,12 +239,22 @@ export function applyObjectChoice(
  * Astro island of vanilla script, and a dependency added here is shipped to
  * every client walkthrough ever published.
  */
+export interface SummaryContext {
+  /** The scene's name — the PDF's title. */
+  title: string
+  /** The viewer's own snapshot(), which renders and reads in one task. */
+  capture?: () => string | null
+  /** Attribution lines for what is on the page as built. */
+  credits?: string[]
+}
+
 export function mountConfigurator(
   container: HTMLElement,
   options: SceneOptions,
   getRoot: () => THREE.Object3D | null,
   resolveUrl: (url: string) => string,
   onApplied?: () => void,
+  summary?: SummaryContext,
 ): void {
   const flooring = options.flooring
   const objects = options.objects
@@ -252,6 +264,19 @@ export function mountConfigurator(
 
   const wrap = document.createElement('div')
   wrap.className = 'configurator'
+
+  /**
+   * What the visitor has chosen so far, for the summary.
+   *
+   * The pressed states already track this visually, but a PDF built by reading
+   * aria attributes back out of the DOM would be the tail wagging the dog.
+   * Selections are recorded when — and only when — a switch actually applied,
+   * so the summary describes what is on screen, never what was clicked.
+   */
+  const chosen: { flooring: FinishChoice | null; objects: Map<string, ObjectChoice> } = {
+    flooring: null,
+    objects: new Map(),
+  }
 
   if (hasObjects && objects) {
     for (const group of objects.groups) {
@@ -286,6 +311,7 @@ export function mountConfigurator(
             pressed?.setAttribute('aria-pressed', 'false')
             button.setAttribute('aria-pressed', 'true')
             pressed = button
+            chosen.objects.set(group.label, choice)
             onApplied?.()
           })
         })
@@ -329,6 +355,7 @@ export function mountConfigurator(
         active?.setAttribute('aria-pressed', 'false')
         button.setAttribute('aria-pressed', 'true')
         active = button
+        chosen.flooring = choice
         onApplied?.()
       })
     })
@@ -336,5 +363,77 @@ export function mountConfigurator(
     wrap.appendChild(button)
   }
 
+  if (summary) {
+    wrap.appendChild(summaryButton(summary, options, chosen))
+  }
+
   container.appendChild(wrap)
+}
+
+/**
+ * "Download summary" — the sheet a buyer takes to a meeting.
+ *
+ * Built at click time from the CURRENT state: the frame on screen, the choices
+ * that actually applied, and the attribution for everything shipped. Nothing is
+ * precomputed, because the whole point is that it reflects what the visitor
+ * configured, and they have not configured it yet when the page loads.
+ */
+function summaryButton(
+  summary: SummaryContext,
+  options: SceneOptions,
+  chosen: { flooring: FinishChoice | null; objects: Map<string, ObjectChoice> },
+): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'configurator-summary'
+  button.textContent = 'Download summary (PDF)'
+
+  button.addEventListener('click', () => {
+    const rows: { label: string; value: string }[] = []
+
+    if (options.flooring) {
+      rows.push({
+        label: options.flooring.label,
+        value: chosen.flooring ? chosen.flooring.name : 'As designed',
+      })
+    }
+    for (const group of options.objects?.groups ?? []) {
+      const pick = chosen.objects.get(group.label)
+      rows.push({
+        label: group.label,
+        value: pick && pick.id !== 'original' ? pick.name : 'As designed',
+      })
+    }
+
+    // Attribution: the page's own credits, plus the authors of anything the
+    // visitor switched IN. The PDF is a published artefact containing their
+    // work, so the licence obligation follows it onto paper.
+    const credits = new Set<string>(summary.credits ?? [])
+    if (chosen.flooring) {
+      credits.add(`${chosen.flooring.author} (${chosen.flooring.licence})`)
+    }
+    for (const pick of chosen.objects.values()) {
+      if (pick.author) credits.add(`${pick.author}${pick.licence ? ` (${pick.licence})` : ''}`)
+    }
+
+    const blob = buildSummaryPdf({
+      title: summary.title,
+      subtitle: `Options summary - ${new Date().toLocaleDateString()}`,
+      imageJpeg: summary.capture?.() ?? null,
+      rows,
+      credits:
+        credits.size > 0 ? [`Includes work by: ${[...credits].join(', ')}.`] : [],
+      footer: 'Made with Arcvia',
+    })
+
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${summary.title.replace(/[^\w-]+/g, '-').toLowerCase() || 'summary'}-options.pdf`
+    anchor.click()
+    // Deferred: revoking synchronously races the browser starting the download.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  })
+
+  return button
 }
