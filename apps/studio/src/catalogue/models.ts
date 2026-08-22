@@ -95,18 +95,15 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  * exists to check.
  *
  * Implemented and measured, it corrected 29 of 38 footprints and RUINED the
- * rest, because several models are rotated 90 degrees in plan relative to their
- * catalogue entry:
+ * rest, because their plan orientation was wrong — a uniform scale is forgiving
+ * of that, since it merely under-fills, while a per-axis scale BAKES IT IN and
+ * stretches the model along axes it does not occupy.
  *
- *   counter         want 2.40 x 0.60    got 0.60 x 2.40
- *   wardrobe-small  want 0.90 x 0.60    got 0.90 x 1.62
- *   wc              want 0.38 x 0.70    got 0.60 x 0.38
- *
- * A uniform scale is forgiving of a wrong plan orientation — it under-fills.
- * A per-axis scale BAKES IT IN, stretching the model along the axes it does not
- * occupy. So the footprint cannot be made authoritative until plan orientation
- * is, and the order of work is: measure each asset's yaw the way `upAxis` was
- * measured, then revisit this.
+ * Chasing that found the quarter-turn bug below, and measuring every asset's
+ * plan aspect found only three genuinely transposed models rather than the many
+ * the experiment implied. Both are now fixed, so this is worth revisiting — but
+ * on measurement rather than on the argument alone, because the argument was
+ * right and the result was still worse.
  *
  * ── A warning was tried too, and dropped ────────────────────────────────────
  * Comparing the model's plan aspect against its slot's does identify assets
@@ -126,13 +123,35 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  */
 function fit(
   model: THREE.Object3D,
-  size: { width: number; height: number; depth: number },
+  catalogueSize: { width: number; height: number; depth: number },
   upAxis: 'y' | 'z' = 'y',
+  /** The facing correction that will be applied AFTER this, in degrees. */
+  yaw = 0,
 ): void {
   // Stand a Z-up model up BEFORE measuring it. Measuring first and rotating
   // after would fit the object's depth to the catalogue's height, which is the
   // bug this exists to remove.
   if (upAxis === 'z') model.rotation.x = -Math.PI / 2
+
+  /**
+   * ── A quarter turn swaps which catalogue dimension is which ──────────────
+   * `yaw` is applied after this, deliberately: it turns the model about its own
+   * centre once fitting has seated it, so a facing correction cannot move the
+   * object off its placement.
+   *
+   * For 180 degrees that is harmless. For 90 or 270 it is not, because the
+   * rotation TRANSPOSES the footprint: a counter fitted to 2.4 x 0.6 and then
+   * turned a quarter comes to rest occupying 0.6 x 2.4, with its long axis
+   * across the wall it was drawn along. Two catalogue assets carry yaw 270 and
+   * both were doing this.
+   *
+   * So the fit targets the dimensions the model will END UP in. The rotation
+   * still happens afterwards; it is only what "width" means that changes.
+   */
+  const quarterTurn = Math.abs(Math.round(yaw / 90)) % 2 === 1
+  const size = quarterTurn
+    ? { width: catalogueSize.depth, height: catalogueSize.height, depth: catalogueSize.width }
+    : catalogueSize
 
   const box = new THREE.Box3().setFromObject(model)
   const extent = box.getSize(new THREE.Vector3())
@@ -228,7 +247,7 @@ export function upgradeModels(
         if (!loaded) return false
 
         const instance = loaded.clone(true)
-        fit(instance, size, upAxis)
+        fit(instance, size, upAxis, yaw)
         if (yaw !== 0) {
           // Wrapped, so the correction turns the model about its own centre
           // *after* fitting has seated it. Rotating the fitted object directly

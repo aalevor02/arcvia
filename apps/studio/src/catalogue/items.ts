@@ -136,6 +136,8 @@ export const CATALOGUE: CatalogueItem[] = [
       source:
         'https://sketchfab.com/3d-models/modern-wooden-dining-table-cb2e355c72464b5ea1d3b9e9d94b97f3',
       triangles: 1842,
+      // Measured: its plan proportions match the slot only turned a quarter.
+      yaw: 90,
     },
   },
   {
@@ -244,7 +246,7 @@ export const CATALOGUE: CatalogueItem[] = [
       source:
         'https://sketchfab.com/3d-models/double-bed-c505ffffc1524865ba63af837346f1f7',
       triangles: 5000,
-      yaw: 180,
+      yaw: 270,
     },
   },
   {
@@ -490,8 +492,6 @@ export const CATALOGUE: CatalogueItem[] = [
     tone: 'white',
     model: {
       url: '/models/wc.glb',
-      // Measured: its own proportions match the catalogue only when Z is up.
-      upAxis: 'z',
       licence: 'CC Attribution 4.0',
       author: 'Ekbercg',
       source:
@@ -516,6 +516,8 @@ export const CATALOGUE: CatalogueItem[] = [
       source:
         'https://sketchfab.com/3d-models/memoirs-washbasinsink-579df71336a9493f8f52ddc815d2fc39',
       triangles: 4999,
+      // Measured: its plan proportions match the slot only turned a quarter.
+      yaw: 90,
     },
   },
   {
