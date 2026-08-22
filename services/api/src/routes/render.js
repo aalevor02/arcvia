@@ -281,7 +281,10 @@ export async function registerRenderRoutes(app) {
         hdriUrl: resolveUrl(hdriUrl ?? scene.hdriUrl),
         camera: {
           position: toBlenderVec(cameraPosition),
-          rotation: cameraRotation ?? null,
+          // Converted, not forwarded — the position is turned into Z-up and the
+          // orientation must take the identical turn or the camera faces the
+          // wrong way. See toBlenderQuat.
+          rotation: toBlenderQuat(cameraRotation),
         },
         width: config.width,
         height: config.height,
@@ -405,7 +408,42 @@ export async function registerRenderRoutes(app) {
  * implementation performs inline at every render call site; doing it once here
  * means a new call site cannot forget it.
  */
-function toBlenderVec(v) {
+export function toBlenderVec(v) {
   if (!v) return null
   return { x: v.x, y: -v.z, z: v.y }
+}
+
+/**
+ * The SAME axis change, for the camera's ORIENTATION.
+ *
+ * ── Why this had to exist ────────────────────────────────────────────────────
+ * `toBlenderVec` rotated the camera's POSITION into Z-up (a +90° turn about X),
+ * and the rotation was forwarded to Blender untouched — a Three.js Y-up world
+ * quaternion applied to a camera in a Z-up scene. So the camera stood in the
+ * right place and faced the wrong way: a view framing the origin from (6,4,6)
+ * rendered aimed ~66° off, and a level walkthrough camera pointed at the floor.
+ * Measured, on every AI and still render, and invisible in review because
+ * `bake.mjs` asserted only the position.
+ *
+ * The orientation must take the same +90°-about-X the position took, applied on
+ * the WORLD side: q_blender = Rx(+90°) · q_three. Premultiplying rotates the
+ * whole orientation into the new frame, so the Blender camera's forward
+ * (its local -Z) ends up being the old forward carried through the same axis
+ * change as the position — which is the only way the two stay consistent.
+ */
+const RX_PLUS_90 = { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 }
+
+/** Hamilton product a·b, quaternions as {x, y, z, w}. */
+function quatMul(a, b) {
+  return {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  }
+}
+
+export function toBlenderQuat(q) {
+  if (!q) return null
+  return quatMul(RX_PLUS_90, q)
 }
