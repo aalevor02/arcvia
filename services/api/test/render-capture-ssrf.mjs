@@ -125,6 +125,31 @@ try {
        !/captured view must be an uploaded image/.test(legit.payload.message ?? ''),
      `status ${legit.status}: ${legit.payload.message ?? ''}`)
 
+  // ---- hdriUrl is the same vector, and refused the same way ---------------
+  // A non-AI render whose body carries a hostile hdriUrl. The model is saved so
+  // the render is otherwise valid; only the environment is the attack.
+  await call(`/scenes/${scene.id}`, { method: 'PATCH', token, body: { modelUrl: '/uploads/model.glb' } })
+  const submitHdri = (hdriUrl) =>
+    call('/render/jobs', {
+      method: 'POST',
+      token,
+      body: { sceneId: scene.id, preset: 'preview', hdriUrl },
+    })
+  const hdriAttacks = [
+    ['metadata endpoint', 'http://169.254.169.254/latest/meta-data/'],
+    ['external https', 'https://attacker.example/x.hdr'],
+    ['a bare path', '/etc/passwd'],
+    ['traversal out of env', '/env/../../etc/passwd'],
+  ]
+  for (const [label, value] of hdriAttacks) {
+    const res = await submitHdri(value)
+    ok(`hdriUrl refused: ${label}`, res.status === 400, `status ${res.status}`)
+  }
+  const legitEnv = await submitHdri('/env/midday.hdr')
+  ok('a catalogue /env/ sky is accepted', legitEnv.status !== 400 ||
+     !/environment must be/.test(legitEnv.payload.message ?? ''),
+     `status ${legitEnv.status}`)
+
   // ---- The credit ledger never moved for a refused attack -----------------
   const me = await call('/organisations/me', { token })
   const owner = (me.payload.members ?? []).find((m) => m.isOwner)

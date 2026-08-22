@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth.js'
 import { spend, balanceFor, InsufficientCredits } from '../lib/credits.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
 import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
-import { resolveUrl, isOwnUpload } from '../lib/storage.js'
+import { resolveUrl, isOwnUpload, isEnvAsset } from '../lib/storage.js'
 import { checkSubmission } from '../lib/idempotency.js'
 import { AI_STYLES, isStyle } from '../lib/aiRender.js'
 
@@ -185,6 +185,20 @@ export async function registerRenderRoutes(app) {
       return reply
         .status(409)
         .send({ message: 'Save the scene before rendering it.' })
+    }
+
+    // ── A body-supplied hdriUrl must be a catalogue env or our own upload ────
+    // Like captureUrl, this reaches the worker: resolveUrl passes an http(s)
+    // value through untouched (the worker then FETCHES it — SSRF, incl.
+    // http://169.254.169.254/… metadata) and a bare path through too (read off
+    // this server's disk). The only legitimate values are a shipped
+    // environment (`/env/*.hdr`) or an uploaded HDR (`/uploads/…`). scene.hdriUrl
+    // is trusted — it was written through the allow-listed scene PATCH — so
+    // only the caller-supplied override is checked here.
+    if (hdriUrl != null && !isEnvAsset(hdriUrl) && !isOwnUpload(hdriUrl)) {
+      return reply
+        .status(400)
+        .send({ message: 'An environment must be a catalogue sky or an uploaded HDR.' })
     }
 
     // Resolved here rather than at the worker, because only this side knows

@@ -303,3 +303,19 @@ export function isOwnUpload(url) {
   if (typeof url !== 'string' || !url.startsWith(`${PUBLIC_PREFIX}/`)) return false
   return pathFor(url.slice(PUBLIC_PREFIX.length + 1)) !== null
 }
+
+/**
+ * Is this a shipped environment asset (`/env/<name>.hdr`) that resolves inside
+ * the env directory?
+ *
+ * The companion to isOwnUpload for the OTHER thing a render legitimately
+ * references — a catalogue HDRI. Same discipline: prefix plus a resolved-path
+ * containment check, so `/env/../../etc/passwd` and an absolute URL are both
+ * rejected. Callers use `isOwnUpload(url) || isEnvAsset(url)` to gate a
+ * caller-supplied hdriUrl before it reaches the worker.
+ */
+export function isEnvAsset(url) {
+  if (typeof url !== 'string' || !url.startsWith('/env/')) return false
+  const base = STATIC_ROOTS.get('/env/')
+  return base ? within(base, url.slice('/env/'.length)) !== null : false
+}
