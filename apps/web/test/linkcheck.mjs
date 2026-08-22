@@ -1,4 +1,32 @@
-const ORIGIN = process.argv[2] ?? 'http://192.168.1.36:4321'
+/**
+ * Where to crawl.
+ *
+ * This defaulted to `http://192.168.1.36:4321` — the LAN address of whichever
+ * machine last ran it. Everywhere else `npm run linkcheck` failed with
+ * `FETCH fetch failed /`, which reads like a broken site rather than a checker
+ * pointed at a host that is not there, so the natural response is to go looking
+ * for a bug in the pages.
+ *
+ * Loopback is the only address that means the same thing on every machine. Pass
+ * an origin as the first argument to crawl a deployed site or a LAN address.
+ */
+const ORIGIN = (process.argv[2] ?? process.env.LINKCHECK_ORIGIN ?? 'http://127.0.0.1:4321')
+  .replace(/\/$/, '')
+
+// Say it before the first fetch, so a wrong target is obvious from the output
+// rather than inferred from the failures.
+console.log(`Crawling ${ORIGIN}\n`)
+
+try {
+  await fetch(ORIGIN + '/')
+} catch (error) {
+  console.error(
+    `Cannot reach ${ORIGIN} — ${error.message}\n\n` +
+      `Start the site first (npm run dev -w apps/web), or pass the origin:\n` +
+      `  node test/linkcheck.mjs https://arcvia.com`,
+  )
+  process.exit(2)
+}
 
 const seen = new Set()
 const queue = ['/']

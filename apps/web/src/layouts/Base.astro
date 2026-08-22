@@ -39,7 +39,17 @@ const gaId = import.meta.env.PUBLIC_GA_ID ?? ''
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
+    {/*
+      `summary_large_image` was declared here with no `og:image` anywhere on the
+      site — a card promising a large image and supplying none. See og.png.ts.
+      An absolute URL is required: crawlers do not resolve relative paths.
+    */}
     <meta name="twitter:card" content="summary_large_image" />
+    <meta property="og:image" content={new URL('/og.png', Astro.site).href} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={`${brand.name} — ${brand.description}`} />
+    <meta property="og:site_name" content={brand.name} />
 
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

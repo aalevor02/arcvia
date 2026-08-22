@@ -1,0 +1,38 @@
+---
+import brand from '@arcvia/brand'
+import Base from '../layouts/Base.astro'
+
+/**
+ * The page a visitor gets at an address that does not exist.
+ *
+ * Without this file Astro serves its own built-in 404 — a grey developer page
+ * carrying Astro's branding and a stack of framework links. In development that
+ * is helpful; shipped, it is the one page on the site that does not look like
+ * the product, and it is reached by exactly the people already having a bad
+ * time: a mistyped address, a stale link, a project that has been unpublished.
+ *
+ * `noindex` because a 404 that gets indexed competes with the real pages.
+ */
+---
+
+<Base
+  title="Page not found"
+  description={`That address does not exist on ${brand.name}.`}
+  noindex
+>
+  <section class="shell max-w-2xl py-24 text-center">
+    <p class="eyebrow">404</p>
+    <h1 class="h2 mt-3 text-balance">This page does not exist</h1>
+
+    <p class="mt-6 text-base leading-relaxed text-ink-soft">
+      The address may be mistyped, or the page may have moved. If you followed a
+      link to a client project, that project may have been unpublished by its
+      owner — the link starts working again if they publish it.
+    </p>
+
+    <div class="mt-10 flex flex-wrap justify-center gap-3">
+      <a class="btn-primary" href="/">Back to the home page</a>
+      <a class="btn-secondary" href="/contact/">Tell us what broke</a>
+    </div>
+  </section>
+</Base>

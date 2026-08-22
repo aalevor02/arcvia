@@ -16,6 +16,25 @@
 
   body {
     @apply bg-surface text-ink font-sans antialiased;
+    /* ── Keep the footer at the bottom on short pages ──────────────────────
+       Without this the footer sits wherever the content ends, which on a page
+       with little of it leaves a band of blank surface underneath — measured
+       at 164px on the 404 at a 898px viewport, and the same on every
+       confirmation and reset page. It reads as a page that failed to finish
+       loading.
+
+       `100dvh` rather than `100vh`: on mobile Safari `vh` is the height with
+       the toolbar HIDDEN, so a `100vh` page is always slightly taller than the
+       screen and every short page gets a scrollbar it does not need. */
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The one element allowed to absorb the slack. Header and footer keep their
+     natural height; anything else growing here would stretch the wrong box. */
+  body > main {
+    flex: 1 0 auto;
   }
 
   /* A visible focus ring is the single highest-value accessibility default.
