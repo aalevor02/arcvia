@@ -72,10 +72,14 @@ function apiBase(): string {
  *
  * So the markup is neutral and this fills it in from whatever loaded.
  *
- * ⚠ This does NOT fix link previews. A crawler does not run JavaScript, so
- * WhatsApp and Slack read the static file and every project still shares the
- * same card. That needs `/p/<slug>/` served by something that can inject the
- * tags before the HTML leaves the server, and is recorded as an open gap.
+ * This is for the reader, not the crawler. A crawler does not run JavaScript,
+ * so link previews are served by `services/api/src/routes/share.js`, which
+ * injects the same tags into `/p/<slug>/` before the HTML is sent.
+ *
+ * ⚠ The wording below is duplicated there deliberately, so the card and the tab
+ * agree. If you change how a heading is built here, change `cardFor()` there —
+ * a share card that says something different from the page it opens is the bug
+ * this pair exists to avoid.
  */
 function describe(heading: string, detail: string): void {
   document.title = heading

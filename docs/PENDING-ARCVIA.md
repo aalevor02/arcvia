@@ -342,10 +342,20 @@ checking is minutes against days. The corollary is the one already at trap 6:
 this codebase's real defect is not missing features, it is finished features
 nothing reaches.
 
-### The Validate stage — nothing in it exists at all
+### The Validate stage
 
-Clearance checking is the notable one: **the furniture catalogue is dimensioned
-specifically for it and nothing uses those dimensions.** 4–6 d.
+~~Nothing in it exists at all.~~ **Stale when written.** Clearance checking —
+described here as the notable gap, *"the furniture catalogue is dimensioned
+specifically for it and nothing uses those dimensions"* — was already built
+(`solve/clearance.py`, 25 assertions) and is now run on every reconstruct with
+its findings in the model (`3e6a38f`).
+
+⚠ It checks **the primary storey only**. `elements.fixtures` covers every floor
+as of `d82c34e`, but `elements.walls` and `spaces` are one floor by design —
+they are what the plan drawing draws — so clearance filters to
+`storeys.primary`. Furniture on other floors is in the model and unchecked.
+Closing that needs per-storey walls in the model, which is a real change, not a
+flag.
 
 Then sun path / shadow study (4–6 d) and code checks — min room, corridor,
 egress (8–12 d).
@@ -390,9 +400,32 @@ other.
 client comments (5–7 d) · per-scene branding (2–3 d) · PDF summary of chosen
 options (3–4 d).
 
-⚠ **Two things the publisher surfaced that are NOT fixed:**
+⚠ **Two things the publisher surfaced. One is now fixed:**
 
-1. **Every published project shares the same social card.**
+1. ~~**Every published project shares the same social card.**~~ ✅ **DONE**,
+   `services/api/src/routes/share.js` + 26 assertions in
+   `test/share-card.mjs`. The API serves `/p/<slug>/` itself and injects the
+   title, description, `og:*` and `twitter:card` from the publication the slug
+   names, before the HTML is sent. It had to be the API rather than the static
+   host, because the answer depends on a database lookup and a bucket cannot do
+   one.
+
+   Three things worth knowing if you touch it:
+   - **The escaping is the load-bearing part**, not the tags. Names, places and
+     taglines are typed by users in the studio and land inside HTML attributes
+     on a page served to *that user's clients*. A name containing `"` ends the
+     attribute; one containing `<script>` does more. Asserted against both.
+   - **An unknown or unpublished slug gets the NEUTRAL card and a 404**, never
+     the previous project's — which is why `apps/visualisation/index.html` must
+     keep saying nothing about any client. That file is now the 404 card.
+   - **`og:image` is emitted only for an already-absolute http(s) URL.** Project
+     images may be storage keys, and resolving one against this service's origin
+     produces a confident link to nothing; a preview with a broken image renders
+     worse than one with none.
+
+   Superseded, for the record:
+
+
    `apps/visualisation/index.html` was one client's — hard-coded title,
    description, Open Graph tags, and a `noscript` block carrying a developer's
    phone number. The markup is neutral now and the tags are filled in at run

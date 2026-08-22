@@ -6,6 +6,7 @@ import { registerAuthRoutes } from './routes/auth.js'
 import { registerOrgRoutes } from './routes/organisation.js'
 import { registerSceneRoutes } from './routes/scenes.js'
 import { registerPublicationRoutes } from './routes/publications.js'
+import { registerShareRoutes } from './routes/share.js'
 import { registerRenderRoutes, reconcileRenderJobs } from './routes/render.js'
 import { registerLeadRoutes } from './routes/leads.js'
 import { registerBillingRoutes } from './routes/billing.js'
@@ -73,6 +74,9 @@ await app.register(registerUploadRoutes, { prefix: '/uploads' })
 await app.register(registerDetectRoutes, { prefix: '/detect' })
 await app.register(registerCadRoutes, { prefix: '/cad' })
 await app.register(registerLeadRoutes)
+// No prefix: `/p/<slug>/` is the address printed on a client's link, and it is
+// served as HTML rather than JSON. See routes/share.js.
+await app.register(registerShareRoutes)
 
 app.setErrorHandler((error, request, reply) => {
   const status = error.statusCode ?? 500

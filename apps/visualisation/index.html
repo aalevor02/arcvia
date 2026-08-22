@@ -18,11 +18,15 @@
       project actually loads. The defaults below are deliberately neutral, so the
       wrong answer is never the one on screen.
 
-      ⚠ A crawler does not run JavaScript. Link previews on WhatsApp, Slack and
-      the like read THIS file, so every project currently shares the same card.
-      Fixing that properly needs `/p/<slug>/` served by something that injects
-      the tags server-side — see docs/PENDING-ARCVIA.md. It is a real gap in the
-      publisher, not an oversight here.
+      A crawler does not run JavaScript, so link previews on WhatsApp and Slack
+      read THIS file and never see what `main.ts` sets. That is handled a layer
+      up: `services/api/src/routes/share.js` serves `/p/<slug>/` and injects the
+      title, description and Open Graph tags from the publication the slug names
+      before the HTML leaves the server.
+
+      So these defaults are what a crawler sees only when the slug names nothing
+      published — which is why they must stay neutral. Anything named here is
+      served for every project that 404s.
     -->
     <title>Project walkthrough</title>
     <meta name="description" content="An interactive presentation of a residential project." />
