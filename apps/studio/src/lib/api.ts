@@ -1,5 +1,6 @@
 import type { Plan } from '../plan/types'
 import type { Credit } from '../catalogue/credits'
+import type { SceneOptions } from '../publish/options'
 import type { Project } from '@arcvia/publication'
 import type { SceneView, Hotspot, Branding } from '../plan/presentation'
 
@@ -167,6 +168,15 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
    * geometry bound. The published viewer renders these; nothing else reads them.
    */
   credits?: Credit[]
+  /**
+   * Client options — what a visitor may reconfigure on the published page.
+   *
+   * Composed in the studio (`publish/options.ts`), which uploads every texture
+   * a choice needs into the API's storage first: the published page is another
+   * origin with no session, so the scene must carry everything it needs, the
+   * same way it carries its credits.
+   */
+  options?: SceneOptions
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }
@@ -459,6 +469,35 @@ export const setAccessCode = (id: string, code: string) =>
  * model has to preserve, and JPEG artefacts around window frames and skirtings
  * are exactly the detail it would otherwise smear.
  */
+/**
+ * Upload an image we already hold as a blob.
+ *
+ * Same route and same shape as `uploadCapture`, without the data-URL detour —
+ * the configurator fetches finish maps from the studio's own /surfaces and
+ * ships the bytes on unchanged. The server ignores the declared type and
+ * sniffs, so nothing here is trusted anyway.
+ */
+export async function uploadImage(blob: Blob, filename: string): Promise<StoredFile> {
+  const body = new FormData()
+  body.append('file', blob, filename)
+
+  const token = getToken()
+  const response = await fetch(`${BASE}/uploads/floorplan`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  })
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  if (!response.ok) {
+    throw new ApiError(
+      typeof payload.message === 'string' ? payload.message : 'Could not upload the image.',
+      response.status,
+    )
+  }
+  return payload as unknown as StoredFile
+}
+
 export async function uploadCapture(dataUrl: string): Promise<StoredFile> {
   const [header, base64] = dataUrl.split(',')
   const type = header.match(/data:([^;]+)/)?.[1] ?? 'image/png'

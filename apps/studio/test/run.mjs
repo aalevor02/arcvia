@@ -39,6 +39,7 @@ const targets = entries.length
       'test/compose.test.ts',
       'test/wallTypes.test.ts',
       'test/roomFinish.test.ts',
+      'test/options.test.ts',
       'test/presentation.test.ts',
       'test/detectionQuality.test.ts',
       'test/furnish.test.ts',

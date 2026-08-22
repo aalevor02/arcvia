@@ -22,6 +22,8 @@ import { creditsFor } from '../catalogue/credits'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
+import OptionsPanel from '../components/OptionsPanel'
+import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
 import { FLOOR_FINISHES, type FloorFinish, type Plan } from '../plan/types'
@@ -119,6 +121,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * against the worker's own default sky rather than failing.
    */
   const [environment, setEnvironment] = useState<string | null>(null)
+  /** Client options for the published page, loaded with the scene. */
+  const [options, setOptions] = useState<SceneOptions | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -152,6 +156,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         })
         setGated(Boolean(scene.protected))
         setEnvironment(scene.hdriUrl ?? null)
+        setOptions(scene.options ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -167,6 +172,15 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     void updateScene(sceneId, { hdriUrl: url }).catch(() =>
       setStatus('That change could not be saved. Check your connection.'),
     )
+  }
+
+  /**
+   * Persist the client options. Awaited, unlike the others: the textures were
+   * just uploaded and the save is the whole point of the button.
+   */
+  async function updateOptions(next: SceneOptions | null) {
+    setOptions(next)
+    await updateScene(sceneId, { options: next ?? undefined })
   }
 
   /** Persist, and keep the panel responsive by not awaiting the write. */
@@ -458,7 +472,13 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       // `publishScene` so a page is never public without them.
       const credits = creditsFor(plan.floors.flatMap((floor) => Object.values(floor.objects)), {
         environmentUrl: environment,
-        surfaces: usedSurfaces(),
+        // Offered finishes ride along with the used ones: a finish a visitor
+        // can switch TO is shipped to the page whether or not any room wears
+        // it at publish time, and its author is owed either way.
+        surfaces: [
+          ...usedSurfaces(),
+          ...(options?.flooring?.choices.map((choice) => choice.id) ?? []),
+        ],
       })
       try {
         await updateScene(sceneId, { credits })
@@ -699,6 +719,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           value={environment}
           onChange={updateEnvironment}
         />
+
+        <OptionsPanel value={options} onSave={updateOptions} />
 
         <PresentationPanel
           viewer={viewerRef.current}

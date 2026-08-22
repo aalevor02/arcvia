@@ -107,6 +107,11 @@ export async function registerSceneRoutes(app) {
       // as the catalogue changed, and the page a client was shown in March is
       // the page whose credits have to be right.
       'credits',
+      // Client options for the published page — which finishes a visitor may
+      // switch between. Composed in the studio, which uploads every texture a
+      // choice needs into this API's storage first, so the published page
+      // never has to reach back into the studio's origin for a file.
+      'options',
     ]
     // ── Why this rejects instead of filtering ───────────────────────────────
     // This used to be `.filter(([k]) => allowed.includes(k))`. A caller sending
@@ -350,6 +355,8 @@ function publicPayload(scene) {
     // model's licence is met by the page the client opens, not by anything in
     // the editor.
     credits: scene.credits ?? [],
+    // Null rather than absent, matching hdriUrl: the page checks one field.
+    options: scene.options ?? null,
   }
 }
 
