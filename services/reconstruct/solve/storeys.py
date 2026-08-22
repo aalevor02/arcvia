@@ -78,12 +78,19 @@ _LEVELS: tuple[tuple[str, float], ...] = (
 _TYPICAL = re.compile(r"\btypical\b", re.I)
 
 #: Two frames belong to the same building only if their footprints are this
-#: close in each dimension. Storeys of one villa share a structural envelope;
-#: measured on the villa both storeys are 20.82 m wide to the centimetre.
+#: close in each dimension.
 #:
-#: 0.75 is deliberately loose — an upper floor is routinely SMALLER than the
-#: floor below (setbacks, terraces, a roof over a single-storey wing), so a
-#: tight congruence test rejects exactly the buildings this is for.
+#: **The signal is measured; the threshold is CHOSEN.** Storeys of one villa
+#: share a structural envelope — on the real villa both storeys are 20.82 m wide
+#: to the centimetre, a ratio of 1.00 — which is what establishes that footprint
+#: congruence carries information at all. It says nothing about where to put the
+#: cut, and 0.75 was not swept.
+#:
+#: It is deliberately loose, because the error it must not make is the strict
+#: one: an upper floor is routinely SMALLER than the floor below (setbacks,
+#: terraces, a roof over a single-storey wing), so a tight test rejects exactly
+#: the buildings this exists for. Over-grouping is safe here — the title check
+#: downstream refuses anything the drawing did not name.
 FOOTPRINT_CONGRUENCE = 0.75
 
 #: Floor-to-floor when nothing says otherwise. Indian residential is typically

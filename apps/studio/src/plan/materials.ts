@@ -455,6 +455,11 @@ export function disposeSurfaces(): void {
   for (const material of cache.values()) {
     material.map?.dispose()
     material.roughnessMap?.dispose()
+    // Every textured surface here also carries a normal map — `normalFrom`
+    // derives one for each, and `catalogue/surfaceUpgrade` replaces it with a
+    // photographed one. Omitting it leaked a third of the textures this module
+    // creates, and three does not free GPU memory on its own.
+    material.normalMap?.dispose()
     material.dispose()
   }
   cache.clear()

@@ -16,6 +16,7 @@ import {
   renderStyles,
 } from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
+import { upgradeSurfaces } from '../catalogue/surfaceUpgrade'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
@@ -212,6 +213,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     void upgradeModels(group, () => viewer.requestRender()).then((upgraded) => {
       if (upgraded > 0) setStatus(`${upgraded} object${upgraded === 1 ? '' : 's'} using real models`)
     })
+
+    // Photographed surfaces arrive the same way. Cheaper than the models — the
+    // materials are shared per kind, so this is eight downloads however large
+    // the plan is, and it resolves once for the session however often this
+    // effect re-runs.
+    void upgradeSurfaces(() => viewer.requestRender())
 
     // Framing the model fights the walk camera: it would yank the view back
     // outside the building on every edit.

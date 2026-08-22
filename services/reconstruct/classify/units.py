@@ -105,14 +105,29 @@ SAMPLE = 4000
 NOMINAL_THICKNESS: tuple[float, ...] = (0.100, 0.115, 0.150, 0.200, 0.229, 0.300)
 
 #: How far off a nominal a wall may be and still count as that nominal.
-#: Generous, because centrelines are measured across paired ink and drawings are
-#: not surveys — but far tighter than the 12x spread of the old band.
+#:
+#: **CHOSEN, not measured.** 20 mm is a judgement: generous enough for
+#: centrelines derived from paired ink on a drawing that is not a survey, tight
+#: enough to separate 0.115 from 0.150 (35 mm apart, the closest pair in the
+#: table above). Nothing was swept to arrive at it.
+#:
+#: What would falsify it: a real drawing whose walls cluster 25-40 mm off a
+#: nominal and are therefore all rejected, leaving the correct scale with no
+#: evidence. If that turns up, widen it — but re-check that 0.115 and 0.150 do
+#: not merge, because that is what it is protecting.
 NOMINAL_TOLERANCE = 0.020
 
 #: Below this many walls landing on a nominal at the winning scale, the signal
 #: is not a signal. A drawing with almost no measurable walls cannot tell you
 #: its own unit, and should say so rather than pick the least-bad of five bad
 #: answers.
+#:
+#: **CHOSEN, not measured**, and on the loose side deliberately: refusing costs
+#: a question, while deciding wrongly builds the villa a thousand times too
+#: small. For scale, the seven real drawings here score 43 to 675 walls at their
+#: winning unit — every one of them clears this by a wide margin, so it has
+#: never yet been the thing that decided an answer. It exists for the drawing
+#: that is mostly furniture.
 MIN_EVIDENCE = 12
 
 
