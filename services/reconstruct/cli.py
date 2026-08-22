@@ -661,6 +661,11 @@ def reconstruct(
         input_segments=len(faces), walls=walls, spaces=rooms,
         openings=holes, unhosted=unhosted,
         scale_candidates=reading.get("scaleCandidates"),
+        # Only `cli` can see this: the walls are dropped by `segment_frames`
+        # before verify is handed a wall list, so from verify's side they never
+        # existed. See the framing-coverage check.
+        walls_dropped=len(all_walls) - sum(len(f.wall_indices) for f in frames),
+        walls_before_framing=len(all_walls),
     )
 
     manifest = write_glb(meshes, out / f"{source.stem}.glb")

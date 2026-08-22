@@ -137,6 +137,72 @@ if len(rooms_apart) >= 2:
        str([len(r.bounded_by) for r in rooms_apart]))
 
 
+print("\n-- the gate notices two drawings called one building --")
+# The villa's two storeys were merged into a single flat model — 901 m of wall,
+# 505 m2 of floor, a bill for a building that does not exist — and it PASSED the
+# gate, because every check was true of the merged pair.
+#
+# Note the threshold is ABSOLUTE, not a share of the extent. A first version
+# required the gap to exceed a quarter of the plan and stayed silent on the very
+# model it was written for: 2.48 m across 32.67 m is 7.6%. Room faces are
+# interior-disjoint and share edges exactly, so a real building's rooms TILE and
+# its projection has no gap at all.
+one_room_walls = join_corners(pair_faces(room_faces()))
+
+
+def _space(x0, y0, x1, y1):
+    """A room with a known outline. Built directly, because this exercises the
+    CHECK — routing through detect_spaces would test polygonize instead."""
+    return sp.Space(
+        index=0, loop=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+        area=(x1 - x0) * (y1 - y0), gross_area=(x1 - x0) * (y1 - y0),
+        perimeter=2 * ((x1 - x0) + (y1 - y0)),
+    )
+
+
+# Rooms of one building TILE — they share edges exactly.
+tiled = [_space(0, 0, 4, 3), _space(4, 0, 8, 3), _space(0, 3, 8, 6)]
+ok("a building whose rooms touch does not trip it",
+   not [c for c in vf.check(input_segments=200, walls=one_room_walls,
+                            spaces=tiled, openings=[], unhosted=0).checks
+        if c.name == "one-building"])
+
+# The villa's two storeys sat 2.48 m apart across 32.67 m — 7.6% of the extent,
+# which is why a ratio test missed it and an absolute gap catches it.
+storeys = [_space(0, 0, 20, 15), _space(0, 17.5, 20, 32.5)]
+caught = [c for c in vf.check(input_segments=200, walls=one_room_walls,
+                              spaces=storeys, openings=[], unhosted=0).checks
+          if c.name == "one-building"]
+ok("two plans 2.5 m apart do", bool(caught), str(caught[0].message[:60]) if caught else "missed")
+ok("and it is a warning, not a block",
+   bool(caught) and caught[0].level == "warning")
+
+# A courtyard is not a gap: rooms elsewhere at the same coordinate close it.
+courtyard = [_space(0, 0, 12, 3), _space(0, 3, 3, 9), _space(9, 3, 12, 9),
+             _space(0, 9, 12, 12)]
+ok("a courtyard is not two buildings",
+   not [c for c in vf.check(input_segments=200, walls=one_room_walls,
+                            spaces=courtyard, openings=[], unhosted=0).checks
+        if c.name == "one-building"])
+
+# Framing loss is a quantity only the CALLER can see: the walls are dropped
+# before verify is handed a wall list, so from here they never existed.
+quiet = vf.check(input_segments=200, walls=one_room_walls, spaces=[],
+                 openings=[], unhosted=0)
+ok("nothing is said when no framing loss is reported",
+   not [c for c in quiet.checks if c.name == "framing-coverage"])
+loud = vf.check(input_segments=200, walls=one_room_walls, spaces=[], openings=[],
+                unhosted=0, walls_dropped=90, walls_before_framing=100)
+covered = [c for c in loud.checks if c.name == "framing-coverage"]
+ok("losing 90 of 100 walls is a warning",
+   bool(covered) and covered[0].level == "warning",
+   str(covered[0].message) if covered else "no check")
+mild = vf.check(input_segments=200, walls=one_room_walls, spaces=[], openings=[],
+                unhosted=0, walls_dropped=19, walls_before_framing=100)
+ok("losing 19 — a title block and a north arrow — is not",
+   [c for c in mild.checks if c.name == "framing-coverage"][0].level == "info")
+
+
 print("\n-- corner-joining is load-bearing --")
 # The same faces WITHOUT the corner join. Every centreline is trimmed to the
 # overlap, so each is short at both ends and nothing closes.

@@ -107,6 +107,26 @@ MIN_ROOMS_TO_JUDGE_SCALE = 4
 #: to contain is precisely what the solve produces afterwards.
 ENVELOPE_COVERAGE_MIN = 0.90
 
+#: Below this share of a sheet's walls reaching a frame, say so.
+#:
+#: **CHOSEN, not measured**, and deliberately loose. A sheet legitimately
+#: carries a title block, a north arrow, a key and a detail callout, and none of
+#: those should reach a frame — so some loss is correct and a tight threshold
+#: would cry wolf on every real drawing. The villa loses 19% to exactly that and
+#: is fine. What this is watching for is the order of magnitude where a WING of
+#: the building has been dropped, which is a bill of quantities for less
+#: building than the client drew.
+FRAMING_COVERAGE_MIN = 0.70
+
+#: A gap in the room projection wider than this means the "building" is two.
+#:
+#: Room faces are interior-disjoint and share edges exactly, so a real
+#: building's rooms TILE and its projection has no gap at all — measured 0.00 m
+#: on both axes of the correct villa, against 2.48 m on the merged pair. The
+#: only work this number does is clear floating-point noise, so a metre is
+#: generous rather than fitted.
+MIN_BUILDING_GAP = 1.0
+
 #: Interior walls in residential construction. Outside this, the unit is wrong
 #: or the pairing matched two unrelated lines.
 PLAUSIBLE_THICKNESS = (0.05, 0.60)
@@ -184,6 +204,8 @@ def check(
     openings,
     unhosted: int,
     scale_candidates: list | None = None,
+    walls_dropped: int = 0,
+    walls_before_framing: int = 0,
 ) -> Verdict:
     """Grade a reconstruction against what went into it."""
     v = Verdict()
@@ -321,25 +343,49 @@ def check(
             lo, hi = WALL_RUN_BAND
             level = "info" if lo <= ratio <= hi else "warning"
 
-            # Say which floor. The band was calibrated against a denominator
-            # that includes everything the solver called a room, and on this
-            # villa 50.5% of that is lawn, pool, patio and balcony — so 1.21
-            # reads as a comfortable pass while the indoor figure is 2.53.
+            # ── The numerator can now be split, so it is ────────────────────
+            # This used to report TWO ratios and say why it could not choose:
+            # the band was calibrated against a denominator including
+            # everything the solver called a room, and on this villa 50.5% of
+            # that is lawn, pool, patio and balcony — so 1.21 read as a
+            # comfortable pass while the indoor figure was 2.53. Swapping in an
+            # indoor-only denominator against an all-walls numerator would have
+            # been a ratio between two different buildings, which is the exact
+            # mismatch this check exists to catch.
             #
-            # Both are reported rather than one being swapped in, because
-            # neither is the whole answer: the numerator cannot be split to
-            # match. Attributing wall run to the spaces it bounds needs
-            # `Space.boundedBy`, which is present on every space and populated
-            # on none. Until it is, an indoor-only denominator against an
-            # all-walls numerator is a ratio between two different buildings —
-            # exactly the mismatch this check exists to catch, introduced by
-            # the fix for it.
+            # `Space.bounded_by` is populated now, so the numerator splits to
+            # match the denominator and there is one honest ratio: indoor wall
+            # against indoor floor. A wall counts as indoor if it bounds at
+            # least one indoor room — a party wall between a bedroom and a
+            # terrace is the bedroom's wall, and somebody builds and plasters it.
+            #
+            # The all-in figure stays in the message. It is what the band was
+            # calibrated on, and a reader comparing against older output needs
+            # to see both to know why they differ.
+            indoor_walls = {
+                i for s in spaces if not _is_outdoor(s)
+                for i in getattr(s, "bounded_by", ())
+            }
             outdoor_share = (1 - indoor_floor / floor) if floor else 0.0
             detail = ""
-            if outdoor_share > 0.05 and indoor_floor > 1:
+
+            if indoor_walls and indoor_floor > 1:
+                indoor_billable = sum(
+                    walls[i].length - getattr(walls[i], "duplicate", 0.0)
+                    for i in indoor_walls if i < len(walls)
+                )
+                ratio = indoor_billable / indoor_floor
+                level = "info" if lo <= ratio <= hi else "warning"
+                detail = (f" — indoor wall against indoor floor"
+                          f"; {billable / floor:.2f} counting the site, "
+                          f"{outdoor_share * 100:.0f}% of which is outdoor")
+            elif outdoor_share > 0.05 and indoor_floor > 1:
+                # No attribution available: an older model, or one whose rooms
+                # did not close. Fall back to reporting both and saying so,
+                # rather than silently ratioing mismatched halves.
                 detail = (f" ({billable / indoor_floor:.2f} against indoor floor "
                           f"alone; {outdoor_share * 100:.0f}% of the floor here "
-                          "is outdoor)")
+                          "is outdoor; walls not attributed)")
 
             v.checks.append(Check(
                 "wall-run-per-area", level,
@@ -415,5 +461,120 @@ def check(
     elif openings:
         v.checks.append(Check("openings-hosted", "info",
                               f"all {len(openings)} openings hosted", 0))
+
+    # ---- Is this one building, or two drawings called one? -----------------
+    # The villa's two storeys were merged into a single flat model — 901 m of
+    # wall, 505 m2 of floor, a Rs 3.25M bill for a building that does not
+    # exist — and it PASSED THIS GATE. Every check here was satisfied because
+    # each one was true of the merged pair: the walls paired, the thickness was
+    # right, the span was plausible, the rooms enclosed.
+    #
+    # `solve/frames.py` now separates them, so this should never fire on the
+    # villa again. It is defence in depth: framing is one heuristic and this is
+    # a different question asked of the answer.
+    #
+    # The test is the same one framing uses, on rooms rather than walls: project
+    # the room polygons onto each axis and look for a band no room crosses. A
+    # building's rooms are contiguous in projection — a courtyard does not
+    # create a gap, because rooms elsewhere at the same coordinate fill it. Two
+    # plans on a sheet do.
+    # Two rooms are enough. The guard was 4, on the reasoning that a building
+    # needs several rooms before its shape means anything — but with an ABSOLUTE
+    # gap test that reasoning does not hold: rooms of one building tile, so two
+    # that do not touch are already two drawings, and requiring four only made
+    # the check unable to fire on the smallest case it should catch.
+    if len(spaces) >= 2:
+        for axis in (0, 1):
+            spans = sorted(
+                (min(p[axis] for p in s.loop), max(p[axis] for p in s.loop))
+                for s in spaces if len(s.loop) >= 3
+            )
+            if len(spans) < 2:
+                continue
+            merged: list[list[float]] = []
+            for lo_, hi_ in spans:
+                if merged and lo_ <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], hi_)
+                else:
+                    merged.append([lo_, hi_])
+
+            extent = merged[-1][1] - merged[0][0]
+            gap = max(
+                (merged[i + 1][0] - merged[i][1] for i in range(len(merged) - 1)),
+                default=0.0,
+            )
+            # ── An absolute gap, NOT a share of the extent ──────────────────
+            # The first version of this required the gap to exceed a quarter of
+            # the plan's extent, on the reasoning that a courtyard is a small
+            # hole and a sheet gutter is a large one. Measured, that is simply
+            # wrong and it missed the case it was written for: the merged villa's
+            # two storeys are 2.48 m apart across 32.67 m — **7.6%** — and the
+            # check stayed silent on the exact model that motivated it.
+            #
+            # What the measurement shows instead is that the room projection of a
+            # real building has NO gap at all:
+            #
+            #     merged villa (two storeys)   y: 2 islands, gap 2.48 m
+            #     correct villa (one storey)   y: 1 island,  gap 0.00 m
+            #
+            # Room faces come from `polygonize` and are interior-disjoint,
+            # sharing edges exactly, so they tile whatever they cover. A
+            # courtyard is bounded by rooms on both sides at the same
+            # coordinate, so it closes in projection. **Any** gap is therefore a
+            # real separation, and the only job of the threshold is to clear
+            # floating-point noise — hence a metre against a measured 0.00.
+            if gap > MIN_BUILDING_GAP:
+                v.checks.append(Check(
+                    "one-building", "warning",
+                    f"the rooms fall into two groups {gap:.2f} m apart across "
+                    f"{extent:.2f} m of plan, with nothing between them. This is "
+                    "usually two drawings on one sheet reconstructed as one "
+                    "building — every quantity would then be for both.",
+                    round(gap / extent, 3),
+                ))
+                break
+
+    # ---- How much linework never reached a frame ---------------------------
+    # This check cannot compute its own quantity, and that is the point.
+    #
+    # `MIN_WALLS = 4` here is BELOW the framing floor of 8 in `solve/frames.py`,
+    # so the wall-count check above is structurally unable to fire on framing
+    # loss while any frame survives — the walls are dropped before `check()` is
+    # ever handed a wall list, so from here they simply never existed. Raising
+    # the constant would not help: the real quantity is walls LOST, and only the
+    # caller can see it.
+    #
+    # So it is passed in. `cli.py` already computes it, and on the villa it is
+    # 40 of 216 walls — 19% of the sheet's linework reaching no frame at all,
+    # a number that previously existed nowhere.
+    #
+    # Usually correct to drop: title blocks, north arrows, stray callouts. The
+    # dangerous case is a MISFIRED drop — a guard house that pairs to five
+    # walls, or a layer choice that fragments a partitions-only plan — which
+    # produces a bill of quantities for less building than the client drew, with
+    # nothing anywhere that moves. Reported always, warned past a threshold,
+    # never blocking: a sheet legitimately carrying a title block and a north
+    # arrow should not fail.
+    # `walls_before_framing` is passed rather than derived as
+    # `total + walls_dropped`, and the difference is not pedantry: `total` is the
+    # wall list AFTER per-frame layer re-selection and `add_perimeter`, which is
+    # a different SET from the one framing chose between. Deriving the
+    # denominator gave 24% here against the 19% the caller reports for the same
+    # quantity — two numbers for one thing, which is the shared-basis trap this
+    # file exists to catch, reintroduced by a check written to catch it.
+    if walls_dropped > 0 and walls_before_framing > 0:
+        framed = walls_before_framing
+        coverage = (framed - walls_dropped) / framed
+        level = "info" if coverage >= FRAMING_COVERAGE_MIN else "warning"
+        v.checks.append(Check(
+            "framing-coverage", level,
+            f"{walls_dropped} of {framed} walls ({(1 - coverage) * 100:.0f}%) "
+            f"reached no frame"
+            + ("" if level == "info" else
+               f" — past {(1 - FRAMING_COVERAGE_MIN) * 100:.0f}%. Usually a title "
+               "block or a north arrow; if it is a wing of the building, the "
+               "quantities are for less building than the drawing shows."),
+            round(coverage, 3),
+        ))
 
     return v
