@@ -31,6 +31,25 @@ Two conventions that have already paid for themselves today:
 - **Commit mid-flight.** `3fc71bb` is titled *"Track the reconstruction engine,
   so a collision is a merge not a deletion"*. That is the right instinct. An
   uncommitted tree plus three sessions is how work disappears.
+
+- ⚠ **But "commit often" is not enough, and the missing half bit us.**
+  **Five sessions share one git index.** `git add` followed by *any* other work
+  opens a window in which another session's bare `git commit` sweeps up your
+  staged files. It happened: `12c9a02` is titled about two Python constants and
+  contains 456 lines of another session's studio work, because `git add <mine>
+  && git commit` commits **the whole index**, not the paths you named.
+
+  The victim had done the careful thing — staged only their own paths, checked
+  `git status --short` for other sessions' files first, and used an explicit
+  pathspec. **None of it helped**, because the staging happened before the
+  window, not after it.
+
+  > **Stage and commit in ONE step, or skip the index entirely:**
+  > `git commit -- <paths>` with nothing staged.
+
+  `git commit -- <paths>` commits only those paths and leaves the index alone.
+  And **do not rebase to tidy an attribution mistake** — putting real work at
+  risk to fix whose name is on a commit is a bad trade. Record it and move on.
 - **Report what you refuted, not just what you found.** Two of today's
   hypotheses were killed by measurement and telling the other sessions saved
   them the same dead ends. A well-measured negative is a real result.
