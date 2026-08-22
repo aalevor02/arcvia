@@ -3,10 +3,29 @@ import { hashPassword, verifyPassword, issueToken, requireAuth } from '../lib/au
 import { grantMonthly } from '../lib/credits.js'
 import { recordReferral, generateReferralCode } from './referral.js'
 import plansConfig from '@arcvia/brand/plans'
+import { createLimiter } from '../lib/rateLimit.js'
 
 const { defaultPlanId } = plansConfig
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// ── Throttles for the unauthenticated credential endpoints ──────────────────
+// Failures only. A user with the right password is never limited; a guesser is.
+// Login is keyed on IP + email so one attacker cannot lock every account and a
+// real owner is not locked out from their own network by a guesser elsewhere.
+// Forgot-password is keyed on IP alone — it must not reveal whether an address
+// exists, so it cannot branch on the email — plus a per-email cap so a mailbox
+// cannot be flooded from many IPs.
+const loginLimiter = createLimiter({ limit: 10, windowMs: 15 * 60 * 1000 })
+const forgotIpLimiter = createLimiter({ limit: 20, windowMs: 60 * 60 * 1000 })
+const forgotEmailLimiter = createLimiter({ limit: 5, windowMs: 60 * 60 * 1000 })
+
+/** The caller's address, honouring a proxy hop when one is configured. */
+function clientIp(request) {
+  const fwd = request.headers['x-forwarded-for']
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim()
+  return request.ip || 'unknown'
+}
 
 const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_MAX_ATTEMPTS = 5
@@ -252,6 +271,18 @@ export async function registerAuthRoutes(app) {
     const { email, password } = request.body ?? {}
     const normalisedEmail = String(email ?? '').trim().toLowerCase()
 
+    // Keyed on IP AND email: an attacker guessing one account is limited on
+    // that account, and cannot lock every account by rotating the email; a real
+    // owner is not locked out of their account by a guesser on another network.
+    const key = `${clientIp(request)}|${normalisedEmail}`
+    const gate = loginLimiter.check(key)
+    if (gate.limited) {
+      return reply
+        .status(429)
+        .header('retry-after', String(gate.retryAfterSeconds))
+        .send({ message: 'Too many sign-in attempts. Try again in a few minutes.' })
+    }
+
     const user = await db.findOne('users', (u) => u.email === normalisedEmail)
 
     // Run the hash comparison even when the user does not exist, so the
@@ -261,9 +292,13 @@ export async function registerAuthRoutes(app) {
       : await verifyPassword('dummy', 'scrypt$00$00')
 
     if (!user || !ok) {
+      loginLimiter.fail(key)
       return reply.status(401).send({ message: 'Email or password is incorrect.' })
     }
 
+    // A correct sign-in clears the count, so a user who fat-fingered their
+    // password twice and then got it right does not carry those attempts.
+    loginLimiter.succeed(key)
     return {
       token: await issueToken(user),
       user: publicUser(user),
@@ -365,13 +400,31 @@ export async function registerAuthRoutes(app) {
   //
   // Two routes, and the interesting decisions are both in the first one.
 
-  app.post('/password/forgot', async (request) => {
+  app.post('/password/forgot', async (request, reply) => {
     const email = String(request.body?.email ?? '').trim().toLowerCase()
+
+    // Two limits, and the ORDER of what they gate matters for the membership
+    // oracle this endpoint is careful not to be. The IP limit is checked first
+    // and returns the SAME generic 429 whether or not the address exists — it
+    // cannot branch on the user. The per-email limit gates only the mailer
+    // inside the `if (user)` branch below, so it changes how many emails a
+    // mailbox receives but never changes the response, which stays identical
+    // for a real and a fake address.
+    const ipGate = forgotIpLimiter.check(clientIp(request))
+    if (ipGate.limited) {
+      return reply
+        .status(429)
+        .header('retry-after', String(ipGate.retryAfterSeconds))
+        .send({ message: 'Too many requests. Try again later.' })
+    }
+    forgotIpLimiter.fail(clientIp(request))
+
     const user = EMAIL_RE.test(email)
       ? await db.findOne('users', (u) => u.email === email)
       : null
 
-    if (user) {
+    if (user && !forgotEmailLimiter.check(email).limited) {
+      forgotEmailLimiter.fail(email)
       // Invalidate any outstanding token before issuing a new one. Otherwise
       // every "I didn't get the email, send it again" click leaves another
       // working key to the account lying in an inbox.

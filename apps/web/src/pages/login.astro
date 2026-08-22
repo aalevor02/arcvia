@@ -78,7 +78,25 @@ import Base from '../layouts/Base.astro'
    */
   function destination(): string {
     const next = new URLSearchParams(location.search).get('next')
-    if (next && next.startsWith('/') && !next.startsWith('//')) return next
+    if (!next) return openStudioUrl()
+    // ── Resolve, then compare origins — string prefixes are not enough ───────
+    // `if (next.startsWith('/') && !next.startsWith('//'))` looks safe and is
+    // not: the WHATWG URL parser treats a backslash as a slash for special
+    // schemes, so `/\evil.com` and `%2F%5Cevil.com` both pass that guard and
+    // resolve to https://evil.com/. The login page then sends a just-
+    // authenticated user to the attacker's site — a phishing hop wearing the
+    // real domain, primed for a "session expired, sign in again" harvest.
+    //
+    // The only correct test is to resolve against our own origin and confirm
+    // the result stayed on it, which is exactly what handoff.astro already
+    // does 40 lines away. Keep only the path so a resolved absolute URL cannot
+    // smuggle a different origin back in.
+    try {
+      const url = new URL(next, location.origin)
+      if (url.origin === location.origin) return url.pathname + url.search + url.hash
+    } catch {
+      /* not a URL we can trust — fall through */
+    }
     return openStudioUrl()
   }
 
