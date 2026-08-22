@@ -1,4 +1,6 @@
+import { environmentByUrl } from './environments'
 import { itemById } from './items'
+import { surfaceMapsFor } from './surfaces'
 import type { AssetModel, PlacedObject } from './types'
 
 /**
@@ -19,6 +21,38 @@ import type { AssetModel, PlacedObject } from './types'
 export interface Credit extends AssetModel {
   /** How many placements in this scene use it, for "x3" in the list. */
   uses: number
+  /**
+   * What kind of asset owes the credit.
+   *
+   * A scene's obligations do not all come from its furniture, and treating
+   * them as if they did is what left environments and surfaces uncredited for
+   * as long as they existed.
+   */
+  kind: 'model' | 'environment' | 'surface'
+}
+
+/**
+ * The scene's assets that are not placed objects.
+ *
+ * ── Why these have to be passed in ──────────────────────────────────────────
+ * A model is in the scene because someone placed it, so the placement list is
+ * the whole truth about the furniture. The environment and the surfaces are
+ * not placed: the environment is one field on the scene, and the surfaces are
+ * shared materials bound by whatever geometry got built. Neither is discoverable
+ * from `objects`, which is exactly why both went uncredited.
+ */
+export interface SceneAssets {
+  /** The scene's `hdriUrl`, if one has been chosen. */
+  environmentUrl?: string | null
+  /**
+   * Surface kinds this scene actually built materials for.
+   *
+   * `usedSurfaces()` in plan/materials.ts reports them: the material cache is
+   * populated on demand, so its keys are precisely the surfaces the geometry
+   * asked for. Crediting the catalogue instead would name authors whose work is
+   * not on the page.
+   */
+  surfaces?: readonly string[]
 }
 
 /**
@@ -28,7 +62,7 @@ export interface Credit extends AssetModel {
  * line, not forty. Sorted by author so the list reads as a list of people
  * rather than a list of furniture — which is what a credit is for.
  */
-export function creditsFor(objects: PlacedObject[]): Credit[] {
+export function creditsFor(objects: PlacedObject[], assets: SceneAssets = {}): Credit[] {
   const byUrl = new Map<string, Credit>()
 
   for (const object of objects) {
@@ -43,7 +77,49 @@ export function creditsFor(objects: PlacedObject[]): Credit[] {
 
     const existing = byUrl.get(model.url)
     if (existing) existing.uses += 1
-    else byUrl.set(model.url, { ...model, uses: 1 })
+    else byUrl.set(model.url, { ...model, uses: 1, kind: 'model' })
+  }
+
+  // The environment lights every frame of the walkthrough, so it is used by the
+  // scene rather than by any object in it. One entry, however many rooms.
+  const environment = environmentByUrl(assets.environmentUrl ?? null)
+  if (environment && !byUrl.has(environment.url)) {
+    byUrl.set(environment.url, {
+      url: environment.url,
+      licence: environment.licence,
+      author: environment.author,
+      source: environment.source,
+      uses: 1,
+      kind: 'environment',
+    })
+  }
+
+  for (const kind of assets.surfaces ?? []) {
+    const surface = surfaceMapsFor(kind as never)
+    if (!surface) continue
+
+    // ── Keyed on the SOURCE, not on the file ──────────────────────────────
+    // The identity of an obligation is the asset it is owed for, and the
+    // ingest tool writes one set of files per surface *id* rather than per
+    // source material. `wall` and `ceiling` are both Plaster001 and have
+    // different map URLs, so keying on the file credited one author twice for
+    // one asset — caught by the assertion below in credits.test.ts, not by
+    // anything at runtime.
+    //
+    // Models keep using their own URL because two GLBs are two assets even
+    // when one person made both, and the page links each to its own source.
+    if (byUrl.has(surface.source)) {
+      byUrl.get(surface.source)!.uses += 1
+      continue
+    }
+    byUrl.set(surface.source, {
+      url: surface.map,
+      licence: surface.licence,
+      author: surface.author,
+      source: surface.source,
+      uses: 1,
+      kind: 'surface',
+    })
   }
 
   return [...byUrl.values()].sort((a, b) =>

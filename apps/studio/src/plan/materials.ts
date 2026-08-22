@@ -343,6 +343,24 @@ export function surface(kind: SurfaceKind): THREE.MeshStandardMaterial {
   return material
 }
 
+/**
+ * Which surfaces this session has actually built.
+ *
+ * The cache is populated on demand by `surface()`, so its keys are precisely
+ * the kinds some piece of geometry asked for — which is the honest answer to
+ * "whose material is on this page". Listing the whole catalogue instead would
+ * credit authors whose work is not in the scene, and deriving it from the plan
+ * would duplicate the decisions the builders already made.
+ *
+ * Cumulative across rebuilds within a session: switching the floor finish
+ * leaves both floors in the cache, so both get credited. That errs toward
+ * naming an author too often, which is the safe direction for an attribution
+ * obligation.
+ */
+export function usedSurfaces(): SurfaceKind[] {
+  return [...cache.keys()]
+}
+
 function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
   if (!CAN_DRAW) {
     return new THREE.MeshStandardMaterial({

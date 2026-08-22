@@ -1,5 +1,6 @@
 import { creditsFor, creditLine, uncredited } from '../src/catalogue/credits'
 import { CATALOGUE } from '../src/catalogue/items'
+import { ENVIRONMENTS } from '../src/catalogue/environments'
 import type { PlacedObject } from '../src/catalogue/types'
 
 /**
@@ -117,6 +118,72 @@ const withModel = CATALOGUE.find((item) => item.model)?.id
     'objects without a custom model are not flagged',
     uncredited(objects).every((o) => o.id === 'o1'),
   )
+}
+
+// ---- Assets that are not placed objects -------------------------------------
+
+/**
+ * ── Why these assertions are the point of this file now ─────────────────────
+ * A scene's obligations do not all come from its furniture. The environment is
+ * one field on the scene, and the surfaces are shared materials bound by
+ * whatever geometry got built — neither is reachable from the placement list,
+ * and both went uncredited for as long as they existed.
+ *
+ * The failure had no runtime symptom at all: the page rendered, the walkthrough
+ * looked right, and the credit list was simply shorter than the licences
+ * required. **A test that only checks placed objects passes in exactly that
+ * state**, which is why every assertion below checks that a credit is PRESENT.
+ */
+{
+  const environment = ENVIRONMENTS[0]
+
+  const withEnvironment = creditsFor([], { environmentUrl: environment.url })
+  check('a scene that chose an environment credits it', withEnvironment.length === 1, `${withEnvironment.length}`)
+  check(
+    'and names its author and licence',
+    withEnvironment[0]?.author === environment.author &&
+      withEnvironment[0]?.licence === environment.licence,
+    `${withEnvironment[0]?.author} / ${withEnvironment[0]?.licence}`,
+  )
+  check('and marks it as an environment', withEnvironment[0]?.kind === 'environment')
+
+  // An environment nobody can identify is a scene lit by something else — not
+  // an error, and not a credit we can invent an author for.
+  check(
+    'an environment outside the catalogue credits nobody',
+    creditsFor([], { environmentUrl: '/env/somebody-elses.hdr' }).length === 0,
+  )
+  check('no environment credits nobody', creditsFor([], { environmentUrl: null }).length === 0)
+
+  const withSurface = creditsFor([], { surfaces: ['floor-wood'] })
+  check('a scene that bound a surface credits it', withSurface.length === 1, `${withSurface.length}`)
+  check('and marks it as a surface', withSurface[0]?.kind === 'surface')
+
+  // wall and ceiling are deliberately the same material. One obligation, one
+  // line, counted twice — the same rule as forty dining chairs.
+  const shared = creditsFor([], { surfaces: ['wall', 'ceiling'] })
+  check('two surfaces sharing one material are one credit', shared.length === 1, `${shared.length}`)
+  check('counted twice', shared[0]?.uses === 2, `uses ${shared[0]?.uses}`)
+
+  // glass is a shader property, not a photograph. It must not invent a credit.
+  check('a procedural surface credits nobody', creditsFor([], { surfaces: ['glass'] }).length === 0)
+
+  const everything = creditsFor([], {
+    environmentUrl: environment.url,
+    surfaces: ['floor-wood', 'wall'],
+  })
+  check('environment and surfaces are credited together', everything.length === 3, `${everything.length}`)
+  check(
+    'and the list is still sorted by author',
+    everything.every(
+      (c, i) =>
+        i === 0 ||
+        everything[i - 1].author.localeCompare(c.author, undefined, { sensitivity: 'base' }) <= 0,
+    ),
+  )
+
+  // Every existing caller passes one argument.
+  check('creditsFor still works with one argument', creditsFor([]).length === 0)
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -3,6 +3,7 @@ import { SceneViewer, WalkController } from '@arcvia/viewer'
 import { buildPlanGeometry } from '../plan/buildGeometry'
 import { suggestedCamera } from '../plan/buildGeometry'
 import { activeFloor } from '../plan/planStore'
+import { usedSurfaces } from '../plan/materials'
 import { submitRender, pollRender, type RenderPreset } from '../lib/renderClient'
 import { exportForBake, loadAndApply } from '../plan/bake'
 import {
@@ -17,6 +18,7 @@ import {
 } from '../lib/api'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { upgradeSurfaces } from '../catalogue/surfaceUpgrade'
+import { creditsFor } from '../catalogue/credits'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
@@ -436,6 +438,23 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   async function handlePublish() {
     setStatus('Publishing…')
     try {
+      // ── Attribution, written before the page becomes public ─────────────
+      // The published viewer already renders a credit list from
+      // `scene.credits` — a toggle, author links to source, licence per line.
+      // Nothing ever wrote that field, so every walkthrough this product has
+      // published showed no credits at all, while 35 of the 38 catalogue
+      // models are CC-BY or CC-BY-SA and require attribution.
+      //
+      // Derived here rather than in the API because only the studio knows what
+      // the client will see: which models were placed, which environment was
+      // chosen, and which surfaces the geometry actually bound. Written before
+      // `publishScene` so a page is never public without them.
+      const credits = creditsFor(plan.floors.flatMap((floor) => Object.values(floor.objects)), {
+        environmentUrl: environment,
+        surfaces: usedSurfaces(),
+      })
+      await updateScene(sceneId, { credits })
+
       const { url } = await publishScene(sceneId)
       const absolute = new URL(url, siteOrigin()).toString()
       setShareUrl(absolute)

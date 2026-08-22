@@ -94,6 +94,19 @@ export async function registerSceneRoutes(app) {
       'views',
       'hotspots',
       'branding',
+      // Attribution for everything on the page, derived in the studio at
+      // publish time.
+      //
+      // ── Why this is stored rather than computed here ────────────────────
+      // The obligation is a property of what the *client* will see, and only
+      // the studio knows that: which models were placed, which environment was
+      // chosen, which surfaces the geometry actually bound. The API has a GLB
+      // and a plan, neither of which names an author.
+      //
+      // Storing it also freezes it. A credit list recomputed later would drift
+      // as the catalogue changed, and the page a client was shown in March is
+      // the page whose credits have to be right.
+      'credits',
     ]
     // ── Why this rejects instead of filtering ───────────────────────────────
     // This used to be `.filter(([k]) => allowed.includes(k))`. A caller sending

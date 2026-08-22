@@ -1,4 +1,5 @@
 import type { Plan } from '../plan/types'
+import type { Credit } from '../catalogue/credits'
 import type { SceneView, Hotspot, Branding } from '../plan/presentation'
 
 /**
@@ -157,6 +158,14 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   views?: SceneView[]
   hotspots?: Hotspot[]
   branding?: Branding | null
+  /**
+   * Attribution for everything on the published page, frozen at publish time.
+   *
+   * Derived in the studio, because only it knows what the client will see —
+   * which models were placed, which environment was chosen, which surfaces the
+   * geometry bound. The published viewer renders these; nothing else reads them.
+   */
+  credits?: Credit[]
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }
