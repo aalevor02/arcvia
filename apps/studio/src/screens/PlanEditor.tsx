@@ -32,7 +32,15 @@ import {
   type History,
 } from '../plan/planStore'
 import { detectRooms, displayName, totalArea } from '../plan/rooms'
-import { WALL_DEFAULTS, type Plan, type Underlay, type Vec2 } from '../plan/types'
+import {
+  WALL_DEFAULTS,
+  WALL_TYPES,
+  wallTypeById,
+  type Plan,
+  type Underlay,
+  type Vec2,
+  type WallTypeId,
+} from '../plan/types'
 import { formatArea, formatLength, parseLength, type UnitSystem } from '../lib/format'
 import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
 import { assessDetection } from '../plan/detectionQuality'
@@ -784,6 +792,37 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             <section>
               <span className="eyebrow">Selected wall</span>
               <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="wall-type">Build-up</label>
+                <select
+                  id="wall-type"
+                  value={selectedWall.type ?? ''}
+                  onChange={(e) => {
+                    const type = wallTypeById(e.target.value as WallTypeId)
+                    // Choosing a build-up sets the thickness, because that is
+                    // the point of naming one. It does not keep owning it —
+                    // see the note on `Wall.type`: the survey wins afterwards.
+                    apply((p) =>
+                      updateWallIn(p, selectedWall.id, {
+                        type: type?.id,
+                        ...(type ? { thickness: type.thickness } : {}),
+                      }),
+                    )
+                  }}
+                >
+                  <option value="">Plastered masonry (unspecified)</option>
+                  {WALL_TYPES.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedWall.type && (
+                  <p className="note" style={{ marginTop: 4 }}>
+                    {wallTypeById(selectedWall.type)?.note}
+                  </p>
+                )}
+              </div>
+              <div className="field">
                 <label htmlFor="wall-thickness">Thickness</label>
                 <input
                   id="wall-thickness"
@@ -851,7 +890,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 }
 
 /** Local helper so the import list does not grow a near-duplicate name. */
-function updateWallIn(plan: Plan, wallId: string, patch: { thickness?: number; height?: number }) {
+function updateWallIn(
+  plan: Plan,
+  wallId: string,
+  patch: { thickness?: number; height?: number; type?: WallTypeId | undefined },
+) {
   return {
     ...plan,
     floors: plan.floors.map((f) =>

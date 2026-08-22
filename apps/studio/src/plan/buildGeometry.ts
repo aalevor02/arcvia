@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import type { Floor, Vec2 } from './types'
+import { wallTypeById } from './types'
+import type { Floor, Vec2, WallTypeId } from './types'
 import { detectRooms } from './rooms'
 import { distance, dot, normalise, sub } from './geometry'
 import { buildObjects } from '../catalogue/build'
@@ -63,6 +64,18 @@ export function buildFloorGeometry(
   // Shared, textured materials rather than a flat colour per build. See
   // materials.ts: untextured geometry reads as a diagram however well it is lit.
   const wallMaterial = surface('wall')
+
+  /**
+   * The material for one wall, from its build-up.
+   *
+   * Looked up per wall rather than once for the floor: a plan routinely mixes a
+   * plastered external skin, an exposed brick feature and a glazed screen, and
+   * drawing all three as plaster is the state this replaces. `surface()` caches
+   * one material per kind, so a floor with fifty walls of three types still
+   * compiles three shaders.
+   */
+  const materialFor = (wall: { type?: WallTypeId }) =>
+    surface(wallTypeById(wall.type)?.surface ?? 'wall')
   const slabMaterial = surface(floorFinish)
   const ceilingMaterial = surface('ceiling')
   // Painted timber, not the floor finish: skirting that matches the floor
@@ -88,7 +101,7 @@ export function buildFloorGeometry(
 
     for (const piece of solidPieces(wall.height, length, holes)) {
       const geometry = new THREE.BoxGeometry(piece.length, piece.height, wall.thickness)
-      const mesh = new THREE.Mesh(geometry, wallMaterial)
+      const mesh = new THREE.Mesh(geometry, materialFor(wall))
 
       // Pieces are positioned along the wall's own axis, then the whole thing
       // is placed and rotated as before.

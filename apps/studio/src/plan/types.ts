@@ -42,7 +42,110 @@ export interface Wall {
   thickness: number
   /** Metres, floor to ceiling. */
   height: number
+  /**
+   * Which build-up this is, from `WALL_TYPES`.
+   *
+   * ── Why the type does not keep owning the thickness ───────────────────────
+   * Choosing a type SETS the thickness, because that is the point of naming
+   * one. It does not keep owning it: a drawing routinely has a 230 mm wall
+   * measured at 240 where it was rendered both sides, and a model that snapped
+   * it back every time would be arguing with the survey.
+   *
+   * So thickness stays the measured truth and the type says what the wall is
+   * MADE OF — which is what the material, and later the bill of quantities,
+   * need. Absent means plastered masonry, which is what every wall was before
+   * this existed.
+   */
+  type?: WallTypeId
 }
+
+/**
+ * Named wall build-ups.
+ *
+ * ── Why these thicknesses ─────────────────────────────────────────────────
+ * Indian residential practice, which is the market this is built for. A nine-
+ * inch brick wall is 230 mm and a four-and-a-half is 115 mm — the two numbers
+ * almost every plan this tool sees is drawn to, and the reason `WALL_DEFAULTS`
+ * already used them. An AAC block is 200 mm because that is the unit, and an
+ * RCC shear wall is 150 mm.
+ *
+ * Round numbers are avoided for the reason the furniture avoids them: a tidy
+ * 200 mm default would make every masonry quantity subtly wrong in a way nobody
+ * notices until it is priced.
+ */
+export type WallTypeId =
+  | 'brick-230'
+  | 'brick-115'
+  | 'block-200'
+  | 'rcc-150'
+  | 'brick-exposed'
+  | 'concrete-fair'
+  | 'glazed'
+
+export interface WallType {
+  id: WallTypeId
+  name: string
+  /** Metres. Applied when the type is chosen, then left alone. */
+  thickness: number
+  /** Which surface the faces are drawn with. */
+  surface: 'wall' | 'brick' | 'concrete' | 'glass'
+  note: string
+}
+
+export const WALL_TYPES: readonly WallType[] = [
+  {
+    id: 'brick-230',
+    name: 'Brick, 230 mm',
+    thickness: 0.23,
+    surface: 'wall',
+    note: 'Nine-inch external wall, plastered both sides.',
+  },
+  {
+    id: 'brick-115',
+    name: 'Brick, 115 mm',
+    thickness: 0.115,
+    surface: 'wall',
+    note: 'Four-and-a-half inch internal partition.',
+  },
+  {
+    id: 'block-200',
+    name: 'AAC block, 200 mm',
+    thickness: 0.2,
+    surface: 'wall',
+    note: 'Lighter than brick, used where the frame carries the load.',
+  },
+  {
+    id: 'rcc-150',
+    name: 'RCC, 150 mm',
+    thickness: 0.15,
+    surface: 'concrete',
+    note: 'Structural — a shear wall or a lift shaft, not a partition.',
+  },
+  {
+    id: 'brick-exposed',
+    name: 'Exposed brick, 230 mm',
+    thickness: 0.23,
+    surface: 'brick',
+    note: 'Left unplastered as a finish.',
+  },
+  {
+    id: 'concrete-fair',
+    name: 'Fair-faced concrete, 200 mm',
+    thickness: 0.2,
+    surface: 'concrete',
+    note: 'Cast and left as struck.',
+  },
+  {
+    id: 'glazed',
+    name: 'Glazed partition, 50 mm',
+    thickness: 0.05,
+    surface: 'glass',
+    note: 'A glass screen — divides the plan without dividing the light.',
+  },
+]
+
+export const wallTypeById = (id: WallTypeId | undefined): WallType | undefined =>
+  id ? WALL_TYPES.find((type) => type.id === id) : undefined
 
 /**
  * A derived room. Never stored — recomputed from the graph.

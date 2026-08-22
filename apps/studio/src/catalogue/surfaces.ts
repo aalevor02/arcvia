@@ -4,7 +4,7 @@
 // behind it and the reason for its tile size are in the SURFACES table at the
 // top of it.
 //
-// 9 surfaces, 1131 KB total, all 512px.
+// 11 surfaces, 1448 KB total, all 512px.
 
 import type { SurfaceKind } from '../plan/materials'
 
@@ -163,6 +163,30 @@ export const SURFACE_MAPS: readonly SurfaceMaps[] = [
     licence: "CC0 1.0 Public Domain",
     author: "ambientCG",
     source: "https://ambientcg.com/view?id=PavingStones126A",
+  },
+  {
+    id: "brick",
+    name: "Brickwork",
+    note: "Clean red brick in running bond, for exposed work.",
+    tileMetres: 0.9,
+    map: "/surfaces/brick-color.jpg",
+    roughnessMap: "/surfaces/brick-roughness.jpg",
+    normalMap: "/surfaces/brick-normal.jpg",
+    licence: "CC0 1.0 Public Domain",
+    author: "ambientCG",
+    source: "https://ambientcg.com/view?id=Bricks005",
+  },
+  {
+    id: "concrete",
+    name: "Fair-faced concrete",
+    note: "Smooth mid-grey concrete.",
+    tileMetres: 2,
+    map: "/surfaces/concrete-color.jpg",
+    roughnessMap: "/surfaces/concrete-roughness.jpg",
+    normalMap: "/surfaces/concrete-normal.jpg",
+    licence: "CC0 1.0 Public Domain",
+    author: "ambientCG",
+    source: "https://ambientcg.com/view?id=Concrete002",
   },
   {
     id: "metal",

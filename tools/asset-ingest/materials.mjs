@@ -169,6 +169,24 @@ const SURFACES = [
     note: 'Grey linear pavers for a terrace or a pool surround.',
   },
   {
+    id: 'brick',
+    slug: 'Bricks005',
+    name: 'Brickwork',
+    // A brick course is 75 mm — a 65 mm brick plus a 10 mm bed joint. The map
+    // shows about twelve courses, so 0.9 m puts a course at 75 mm exactly.
+    tileMetres: 0.9,
+    note: 'Clean red brick in running bond, for exposed work.',
+  },
+  {
+    id: 'concrete',
+    slug: 'Concrete002',
+    name: 'Fair-faced concrete',
+    // No features to scale against, like plaster: the number only controls how
+    // fine the variation reads.
+    tileMetres: 2.0,
+    note: 'Smooth mid-grey concrete.',
+  },
+  {
     id: 'metal',
     slug: 'Metal010',
     name: 'Brushed steel',

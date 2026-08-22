@@ -55,6 +55,8 @@ const FLAT: Record<string, number> = {
   water: 0x2f7f9e,
   grass: 0x5f8a4a,
   paving: 0xa8a49d,
+  brick: 0x9a5f47,
+  concrete: 0x9d9d99,
 }
 
 function canvas(): { ctx: CanvasRenderingContext2D; el: HTMLCanvasElement } {
@@ -402,6 +404,12 @@ export const SURFACE_KINDS = [
   'water',
   'grass',
   'paving',
+  // ---- Wall build-ups ------------------------------------------------------
+  // Every wall was plaster. A drawing that distinguishes a 230 mm brick
+  // external from a 115 mm partition should be able to say so in the model, and
+  // exposed brick and fair-faced concrete are both finishes people specify.
+  'brick',
+  'concrete',
 ] as const
 
 export type SurfaceKind = (typeof SURFACE_KINDS)[number]
@@ -595,6 +603,32 @@ function build(kind: SurfaceKind): THREE.MeshStandardMaterial {
     case 'paving': {
       const { map, roughness } = tile()
       return textured(map, roughness, 1 / 1.2, 3, { roughness: 0.9 })
+    }
+
+    /**
+     * Exposed brickwork.
+     *
+     * The procedural stand-in reuses the tile generator, which draws a grid
+     * rather than a running bond — wrong in the detail and right in the thing
+     * that matters at room distance, which is the scale and direction of the
+     * courses. `catalogue/surfaces` replaces it with photographed brick.
+     */
+    case 'brick': {
+      const { map, roughness } = tile()
+      return textured(map, roughness, 1 / 0.9, 3.4, { roughness: 0.95 })
+    }
+
+    /**
+     * Fair-faced concrete.
+     *
+     * Plaster's generator at a coarser repeat and lower relief: concrete is
+     * plaster's near neighbour visually — an even mineral surface with fine
+     * variation — and differs mostly in tone and in having almost no texture at
+     * all.
+     */
+    case 'concrete': {
+      const { map, roughness } = plaster(210, 62)
+      return textured(map, roughness, 1 / 2, 0.9, { roughness: 0.92 })
     }
   }
 }
