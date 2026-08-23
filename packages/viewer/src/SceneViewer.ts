@@ -92,7 +92,6 @@ export class SceneViewer {
   private readonly clock = new THREE.Clock()
 
   private model: THREE.Object3D | null = null
-  private frameHandle = 0
   private disposed = false
   private needsRender = true
 
@@ -145,6 +144,13 @@ export class SceneViewer {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
+    // WebXR. Enabling it changes nothing until a session is actually requested
+    // (see enterVR) — a desktop with no headset renders exactly as before — but
+    // it must be set on the renderer before the first frame, and it is why the
+    // loop below is driven by setAnimationLoop rather than requestAnimationFrame:
+    // an XR device owns its own frame timing and rAF cannot serve it.
+    this.renderer.xr.enabled = true
+
     // ACES filmic maps the wide dynamic range of an HDRI-lit interior into
     // something a monitor can show. Without it, bright windows clip to flat
     // white and the whole render looks like a video game from 2008.
@@ -174,7 +180,11 @@ export class SceneViewer {
     // black screen.
     this.setAmbientOcclusion(true)
     window.addEventListener('resize', this.resize)
-    this.loop()
+    // setAnimationLoop, not requestAnimationFrame: it is the one driver that
+    // serves both a normal page and a live XR session. Three swaps to the
+    // headset's frame timing under the hood when a session starts; the loop
+    // body does not have to know which it is running in.
+    this.renderer.setAnimationLoop(this.loop)
   }
 
   /**
@@ -1204,7 +1214,18 @@ export class SceneViewer {
    */
   private loop = (): void => {
     if (this.disposed) return
-    this.frameHandle = requestAnimationFrame(this.loop)
+    // No requestAnimationFrame here — setAnimationLoop calls this every frame.
+
+    // ── In VR, render every frame, straight to the headset ───────────────────
+    // A headset is never "still": the head moves continuously, so the on-demand
+    // gate below would starve it. And the post-processing composer is not
+    // XR-aware — it renders into its own targets, not the per-eye framebuffers —
+    // so presenting must go through the plain renderer. Head pose is the camera;
+    // orbit controls and view transitions are meaningless and skipped.
+    if (this.renderer.xr.isPresenting) {
+      this.renderer.render(this.scene, this.camera)
+      return
+    }
 
     const delta = this.clock.getDelta()
     let moving = false
@@ -1300,11 +1321,95 @@ export class SceneViewer {
 
   dispose(): void {
     this.disposed = true
-    cancelAnimationFrame(this.frameHandle)
+    // Stop the driver installed in the constructor. cancelAnimationFrame is the
+    // wrong tool now — nothing hands out a frame handle — and leaving the loop
+    // registered keeps the renderer (and the whole scene) alive after dispose.
+    this.renderer.setAnimationLoop(null)
     window.removeEventListener('resize', this.resize)
     this.clearModel()
     this.composer?.dispose()
     this.controls.dispose()
     this.renderer.dispose()
+  }
+
+  // ---------------------------------------------------------------------------
+  // WebXR
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Whether this browser and device can present immersive VR.
+   *
+   * Async because `isSessionSupported` is — the browser may ask the runtime.
+   * Returns false rather than throwing anywhere it cannot answer (no WebXR,
+   * an insecure context, a runtime that refuses the query), so a caller can
+   * `if (await viewer.isVRSupported())` without a guard of its own.
+   */
+  async isVRSupported(): Promise<boolean> {
+    const xr = (navigator as Navigator & { xr?: XRSystem }).xr
+    if (!xr?.isSessionSupported) return false
+    try {
+      return await xr.isSessionSupported('immersive-vr')
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Enter immersive VR, standing where a walkthrough would put the visitor.
+   *
+   * The headset provides head pose relative to a floor-level reference space;
+   * `standInside` decides WHERE that floor is in the model. Without offsetting
+   * the reference space the visitor would start at the model's origin — which
+   * for a reconstructed building is a corner of the site, outside the walls —
+   * so the reference space is shifted to the eye position `standInside` chose.
+   *
+   * Resolves when the session is running; rejects if the request is refused
+   * (no device, permission denied, another session already active), so the UI
+   * can put its button back rather than lie that VR is on.
+   */
+  async enterVR(eyeHeight = 1.6): Promise<void> {
+    const xr = (navigator as Navigator & { xr?: XRSystem }).xr
+    if (!xr) throw new Error('This browser has no WebXR support.')
+
+    // Position the camera as the walkthrough would, so the offset below starts
+    // the visitor inside the building rather than at the site origin.
+    this.standInside(eyeHeight)
+    const start = this.camera.position.clone()
+
+    const session = await xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor'],
+    })
+    await this.renderer.xr.setSession(session as unknown as XRSession)
+
+    // Shift the reference space so physical floor-origin maps to `start`. The
+    // XR transform is in the headset's own axes (y up, -z forward, metres),
+    // which is the same as the model's here; only the horizontal placement and
+    // the standing height need to move. The offset is the INVERSE of where we
+    // want to stand, because it moves the world under a fixed viewer.
+    const base = this.renderer.xr.getReferenceSpace()
+    if (base && typeof XRRigidTransform !== 'undefined') {
+      const offset = new XRRigidTransform({
+        x: -start.x,
+        y: -(this.model ? new THREE.Box3().setFromObject(this.model).min.y : 0),
+        z: -start.z,
+      })
+      this.renderer.xr.setReferenceSpace(base.getOffsetReferenceSpace(offset))
+    }
+
+    // When the visitor takes the headset off, hand control back to orbit and
+    // reframe, so the desktop view is not left standing in a wall.
+    session.addEventListener(
+      'end',
+      () => {
+        this.needsRender = true
+        this.frameModel()
+      },
+      { once: true },
+    )
+  }
+
+  /** Leave VR, if a session is running. */
+  async exitVR(): Promise<void> {
+    await this.renderer.xr.getSession()?.end()
   }
 }

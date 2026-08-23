@@ -164,6 +164,9 @@ const title = 'Walkthrough'
     <div class="overlay" id="controls" hidden>
       <button id="walk" aria-pressed="false">Walk through it</button>
       <button id="fit">Overview</button>
+      <!-- Shown only when the device can actually present immersive VR — a flat
+           browser must not offer a button that does nothing. -->
+      <button id="viewVr" hidden>View in VR</button>
       <button id="creditsToggle" aria-pressed="false" hidden>Credits</button>
       <button id="noteToggle" aria-pressed="false">Leave a note</button>
     </div>
@@ -313,6 +316,7 @@ const title = 'Walkthrough'
         controls: must('controls'),
         walk: must('walk'),
         fit: must('fit'),
+        viewVr: must('viewVr'),
         credits: must('credits'),
         creditList: must('creditList'),
         creditsToggle: must('creditsToggle'),
@@ -557,6 +561,26 @@ const title = 'Walkthrough'
         els.fit.addEventListener('click', () => {
           if (walking) els.walk.click()
           else viewer.frameModel()
+        })
+
+        // ---- View in VR -----------------------------------------------------
+        // The button reveals itself only on a device that can actually present
+        // immersive VR — asked once, after the model is up. On a phone or a
+        // desktop with no headset the check returns false and the button stays
+        // hidden, so nobody is offered a control that does nothing. A failed or
+        // refused session (permission denied, headset busy) writes to the gate
+        // error line and leaves the flat walkthrough exactly as it was.
+        void viewer.isVRSupported().then((supported: boolean) => {
+          if (!supported) return
+          els.viewVr.hidden = false
+          els.viewVr.addEventListener('click', () => {
+            viewer.enterVR().catch((error: Error) => {
+              els.detail.textContent =
+                'Could not start VR — ' + (error?.message ?? 'the headset refused the session.')
+              els.status.classList.remove('gone')
+              window.setTimeout(() => els.status.classList.add('gone'), 4000)
+            })
+          })
         })
 
         // ---- Branding -------------------------------------------------------
