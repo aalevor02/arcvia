@@ -8,6 +8,9 @@ import { registerSceneRoutes } from './routes/scenes.js'
 import { registerPublicationRoutes } from './routes/publications.js'
 import { registerShareRoutes } from './routes/share.js'
 import { registerRenderRoutes, reconcileRenderJobs } from './routes/render.js'
+import { attachRealtime } from './realtime/index.js'
+import { readToken } from './lib/auth.js'
+import { db } from './store.js'
 import { registerLeadRoutes } from './routes/leads.js'
 import { registerBillingRoutes } from './routes/billing.js'
 import { registerReferralRoutes } from './routes/referral.js'
@@ -102,6 +105,15 @@ if (reclaimed.requeued + reclaimed.watched + reclaimed.failed > 0) {
       `${reclaimed.watched} awaiting their worker, ${reclaimed.failed} failed and refunded`,
   )
 }
+
+// Live co-editing rides the SAME http server as the REST API — one port to
+// deploy. The relay only carries the live cursor between saves; durable writes
+// still go through the scene PATCH path. See src/realtime/.
+attachRealtime(app.server, {
+  readToken,
+  db,
+  log: (msg) => app.log.warn(msg),
+})
 
 try {
   await app.listen({ port: PORT, host: HOST })

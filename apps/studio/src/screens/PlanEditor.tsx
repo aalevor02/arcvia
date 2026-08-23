@@ -54,6 +54,7 @@ import {
   type UnitSystem,
 } from '../lib/format'
 import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
+import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
 import {
@@ -165,6 +166,16 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const lastSavedRef = useRef<Plan | null>(null)
   const sceneIdRef = useRef<string | null>(null)
 
+  // ---- Live co-editing -----------------------------------------------------
+  const channelRef = useRef<SceneChannel | null>(null)
+  /** True while a REMOTE snapshot is being applied, so the send-effect below
+   *  does not echo it straight back to the room. */
+  const applyingRemoteRef = useRef(false)
+  /** A remote snapshot that arrived mid-gesture, held until the drag releases —
+   *  replacing the plan under a live gesture clobbers its baseline. */
+  const pendingRemoteRef = useRef<Plan | null>(null)
+  const [peers, setPeers] = useState<Peer[]>([])
+
   // ---- Load ----------------------------------------------------------------
   useEffect(() => {
     let cancelled = false
@@ -216,11 +227,78 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     setSave('dirty')
   }, [])
 
+  /**
+   * Apply a plan a collaborator just sent.
+   *
+   * Two rules, both from the collision hazards the studio already knows:
+   * (1) if a gesture is live, DO NOT replace the plan now — it would clobber
+   * the gesture baseline and the user's drag would finish against the wrong
+   * plan; buffer it and let `finishGesture` apply it on release. (2) applying
+   * it must NOT mark the plan dirty, or autosave would immediately PATCH back
+   * what we just received and two clients ping-pong; so `lastSavedRef` is set
+   * to the incoming plan and the state is left 'saved'. `applyingRemoteRef`
+   * stops the send-effect echoing it to the room.
+   */
+  const applyRemotePlan = useCallback((incoming: unknown) => {
+    const next = loadPlan(incoming)
+    if (gestureBaseRef.current !== null) {
+      pendingRemoteRef.current = next
+      return
+    }
+    applyingRemoteRef.current = true
+    lastSavedRef.current = next
+    setHistory((h) => ({ ...h, present: next }))
+    setSave('saved')
+  }, [])
+
   /** Close the open gesture, recording one undo entry for the whole drag. */
   const finishGesture = useCallback(() => {
     setHistory((h) => commitFrom(h, gestureBaseRef.current))
     gestureBaseRef.current = null
-  }, [])
+    // A snapshot that arrived mid-drag was held; apply it now the gesture is
+    // closed. The user's own edit committed first (above), then the peer's
+    // lands on top — last-writer-wins, and the buffering kept the drag intact.
+    if (pendingRemoteRef.current) {
+      const buffered = pendingRemoteRef.current
+      pendingRemoteRef.current = null
+      applyRemotePlan(buffered)
+    }
+  }, [applyRemotePlan])
+
+  // ---- Live co-editing: connect while the scene is open --------------------
+  useEffect(() => {
+    const channel = new SceneChannel(sceneId, {
+      onPlan: (incoming) => applyRemotePlan(incoming),
+      onPresence: (roster) => setPeers(roster),
+      onStatus: (status) => {
+        // Losing the socket means the roster is stale; clear it so the "N
+        // others" chip does not claim company that has gone.
+        if (status === 'closed') setPeers([])
+      },
+    })
+    channel.connect()
+    channelRef.current = channel
+    return () => {
+      channel.close()
+      channelRef.current = null
+      setPeers([])
+    }
+  }, [sceneId, applyRemotePlan])
+
+  // ---- Live co-editing: broadcast local edits ------------------------------
+  // Fires on every plan change, and decides what NOT to send:
+  //   - a REMOTE apply, or we would echo a peer's edit straight back;
+  //   - a live gesture frame (gestureBaseRef set), or a drag floods the room at
+  //     60 messages a second. finishGesture's commit is a plan change with the
+  //     gesture already closed, so the finished drag sends exactly once.
+  useEffect(() => {
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false
+      return
+    }
+    if (gestureBaseRef.current !== null) return
+    channelRef.current?.sendPlan(plan)
+  }, [plan])
 
   // ---- Canvas lifecycle ----------------------------------------------------
   /**
@@ -579,6 +657,34 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           />
           {SAVE_LABEL[save]}
         </span>
+
+        {/* Who else is in this scene. One dot per collaborator, tinted with the
+            colour the server assigned their cursor, so the strip and the
+            cursors on the plan agree. Hidden when alone. */}
+        {peers.length > 0 && (
+          <span
+            className="presence"
+            title={peers.map((p) => p.name).join(', ') + ' also editing'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            {peers.slice(0, 5).map((p) => (
+              <span
+                key={p.userId}
+                aria-hidden="true"
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: p.colour,
+                  display: 'inline-block',
+                }}
+              />
+            ))}
+            <span style={{ fontSize: 12, opacity: 0.7 }}>
+              {peers.length} {peers.length === 1 ? 'other' : 'others'}
+            </span>
+          </span>
+        )}
 
         <span className="spacer" />
 
