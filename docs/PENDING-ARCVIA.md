@@ -474,7 +474,16 @@ on settled jobs are refused (409) — a refunded job must not flip to 'done'.
 `test/queue-persistence.mjs` proves all three branches with real SIGKILLs
 between boots.
 
-Per-preset queue lanes (1–2 d).
+~~Per-preset queue lanes (1–2 d)~~ ✅ **DONE** — two lanes split by the shape
+of the work: `fast` (preview, isometric, ai) and `heavy` (full, bake, cad),
+each with its own limit (`RENDER_CONCURRENCY` / `RENDER_HEAVY_CONCURRENCY`,
+both default 1). A 45-minute bake can no longer starve a 20-second preview.
+⚠ Worst-case burn is now the SUM of the two limits — an operator pricing GPU
+spend budgets both. Every running-job exit goes through one `release()`
+helper, because a leaked lane slot narrows the lane silently forever. The
+daily cap stays global across lanes on purpose (a runaway loop must not get
+two budgets). `test/queue-lanes.mjs` proves flow-past, per-lane FIFO, and
+freed-slot-serves-its-own-lane against a held stub worker.
 
 ### Two `TODO(you)` markers that are business decisions, not work
 

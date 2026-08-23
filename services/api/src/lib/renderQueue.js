@@ -51,12 +51,36 @@ if (MODE === 'local' && !existsSync(SCRIPT)) {
 }
 
 /**
- * How many jobs may render at once.
+ * Two lanes, so a bake cannot starve a preview.
  *
- * This is the single most important number for cost control in remote mode:
- * concurrency multiplied by GPU hourly rate is your worst-case burn. Default 1.
+ * With one global slot, a 45-minute CPU bake at the head of the queue held a
+ * 20-second preview hostage behind it — the user watching the viewport paid
+ * the waiting cost of someone else's overnight job. Splitting by the SHAPE of
+ * the work fixes that: quick, someone-is-watching jobs flow through `fast`
+ * while long deliverables take turns in `heavy`. Within a lane it is still
+ * strict FIFO; lanes only stop unlike work from queueing behind unlike work.
+ *
+ * ── Cost control now reads as a SUM ─────────────────────────────────────────
+ * Concurrency multiplied by GPU hourly rate is the worst-case burn, and that
+ * number is now RENDER_CONCURRENCY + RENDER_HEAVY_CONCURRENCY — at the
+ * defaults, two jobs at once where the old single queue ran one. That is not
+ * an accident to be minimised; it is the feature. An operator pricing
+ * worst-case burn budgets the sum, and either limit can be set to zero to
+ * close its lane entirely.
+ *
+ * `full` sits in heavy deliberately: 128 CPU samples is minutes of work
+ * (measured in this repo at 4–5 minutes a frame), and minutes is what the
+ * fast lane exists to never wait for.
  */
-const CONCURRENCY = Number(process.env.RENDER_CONCURRENCY ?? 1)
+const LANES = {
+  fast: { limit: Number(process.env.RENDER_CONCURRENCY ?? 1) },
+  heavy: { limit: Number(process.env.RENDER_HEAVY_CONCURRENCY ?? 1) },
+}
+
+const LANE_OF_PRESET = { full: 'heavy', cad: 'heavy', bake: 'heavy' }
+
+/** Which lane a job queues in. Unknown presets ride fast — they always did. */
+export const laneOf = (job) => LANE_OF_PRESET[job.preset] ?? 'fast'
 
 /**
  * Hard ceiling on a single job. A runaway scene cannot bill for hours.
@@ -94,8 +118,28 @@ export const isRemoteOwned = (job) =>
  */
 const DAILY_JOB_CAP = Number(process.env.RENDER_DAILY_CAP ?? 500)
 
-const pending = []
+const pending = { fast: [], heavy: [] }
 const running = new Map() // jobId -> { child, startedAt, timer }
+// jobId -> lane, kept beside `running` rather than inside its entries because
+// the per-branch `running.set` calls in start() overwrite entries wholesale —
+// a lane recorded there would be lost at exactly the moment it must be stable.
+const laneTag = new Map()
+const laneBusy = { fast: 0, heavy: 0 }
+
+/**
+ * The one exit for a running job. Every path that removes a job from
+ * `running` must come through here, or its lane's slot leaks and the lane
+ * quietly narrows until nothing in it ever starts again.
+ */
+function release(jobId) {
+  const lane = laneTag.get(jobId)
+  if (lane !== undefined) {
+    laneTag.delete(jobId)
+    laneBusy[lane] = Math.max(0, laneBusy[lane] - 1)
+  }
+  running.delete(jobId)
+}
+
 let completedToday = 0
 let dayStamp = new Date().toISOString().slice(0, 10)
 
@@ -108,7 +152,7 @@ function rollDayIfNeeded() {
 }
 
 export async function queueDepth() {
-  return pending.length + running.size
+  return pending.fast.length + pending.heavy.length + running.size
 }
 
 export async function jobStatus(jobId) {
@@ -124,22 +168,24 @@ export async function jobStatus(jobId) {
       markers: entry.markers ?? {},
     }
   }
-  if (pending.some((j) => j.id === jobId)) {
+  if (pending.fast.some((j) => j.id === jobId) || pending.heavy.some((j) => j.id === jobId)) {
     return { status: 'queued', progress: 0, elapsedMs: 0, markers: {} }
   }
   return null
 }
 
 export async function enqueue(job) {
-  pending.push(job)
+  pending[laneOf(job)].push(job)
   drain()
 }
 
 export async function cancelJob(jobId) {
-  const index = pending.findIndex((j) => j.id === jobId)
-  if (index !== -1) {
-    pending.splice(index, 1)
-    return true
+  for (const lane of Object.keys(pending)) {
+    const index = pending[lane].findIndex((j) => j.id === jobId)
+    if (index !== -1) {
+      pending[lane].splice(index, 1)
+      return true
+    }
   }
 
   const active = running.get(jobId)
@@ -152,7 +198,7 @@ export async function cancelJob(jobId) {
     // finish('done') raced the cancel.
     active.child?.kill('SIGTERM')
     active.controller?.abort()
-    running.delete(jobId)
+    release(jobId)
     drain()
     return true
   }
@@ -162,31 +208,38 @@ export async function cancelJob(jobId) {
 function drain() {
   rollDayIfNeeded()
 
-  while (running.size < CONCURRENCY && pending.length > 0) {
-    if (completedToday >= DAILY_JOB_CAP) {
-      // Deliberately leaves jobs queued rather than failing them — the cap is a
-      // spend guard, not a rejection. They run when the day rolls over.
-      console.warn(
-        `[renderQueue] daily cap of ${DAILY_JOB_CAP} reached; holding ${pending.length} job(s)`,
-      )
-      return
-    }
+  for (const lane of Object.keys(LANES)) {
+    while (laneBusy[lane] < LANES[lane].limit && pending[lane].length > 0) {
+      if (completedToday >= DAILY_JOB_CAP) {
+        // Deliberately leaves jobs queued rather than failing them — the cap
+        // is a spend guard, not a rejection. They run when the day rolls
+        // over. It is also global across lanes on purpose: it exists to bound
+        // a runaway submission loop's spend, and a per-lane cap would just
+        // mean the loop burns two budgets.
+        const held = pending.fast.length + pending.heavy.length
+        console.warn(
+          `[renderQueue] daily cap of ${DAILY_JOB_CAP} reached; holding ${held} job(s)`,
+        )
+        return
+      }
 
-    const job = pending.shift()
-    // ── Reserve the slot BEFORE yielding ─────────────────────────────────────
-    // `start()` does not register the job in `running` until after its first
-    // `await` (db.update below), so without this line `running.size` is
-    // unchanged when the loop re-tests its condition — and the whole `pending`
-    // array is shifted and started in one tick. At CONCURRENCY=1 that launched
-    // five queued jobs at once: five simultaneous Blender processes locally, or
-    // five times the operator's configured worst-case GPU burn in remote mode
-    // — the exact number the CONCURRENCY comment calls the most important cost
-    // control. Reserving here makes the counter honest across the await; the
-    // per-branch `running.set` calls in start() overwrite this placeholder with
-    // the real entry (same key, so size is unchanged), and finish() deletes it
-    // on every exit path.
-    running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
-    void start(job)
+      const job = pending[lane].shift()
+      // ── Reserve the slot BEFORE yielding ───────────────────────────────────
+      // `start()` does not register the job in `running` until after its first
+      // `await` (db.update below), so without this line the lane's tally is
+      // unchanged when the loop re-tests its condition — and the whole lane
+      // is shifted and started in one tick. At limit 1 that launched five
+      // queued jobs at once: five simultaneous Blender processes locally, or
+      // five times the operator's configured worst-case GPU burn in remote
+      // mode. Reserving here makes the counter honest across the await; the
+      // per-branch `running.set` calls in start() overwrite this placeholder
+      // with the real entry (same key, so size is unchanged), and release()
+      // gives the slot back on every exit path.
+      running.set(job.id, { child: null, startedAt: Date.now(), progress: 0, markers: {} })
+      laneTag.set(job.id, lane)
+      laneBusy[lane] += 1
+      void start(job)
+    }
   }
 }
 
@@ -199,7 +252,7 @@ async function start(job) {
   } catch (error) {
     const active = running.get(job.id)
     if (active?.timer) clearTimeout(active.timer)
-    running.delete(job.id)
+    release(job.id)
     await db.update('renderJobs', job.id, { status: 'failed', error: error.message })
     await settleRefund(job.id, 'render-failed')
     drain()
@@ -217,7 +270,7 @@ async function runJob(job) {
   if (current && ['cancelled', 'failed', 'done'].includes(current.status)) {
     const active = running.get(job.id)
     if (active?.timer) clearTimeout(active.timer)
-    running.delete(job.id)
+    release(job.id)
     drain()
     return
   }
@@ -231,7 +284,7 @@ async function runJob(job) {
   const finish = async (status, patch = {}) => {
     const active = running.get(job.id)
     if (active) clearTimeout(active.timer)
-    running.delete(job.id)
+    release(job.id)
 
     // ── A cancelled job stays cancelled ──────────────────────────────────────
     // The worker (or the CAD engine) may complete a fraction of a second after
