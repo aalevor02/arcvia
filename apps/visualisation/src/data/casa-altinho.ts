@@ -148,7 +148,7 @@ export const casaAltinho: Project = {
       id: 'a1',
       name: 'Villa A-1',
       appliesTo: ['A1'],
-      totalSbua: 417.99,
+      sbua: 417.99,
       summary:
         'The single A-type villa, at the head of the western row. Two bedrooms below a double-height verandah, an open stilt family lounge, and living, kitchen and pool stacked on the top level.',
       renders: ['villa-a1-aerial', 'villa-a-street', 'villa-a-living', 'villa-a-rear'],
@@ -233,7 +233,7 @@ export const casaAltinho: Project = {
       id: 'b1',
       name: 'Villa B-1',
       appliesTo: ['B1'],
-      totalSbua: 400.55,
+      sbua: 400.55,
       summary:
         'The southern end of the B row, and the only villa with a double car park at stilt level. Four bedrooms across two floors, with the living level and pool on top.',
       renders: ['villa-b-street', 'villa-b-living', 'villa-b-garden'],
@@ -312,7 +312,7 @@ export const casaAltinho: Project = {
       id: 'bd',
       name: 'Villa B-2, B-3, B-4 & D-1 to D-5',
       appliesTo: ['B2', 'B3', 'B4', 'D1', 'D2', 'D3', 'D4', 'D5'],
-      totalSbua: 438.4,
+      sbua: 438.4,
       summary:
         'The most numerous configuration on the site — eight villas share it. A private garden at stilt level, three bedrooms above, and a 6.73 m living room opening onto the pool deck.',
       renders: ['villa-b-street', 'villa-b-living', 'villa-b-garden'],
@@ -397,7 +397,7 @@ export const casaAltinho: Project = {
       id: 'ce',
       name: 'Villa C1–C4, E2, E3 & A2, A3',
       appliesTo: ['C1', 'C2', 'C3', 'C4', 'E2', 'E3', 'A2', 'A3'],
-      totalSbua: 467.97,
+      sbua: 467.97,
       summary:
         'Eight villas share this drawing set — the second most common on site and the larger of the two mainstream types. Twin bedrooms open onto a 7.20 m double-height verandah; the stilt level carries a wall feature with a water body.',
       renders: ['villa-e2', 'villa-e3', 'villa-a-street', 'villa-a-rear'],
@@ -483,7 +483,7 @@ export const casaAltinho: Project = {
       id: 'e1',
       name: 'Villa E-1',
       appliesTo: ['E1'],
-      totalSbua: 631.64,
+      sbua: 631.64,
       summary:
         'The corner plot, and the largest villa on the site by a wide margin — half as much again as the next type. Two separate car parks, a 7.23 m family lounge and reception at stilt level, four bedrooms, and an 8.00 × 3.50 m pool off a 12.57 m open deck.',
       renders: ['villa-e1', 'aerial-day', 'villa-a-living'],

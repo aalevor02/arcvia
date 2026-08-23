@@ -44,7 +44,7 @@ export function masterPlanPage(project: Project): HTMLElement {
       'stroke-width': '0.35',
       tabindex: '0',
       role: 'link',
-      'aria-label': `${unit.code} — ${type?.name ?? 'villa'}, ${area(type?.totalSbua ?? 0)}`,
+      'aria-label': `${unit.code} — ${type?.name ?? 'villa'}, ${area(type?.sbua ?? type?.totalMeasuredArea ?? 0)}`,
     })
 
     const show = () => {
@@ -125,7 +125,7 @@ export function masterPlanPage(project: Project): HTMLElement {
         'dl',
         {},
         h('dt', {}, 'Total SBUA'),
-        h('dd', {}, area(type?.totalSbua ?? 0)),
+        h('dd', {}, area(type?.sbua ?? type?.totalMeasuredArea ?? 0)),
         h('dt', {}, 'Levels'),
         h('dd', {}, String(type?.floors.length ?? 0)),
         h('dt', {}, 'Facing'),

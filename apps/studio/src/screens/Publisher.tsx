@@ -164,6 +164,7 @@ export default function Publisher({ onBack }: Props) {
             plan: scene.plan,
             modelUrl: scene.modelUrl,
             hdriUrl: scene.hdriUrl,
+            sbua: scene.sbua,
             views: scene.views?.map((view) => ({
               id: view.id,
               name: view.name,

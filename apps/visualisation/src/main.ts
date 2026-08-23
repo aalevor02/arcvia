@@ -272,7 +272,7 @@ function villaIndexPage(): HTMLElement {
               h('div', { class: 'units' }, type.appliesTo.join(' · ')),
               h('p', { class: 'muted', style: 'font-size:13px;margin:4px 0 0' },
                 `${count} unit${count === 1 ? '' : 's'} · ${type.floors.length} levels`),
-              h('div', { class: 'sbua' }, `${type.totalSbua.toFixed(2)} m²`),
+              h('div', { class: 'sbua' }, `${(type.sbua ?? type.totalMeasuredArea ?? 0).toFixed(2)} m²`),
             ),
           )
         }),

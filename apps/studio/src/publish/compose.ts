@@ -44,6 +44,8 @@ export interface ComposableScene {
   plan: Plan | null
   modelUrl?: string | null
   hdriUrl?: string | null
+  /** The developer's declared SBUA, entered by a person. Never derived. */
+  sbua?: number | null
   views?: { id: string; name: string; position: [number, number, number]; rotation: [number, number] }[]
 }
 
@@ -149,10 +151,11 @@ const round = (value: number): number => Math.round(value * 100) / 100
  *
  * It is emphatically **not** a certified super built-up area. SBUA is a
  * commercial figure with a legal meaning, typically 1.2 to 1.5 times carpet,
- * and it is not derivable from a drawing. The published model happens to define
- * `totalSbua` as the sum of these floor areas, so that is what is written — and
- * a warning says so, every time, so the number is confirmed by a person before
- * a buyer reads it.
+ * and it is not derivable from a drawing. The published model now says so in
+ * its shape: this sum is written as `totalMeasuredArea`, and `sbua` exists
+ * only when the architect typed the real figure in. Until they do, a warning
+ * on every compose asks for it, so the measured number is never shown under
+ * the commercial label.
  */
 function composeFloor(floor: Floor, warnings: string[], typeName: string): PublishedFloor {
   const rooms = detectRooms(floor)
@@ -205,12 +208,21 @@ function composeType(input: TypeInput, warnings: string[]): VillaType | null {
   }
 
   const floors = scene.plan.floors.map((floor) => composeFloor(floor, warnings, name))
-  const totalSbua = round(floors.reduce((sum, floor) => sum + floor.area, 0))
+  const totalMeasuredArea = round(floors.reduce((sum, floor) => sum + floor.area, 0))
 
-  warnings.push(
-    `${name}: ${totalSbua} m² is measured from the drawing at wall centrelines, not a certified ` +
-      'super built-up area. Confirm it before publishing.',
-  )
+  // The declared SBUA comes from a person or not at all. When the architect
+  // has entered one, the page shows their figure under its real name and the
+  // measurement under its own; when they have not, the measurement stands
+  // alone — labelled as a measurement — and the warning below asks for the
+  // real thing rather than letting the derived number impersonate it.
+  const sbua = typeof scene.sbua === 'number' && scene.sbua > 0 ? scene.sbua : undefined
+  if (!sbua) {
+    warnings.push(
+      `${name}: ${totalMeasuredArea} m² is measured from the drawing at wall centrelines — ` +
+        'not a super built-up area, and buyers read totals as SBUA. Enter the certified ' +
+        'figure in Presentation to publish one.',
+    )
+  }
 
   if (floors.every((floor) => floor.plan === '')) {
     warnings.push(`${name}: no floor-plan drawings yet, so the plan tab will show room schedules only.`)
@@ -251,7 +263,8 @@ function composeType(input: TypeInput, warnings: string[]): VillaType | null {
     id,
     name,
     appliesTo: input.appliesTo ?? [],
-    totalSbua,
+    ...(sbua ? { sbua } : {}),
+    totalMeasuredArea,
     floors,
     renders: input.renders ?? [],
     summary: input.summary ?? '',

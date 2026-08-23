@@ -127,6 +127,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [options, setOptions] = useState<SceneOptions | null>(null)
   /** Where the building is, for the sun study. */
   const [site, setSite] = useState<Site | null>(null)
+  /** The declared SBUA, typed in by the architect. Never derived. */
+  const [sbua, setSbua] = useState<number | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -162,6 +164,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setEnvironment(scene.hdriUrl ?? null)
         setOptions(scene.options ?? null)
         setSite(scene.site ?? null)
+        setSbua(scene.sbua ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -767,6 +770,13 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           onChange={updatePresentation}
           placing={placing}
           onPlacingChange={setPlacing}
+          sbua={sbua}
+          onSbuaChange={(next) => {
+            setSbua(next)
+            void updateScene(sceneId, { sbua: next }).catch(() =>
+              setStatus('That change could not be saved. Check your connection.'),
+            )
+          }}
         />
 
         <section>

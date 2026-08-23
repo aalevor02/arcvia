@@ -169,7 +169,7 @@ export function homePage(project: Project): HTMLElement {
                 { class: 'body' },
                 h('h3', {}, type.name),
                 h('div', { class: 'units' }, `${count} unit${count === 1 ? '' : 's'} · ${type.floors.length} levels`),
-                h('div', { class: 'sbua' }, area(type.totalSbua)),
+                h('div', { class: 'sbua' }, area(type.sbua ?? type.totalMeasuredArea ?? 0)),
               ),
             )
           }),

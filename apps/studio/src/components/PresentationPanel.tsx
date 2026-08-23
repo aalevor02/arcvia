@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SceneViewer } from '@arcvia/viewer'
 import { uploadImage } from '../lib/api'
 import {
@@ -19,6 +19,9 @@ interface Props {
   /** True while the author is picking a point in the 3D view for a hotspot. */
   placing: boolean
   onPlacingChange: (placing: boolean) => void
+  /** The declared SBUA in m², or null while none has been entered. */
+  sbua: number | null
+  onSbuaChange: (next: number | null) => void
 }
 
 /**
@@ -36,8 +39,27 @@ export default function PresentationPanel({
   onChange,
   placing,
   onPlacingChange,
+  sbua,
+  onSbuaChange,
 }: Props) {
   const [viewName, setViewName] = useState('')
+  // Typed freely, committed on blur — half-typed numbers must not be saved.
+  const [sbuaDraft, setSbuaDraft] = useState(sbua === null ? '' : String(sbua))
+
+  // The stored figure arrives after mount, with the scene.
+  useEffect(() => {
+    setSbuaDraft(sbua === null ? '' : String(sbua))
+  }, [sbua])
+
+  function commitSbua() {
+    const value = Number(sbuaDraft)
+    if (sbuaDraft.trim() === '' || !Number.isFinite(value) || value <= 0) {
+      setSbuaDraft('')
+      onSbuaChange(null)
+      return
+    }
+    onSbuaChange(value)
+  }
 
   const { views, hotspots, branding } = presentation
 
@@ -262,6 +284,27 @@ export default function PresentationPanel({
             }
           />
           <span style={{ fontSize: 12 }}>Hide the Arcvia credit</span>
+        </label>
+      </section>
+
+      <section>
+        <span className="eyebrow">Areas</span>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 0 }}>
+          The plan gives a measured area (to wall centrelines). SBUA is a
+          commercial figure only you can supply — the published page shows it
+          under that name only once it is entered here.
+        </p>
+        <label style={{ display: 'block', fontSize: 11.5 }}>
+          Super built-up area, m²
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={sbuaDraft}
+            placeholder="e.g. 417.99"
+            onChange={(e) => setSbuaDraft(e.target.value)}
+            onBlur={commitSbua}
+          />
         </label>
       </section>
     </>

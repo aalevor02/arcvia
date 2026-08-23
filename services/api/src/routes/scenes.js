@@ -116,6 +116,9 @@ export async function registerSceneRoutes(app) {
       // — no address, nothing a geocoder touched, just what solar geometry
       // needs.
       'site',
+      // The declared super built-up area in square metres, entered by the
+      // architect in the Presentation panel. Stored as given.
+      'sbua',
     ]
     // ── Why this rejects instead of filtering ───────────────────────────────
     // This used to be `.filter(([k]) => allowed.includes(k))`. A caller sending

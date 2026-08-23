@@ -40,7 +40,24 @@ export interface VillaType {
   name: string
   /** Unit codes that share this drawing set. */
   appliesTo: string[]
-  totalSbua: number
+  /**
+   * The super built-up area the DEVELOPER declares, in square metres.
+   *
+   * Present only when a person supplied it. SBUA is a commercial figure with
+   * a legal meaning — typically 1.2 to 1.5 times carpet — and it is not
+   * derivable from a drawing, which is why no pipeline in this repository
+   * ever writes it. This field replaced `totalSbua`, which carried the
+   * composer's centreline measurement under a name a buyer reads as the
+   * certified figure.
+   */
+  sbua?: number
+  /**
+   * What the composer can honestly measure: the sum of floor areas taken at
+   * wall CENTRELINES — carpet plus roughly half of every wall, between carpet
+   * and built-up and equal to neither. Shown labelled as a measurement, never
+   * as SBUA.
+   */
+  totalMeasuredArea?: number
   floors: Floor[]
   /** Render slugs, most representative first. */
   renders: string[]

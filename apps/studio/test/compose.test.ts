@@ -99,19 +99,45 @@ const scene = (plan: Plan | null, extra: Partial<ComposableScene> = {}): Composa
 
   // 6x4 = 24 and 4x4 = 16, measured at centrelines.
   check('the floor area is the sum of the rooms', type?.floors[0].area === 40, String(type?.floors[0].area))
-  check('and totalSbua is the sum of the floors', type?.totalSbua === 40, String(type?.totalSbua))
+  check(
+    'and totalMeasuredArea is the sum of the floors',
+    type?.totalMeasuredArea === 40,
+    String(type?.totalMeasuredArea),
+  )
+  check('and no SBUA is published — nobody declared one', type?.sbua === undefined, String(type?.sbua))
 
   const [largest, smallest] = type!.floors[0].rooms
   check('rooms are ordered largest first', largest.width === 6 && smallest.width === 4, `${largest.width} then ${smallest.width}`)
   check('and carry their extents', largest.depth === 4 && smallest.depth === 4)
 
   // ── The assertion that matters most on a sales page ──────────────────────
-  // A measured centreline area is not a certified SBUA, and the composer must
-  // never let that number reach a buyer unremarked.
+  // A measured centreline area is not an SBUA, and the composer must never
+  // let that number reach a buyer under the commercial label. With no
+  // declared figure, the compose asks for one.
   check(
-    'the SBUA figure is flagged as measured, not certified',
-    warnings.some((w) => /not a certified/i.test(w) && /Type A/.test(w)),
-    warnings.find((w) => /certified/i.test(w)),
+    'with no declared SBUA, the compose asks for one',
+    warnings.some((w) => /not a super built-up area/i.test(w) && /Type A/.test(w)),
+    warnings.find((w) => /built-up/i.test(w)),
+  )
+}
+
+// ── A declared SBUA is published under its name, and the warning stops ──────
+{
+  const floor = twoRoomFloor()
+  const declared = { ...scene(planWith([floor])), sbua: 55.5 }
+  const { project, warnings } = composeProject('Test Project', [{ scene: declared, name: 'Type A' }])
+  const type = project.villaTypes[0]
+
+  check('a declared SBUA is published verbatim', type?.sbua === 55.5, String(type?.sbua))
+  check(
+    'the measurement is still published beside it',
+    type?.totalMeasuredArea === 40,
+    String(type?.totalMeasuredArea),
+  )
+  check(
+    'and the ask-for-SBUA warning goes quiet',
+    !warnings.some((w) => /built-up/i.test(w)),
+    warnings.find((w) => /built-up/i.test(w)),
   )
 }
 

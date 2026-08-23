@@ -181,7 +181,14 @@ export function villaPage(project: Project, typeId: string, highlightUnit?: stri
                 ...type.floors.map((floor) =>
                   h('tr', {}, h('td', {}, `${floor.label} floor`), h('td', {}, area(floor.area))),
                 ),
-                h('tr', { class: 'total' }, h('td', {}, 'Total SBUA'), h('td', {}, area(type.totalSbua))),
+                // The developer's declared SBUA when one exists; otherwise the
+                // measured centreline sum, labelled as the measurement it is.
+                h(
+                  'tr',
+                  { class: 'total' },
+                  h('td', {}, type.sbua ? 'Total SBUA' : 'Measured area'),
+                  h('td', {}, area(type.sbua ?? type.totalMeasuredArea ?? 0)),
+                ),
               ),
             ),
             h(

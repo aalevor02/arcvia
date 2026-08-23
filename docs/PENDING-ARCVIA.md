@@ -452,15 +452,18 @@ options (3–4 d).
    something that injects the tags before the HTML leaves the server.
    Architectural, not an oversight.
 
-2. **`totalSbua` is not a super built-up area, and a buyer will read it as
-   one.** The composer sums measured floor areas because the published model
-   defines it that way — but rooms are bounded faces of the wall graph, so those
-   polygons run along **centrelines**: carpet plus roughly half of every wall. A
-   certified SBUA is a commercial figure, typically 1.2–1.5× carpet, and is
-   **not derivable from a drawing at all.** A warning naming the figure and the
-   unit type fires on every compose and the studio lists it before anything can
-   be published — which is why the publisher is noisy, is correct, and should
-   not be quietened without a real SBUA source.
+2. ~~**`totalSbua` is not a super built-up area, and a buyer will read it as
+   one.**~~ ✅ **RESOLVED** — the real SBUA source turned out to be the only
+   one there ever was: the architect. The schema now says what each number is:
+   `totalMeasuredArea` (the centreline sum, always written, labelled as a
+   measurement) and `sbua` (present only when a person typed it into the new
+   Presentation → Areas field; stored on the scene, PATCH-allow-listed).
+   The compose warning now fires only while no declared figure exists, and
+   goes quiet when one does — the noisy state asks for the missing input
+   instead of flagging a mislabelled output. Casa Altinho's figures moved to
+   `sbua`: its own caption already said "as stated on the architect's type
+   sheet", so they were declared figures all along, filed under the wrong
+   name.
 
 ### Operations
 

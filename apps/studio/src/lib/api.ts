@@ -179,6 +179,12 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   options?: SceneOptions
   /** Where the building is, for the sun study. Set once per project. */
   site?: { latitude: number; longitude: number } | null
+  /**
+   * The declared super built-up area, in m² — typed in by the architect,
+   * never derived. The publisher shows it under the SBUA label only when it
+   * is present; the measured centreline sum is labelled as a measurement.
+   */
+  sbua?: number | null
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }
