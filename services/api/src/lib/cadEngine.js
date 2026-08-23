@@ -131,13 +131,18 @@ export function runEngine(command, args, { onProgress, signal } = {}) {
  * not believe, and shipping that to a viewer is worse than failing.
  */
 export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers = true,
-                                    height, frame, onProgress, signal }) {
+                                    height, frame, storeys = true, onProgress, signal }) {
   const args = ['--input', inputPath, '--out', outDir]
   if (unit) args.push('--unit', unit)
   if (layers?.length) args.push('--layers', layers.join(','))
   else if (autoLayers) args.push('--auto-layers')
   if (height) args.push('--height', String(height))
   if (frame !== undefined && frame !== null) args.push('--frame', String(frame))
+  // On by default: a sheet drawing two floors of one house should build both.
+  // Safe by the engine's own rule — geometry may propose a stack but only the
+  // drawing's TEXT confirms one, and an unconfirmed group builds exactly as a
+  // single-frame job does. The engine had this finished; nothing called it.
+  if (storeys) args.push('--storeys')
 
   await runEngine('reconstruct', args, { onProgress, signal })
 

@@ -192,8 +192,29 @@ them and discards the other. The prerequisite is done; the feature is not:
   boxes, room names that cross-reference (`OFFICE PATIO (BELOW)` is literally an
   upper floor pointing at a lower one), and the sheet's own title text.
 
-Estimated 10–14 days. It is the largest single unlock in the product and it is
-now unblocked.
+~~Estimated 10–14 days. It is the largest single unlock in the product and it
+is now unblocked.~~ ✅ **MOSTLY BUILT ALREADY, NOW REACHABLE — go-and-look
+strikes the flagship entry itself.** `solve/storeys.py` (geometry proposes,
+only TEXT confirms, refusals are a product), the stacked `--storeys` build
+with plan registration, and per-storey GLB meshes all existed. Two real gaps
+closed on 2026-08-24:
+
+1. **`_solve_frame` accepted `base_z` and forwarded it to no builder** — a
+   two-storey build put both floors at z=0. The report said "storey0 z −3.0",
+   verify PASSED, and only measuring the GLB's actual mesh heights caught the
+   interpenetration. Fixed; the villa now stacks at y [−3, −0.3] / [0, 2.7],
+   plan-registered, measured.
+2. **Nothing in the product passed `--storeys`** (the finished-producer defect,
+   on the flagship). The API cad path now defaults it ON — safe because an
+   unconfirmed group builds exactly as before — and the import summary says
+   "2 storeys (Lower Ground Floor Plan, Ground Floor Plan): 45 rooms, 302
+   walls in all", proven through the real API on the villa DWG.
+
+**What genuinely remains of this entry:** `elements.walls/spaces/openings` are
+still primary-storey-only by design, so the BOQ, clearance and code checks
+cover one floor of a multi-storey building. Closing that is the real
+remaining chunk (per-storey elements through quantify/solve), not the
+registration this entry described.
 
 ---
 

@@ -411,6 +411,11 @@ export interface CadSummary {
   openings?: number
   unit?: string
   layers?: string[]
+  /** Present when the sheet drew several floors of ONE building. */
+  storeys?: number
+  storeyNames?: string[]
+  roomsAllStoreys?: number
+  wallsAllStoreys?: number
 }
 
 export interface CadJob {

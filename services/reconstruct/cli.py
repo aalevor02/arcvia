@@ -595,10 +595,15 @@ def reconstruct(
         # goes into fixture_mesh as a box. See build/glb.py's material palette.
         wall_mesh, floor_mesh, fixture_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
         plant_mesh, trunk_mesh, lawn_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
-        wall_build = build_walls(wall_mesh, walls, holes, height)
-        slab_build = build_slabs(floor_mesh, rooms, lawn=lawn_mesh)
+        # `base_z` MUST reach every builder. It arrived in this signature with
+        # the storey work and was forwarded to none of them, so a two-storey
+        # build put both floors at z=0 — the report said "storey0 z -3.0",
+        # the geometry interpenetrated, and only measuring the GLB's actual
+        # mesh heights caught it. The builders all supported it already.
+        wall_build = build_walls(wall_mesh, walls, holes, height, base_z=base_z)
+        slab_build = build_slabs(floor_mesh, rooms, base_z=base_z, lawn=lawn_mesh)
         fixture_build = build_fixtures(
-            fixture_mesh, fixtures, CATALOGUE_DIMS,
+            fixture_mesh, fixtures, CATALOGUE_DIMS, base_z=base_z,
             plants=plant_mesh, trunks=trunk_mesh,
         )
 

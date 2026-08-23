@@ -378,6 +378,7 @@ async function runJob(job) {
               autoLayers: job.spec.autoLayers !== false,
               height: job.spec.height,
               frame: job.spec.frame,
+              storeys: job.spec.storeys !== false,
               signal: controller.signal,
               onProgress,
             })
@@ -415,6 +416,17 @@ async function runJob(job) {
             ? {
                 scale: model.scale.metresPerUnit,
                 scaleConfirmed: Boolean(model.scale.confirmed),
+              }
+            : {}),
+          // A sheet drawing two floors of one house builds both, and the
+          // summary must say so — a two-storey villa reported with one
+          // storey's room count reads as half the building going missing.
+          ...(Array.isArray(model.storeys?.built) && model.storeys.built.length > 1
+            ? {
+                storeys: model.storeys.built.length,
+                storeyNames: model.storeys.built.map((s) => s.title).filter(Boolean),
+                roomsAllStoreys: model.storeys.built.reduce((n, s) => n + (s.rooms ?? 0), 0),
+                wallsAllStoreys: model.storeys.built.reduce((n, s) => n + (s.walls ?? 0), 0),
               }
             : {}),
         },

@@ -755,7 +755,15 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           onLanded={(modelUrl, summary: CadSummary | null) => {
             setNotice(false)
             void updateScene(sceneId, { modelUrl }).catch(() => {})
-            if (summary) {
+            if (summary && (summary.storeys ?? 0) > 1) {
+              // A two-storey villa reported with one storey's room count reads
+              // as half the building going missing.
+              setImportSummary(
+                `Reconstructed ${summary.storeys} storeys` +
+                  (summary.storeyNames?.length ? ` (${summary.storeyNames.join(', ')})` : '') +
+                  `: ${summary.roomsAllStoreys ?? 0} rooms, ${summary.wallsAllStoreys ?? 0} walls in all.`,
+              )
+            } else if (summary) {
               setImportSummary(
                 `Reconstructed: ${summary.rooms ?? 0} rooms (${summary.named ?? 0} named), ` +
                   `${summary.walls ?? 0} walls, ${summary.openings ?? 0} openings` +
