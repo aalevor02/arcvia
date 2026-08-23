@@ -125,7 +125,7 @@ try {
     slug: 'casa-altinho',
     name: 'Casa Altinho',
     script: 'Casa',
-    villaTypes: [{ id: 'a1', name: 'Type A1', floors: [], renders: [], appliesTo: [], totalSbua: 0, summary: '' }],
+    villaTypes: [{ id: 'a1', name: 'Type A1', floors: [], renders: [], appliesTo: [], totalMeasuredArea: 0, summary: '' }],
     gallery: [],
   }
   const saved = await call(`/publications/${id}`, { method: 'PATCH', token: aliceToken, body: { project } })
