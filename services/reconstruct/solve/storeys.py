@@ -257,3 +257,41 @@ def register_storeys(frames, rise: float = DEFAULT_STOREY_RISE) -> Registration:
 
     registration.stacks.sort(key=lambda s: -len(s))
     return registration
+
+
+def element_blocks(model: dict):
+    """
+    The building's elements, one block per storey — the canonical way to read
+    a model that may have floors.
+
+    Yields `(tag, elements)` pairs. For a single-storey model there is one
+    pair: `tag` is None and `elements` is `model["elements"]` unchanged, so a
+    consumer written against this iterator handles every model ever produced.
+    For a stacked build, `tag` is the storey block ({storey, level, title,
+    shift}) and `elements` carries that storey's walls/spaces/openings plus
+    the fixtures tagged to it.
+
+    Why this exists as ONE function: clearance, the code checks, the bill of
+    quantities and the schedules all read `elements.*`, and all of them were
+    silently covering one floor of a multi-storey building. Four consumers
+    each growing their own storey loop is four chances to filter fixtures
+    differently — the exact class of drift this repository keeps writing down.
+    Coordinates inside a block are FRAME coordinates; the registration shift
+    is on the tag and applies to the meshes only, so geometry within a block
+    is self-consistent and geometry ACROSS blocks must not be compared without
+    applying it.
+    """
+    elements = model.get("elements") or {}
+    blocks = elements.get("storeys")
+    if not blocks:
+        yield None, elements
+        return
+
+    fixtures = elements.get("fixtures", [])
+    for block in blocks:
+        yield block, {
+            "walls": block.get("walls", []),
+            "spaces": block.get("spaces", []),
+            "openings": block.get("openings", []),
+            "fixtures": [f for f in fixtures if f.get("storey") == block.get("storey")],
+        }

@@ -705,6 +705,9 @@ def reconstruct(
     # different floors are not an overlap and a checker with no storey index
     # cannot tell that.
     all_fixtures: list[dict] = []
+    #: Per-storey element blocks — the whole building, for consumers that can
+    #: read more than one floor. Empty on single-storey builds.
+    storey_elements: list[dict] = []
     #: Which storey `elements.walls` / `spaces` / `openings` describe. Anything
     #: that pairs a fixture with WALLS has to filter to this one, because those
     #: walls belong to one floor and a fixture from another would be measured
@@ -732,6 +735,21 @@ def reconstruct(
             all_fixtures.extend({**f, "storey": n} for f in result["fixtures"])
             if result is storey:
                 primary_storey = n
+            # The whole building's elements, one block per storey, in FRAME
+            # coordinates (the registration shift is recorded beside them, and
+            # applied only to the meshes). `elements.walls/spaces/openings`
+            # stay the primary storey so every existing consumer keeps its
+            # shape; anything that wants the WHOLE building iterates these —
+            # see solve/storeys.py::element_blocks.
+            storey_elements.append({
+                "storey": n,
+                "level": level.level,
+                "title": level.title,
+                "shift": [round(shift[0], 3), round(shift[1], 3)],
+                "walls": [w.as_dict() for w in result["walls"]],
+                "spaces": [r.as_dict() for r in result["rooms"]],
+                "openings": [o.as_dict() for o in result["holes"]],
+            })
             storey_report.append({
                 "storey": n,
                 "level": level.level,
@@ -809,6 +827,10 @@ def reconstruct(
             "openings": [o.as_dict() for o in holes],
             # Single-storey models keep storey 0, so consumers read one shape.
             "fixtures": all_fixtures or [{**f, "storey": 0} for f in fixtures],
+            # The whole building, one block per storey — present only when a
+            # confirmed stack was built. The flat lists above remain the
+            # primary storey, so nothing that reads them changes meaning.
+            **({"storeys": storey_elements} if storey_elements else {}),
         },
     }
 
@@ -831,7 +853,7 @@ def reconstruct(
     try:
         from solve import clearance as cl
 
-        issues = cl.check(model, CATALOGUE_DIMS)
+        issues = cl.check_building(model, CATALOGUE_DIMS)
         model["clearance"] = {
             "summary": cl.summarise(issues),
             "issues": [i.as_dict() for i in issues],
@@ -853,7 +875,7 @@ def reconstruct(
         from solve import codecheck as cc
 
         book = cc.load_rulebook(DEFAULT_RULEBOOK)
-        code_findings, code_coverage = cc.check(model, book)
+        code_findings, code_coverage = cc.check_building(model, book)
         model["codecheck"] = {
             "rulebook": book.get("title"),
             "summary": cc.summarise(code_findings, code_coverage, book),
@@ -1189,7 +1211,7 @@ def clearance_report(model_path: str) -> dict:
     from solve import clearance
 
     model = json.loads(Path(model_path).read_text(encoding="utf-8"))
-    issues = clearance.check(model, CATALOGUE_DIMS)
+    issues = clearance.check_building(model, CATALOGUE_DIMS)
     return {
         "source": model.get("source"),
         "summary": clearance.summarise(issues),
@@ -1208,7 +1230,7 @@ def codecheck_report(model_path: str, rulebook_path: str) -> dict:
 
     model = json.loads(Path(model_path).read_text(encoding="utf-8"))
     book = cc.load_rulebook(rulebook_path)
-    findings, coverage = cc.check(model, book)
+    findings, coverage = cc.check_building(model, book)
     return {
         "source": model.get("source"),
         "rulebook": book.get("title"),
@@ -1227,6 +1249,8 @@ def _print_codecheck(report: dict) -> None:
     for finding in report["findings"][:20]:
         where = finding["roomName"] or (
             f"room {finding['room']}" if finding["room"] is not None else "-")
+        if finding.get("storeyTitle"):
+            where = f"{finding['storeyTitle']} · {where}"
         print(f"      !  [{where[:22]:<22}] {finding['message'][:96]}")
         print(f"           {finding['cite']}")
     if len(report["findings"]) > 20:
@@ -1252,6 +1276,8 @@ def _print_clearance(report: dict) -> None:
     for issue in report["issues"][:14]:
         mark = {"blocking": "!!", "tight": " !", "note": "  "}.get(issue["severity"], "  ")
         where = issue["roomName"] or (f"room {issue['room']}" if issue["room"] is not None else "-")
+        if issue.get("storeyTitle"):
+            where = f"{issue['storeyTitle']} · {where}"
         print(f"  {mark} [{where[:22]:<22}] {issue['message']}")
     if len(report["issues"]) > 14:
         print(f"     ... {len(report['issues']) - 14} more")

@@ -94,6 +94,10 @@ class Issue:
     measured: float | None = None
     wanted: float | None = None
     at: tuple[float, float] | None = None
+    # Which floor, on a multi-storey building. None on single-storey models,
+    # where the question does not arise.
+    storey: int | None = None
+    storey_title: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -106,6 +110,8 @@ class Issue:
             "measured": round(self.measured, 3) if self.measured is not None else None,
             "wanted": round(self.wanted, 3) if self.wanted is not None else None,
             "at": [round(v, 3) for v in self.at] if self.at else None,
+            "storey": self.storey,
+            "storeyTitle": self.storey_title,
         }
 
 
@@ -469,6 +475,36 @@ def check(model: dict, dims: dict) -> list[Issue]:
                 room=index, room_name=space.get("name"),
                 at=tuple(shape.representative_point().coords)[0],
             ))
+
+    order = {"blocking": 0, "tight": 1, "note": 2}
+    issues.sort(key=lambda i: (order.get(i.severity, 3), -(i.measured or 0)))
+    return issues
+
+
+def check_building(model: dict, dims: dict) -> list[Issue]:
+    """
+    Every storey of the building, one report.
+
+    `check` measures one floor against its own walls — correctly, because two
+    beds at the same (x, y) on different floors are not an overlap. This runs
+    it once per storey block (see solve/storeys.py::element_blocks) and tags
+    each finding with the floor it belongs to. On a single-storey model it is
+    `check`, exactly.
+    """
+    from .storeys import element_blocks
+
+    issues: list[Issue] = []
+    for tag, elements in element_blocks(model):
+        scoped = {
+            "elements": elements,
+            "storeys": {"primary": (tag or {}).get("storey", 0)},
+        }
+        found = check(scoped, dims)
+        if tag:
+            for issue in found:
+                issue.storey = tag.get("storey")
+                issue.storey_title = tag.get("title") or None
+        issues.extend(found)
 
     order = {"blocking": 0, "tight": 1, "note": 2}
     issues.sort(key=lambda i: (order.get(i.severity, 3), -(i.measured or 0)))

@@ -91,6 +91,9 @@ class Finding:
     required: float | None = None
     at: tuple[float, float] | None = None
     items: list[str] = field(default_factory=list)
+    # Which floor, on a multi-storey building. None where it does not arise.
+    storey: int | None = None
+    storey_title: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -103,6 +106,8 @@ class Finding:
             "required": round(self.required, 3) if self.required is not None else None,
             "at": [round(v, 3) for v in self.at] if self.at else None,
             "items": self.items,
+            "storey": self.storey,
+            "storeyTitle": self.storey_title,
         }
 
 
@@ -635,6 +640,76 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
 
     findings.sort(key=lambda f: (f.rule, -(f.required or 0) + (f.measured or 0)))
     return findings, coverage
+
+
+def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
+    """
+    Every storey of the building against the rulebook, merged honestly.
+
+    Room and door rules run per storey — a bedroom on the first floor answers
+    to the same figures as one on the ground. EGRESS runs only on the storey
+    the site is entered from (`storeys.primary`): the engine does not model
+    stairs, so asking an upper floor to reach an exterior door would flag every
+    upstairs bedroom of every house ever drawn. That is not a silent narrowing
+    — the skipped storeys appear in coverage with exactly that reason.
+
+    Coverage rows merge by rule across storeys (checked and short sum; skips
+    concatenate, tagged with their floor). Findings carry storey and title.
+    On a single-storey model this is `check`, exactly.
+    """
+    from .storeys import element_blocks
+
+    blocks = list(element_blocks(model))
+    if len(blocks) == 1 and blocks[0][0] is None:
+        return check(model, rulebook)
+
+    primary = (model.get("storeys") or {}).get("primary", 0)
+    egress_rules = [r for r in rulebook["rules"] if r["metric"] == "egress-reach"]
+    grounded = {**rulebook}
+    upper = {**rulebook, "rules": [r for r in rulebook["rules"]
+                                   if r["metric"] != "egress-reach"]}
+
+    findings: list[Finding] = []
+    merged: dict[str, dict] = {
+        rule["id"]: {"rule": rule["id"], "checked": 0, "short": 0, "skipped": []}
+        for rule in rulebook["rules"]
+    }
+
+    for tag, elements in blocks:
+        storey = tag.get("storey", 0)
+        title = tag.get("title") or f"storey {storey}"
+        scoped = {"elements": elements, "storeys": {"primary": storey}}
+        book = grounded if storey == primary else upper
+
+        found, coverage = check(scoped, book)
+        for finding in found:
+            finding.storey = storey
+            finding.storey_title = tag.get("title") or None
+        findings.extend(found)
+
+        for row in coverage:
+            into = merged[row["rule"]]
+            into["checked"] += row["checked"]
+            into["short"] += row["short"]
+            into["skipped"].extend(
+                {**skip, "storey": storey, "storeyTitle": tag.get("title")}
+                for skip in row["skipped"]
+            )
+
+        if storey != primary:
+            for rule in egress_rules:
+                merged[rule["id"]]["skipped"].append({
+                    "subject": title,
+                    "reason": (
+                        "stairs are not modelled; egress is assessed on the "
+                        "storey the site is entered from"
+                    ),
+                    "storey": storey,
+                    "storeyTitle": tag.get("title"),
+                })
+
+    findings.sort(key=lambda f: (f.rule, -(f.required or 0) + (f.measured or 0)))
+    return findings, list(merged.values())
 
 
 def summarise(findings: list[Finding], coverage: list[dict], rulebook: dict) -> dict:

@@ -210,11 +210,21 @@ closed on 2026-08-24:
    "2 storeys (Lower Ground Floor Plan, Ground Floor Plan): 45 rooms, 302
    walls in all", proven through the real API on the villa DWG.
 
-**What genuinely remains of this entry:** `elements.walls/spaces/openings` are
-still primary-storey-only by design, so the BOQ, clearance and code checks
-cover one floor of a multi-storey building. Closing that is the real
-remaining chunk (per-storey elements through quantify/solve), not the
-registration this entry described.
+~~**What genuinely remains of this entry:** `elements.walls/spaces/openings`
+are still primary-storey-only by design, so the BOQ, clearance and code
+checks cover one floor of a multi-storey building.~~ ✅ **DONE** — the model
+now carries `elements.storeys` (one block per floor, frame coordinates, shift
+on the tag; the flat `elements.*` stays the primary storey so every existing
+consumer keeps its shape), read through ONE iterator
+(`solve/storeys.py::element_blocks`) by all four consumers. Clearance and the
+code checks run per floor with findings tagged (two beds at the same (x, y)
+on different floors are NOT an overlap; egress runs only on the entry storey,
+with the others skipped in coverage saying "stairs are not modelled" — never
+silently). Openings re-host by index offset in the concatenated view, or
+every upstairs door lands on a ground-floor wall. **On the villa the bill
+went from ₹957,376 to ₹1,985,270 — the old bill priced half the building.**
+`test/test_multistorey.py`, 17 assertions; the full engine suite is 531
+green.
 
 ---
 

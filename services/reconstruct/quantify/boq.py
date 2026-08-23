@@ -255,6 +255,36 @@ class Costing:
         }
 
 
+
+def _building_elements(model: dict) -> dict:
+    """
+    The WHOLE building's walls, spaces and openings — every storey.
+
+    A bill of quantities that reads `elements.*` directly prices the primary
+    storey only, which on a two-storey villa is a bill for half the masonry a
+    client will be charged for. Storey blocks concatenate here; on a
+    single-storey model this is `model["elements"]` unchanged. Fixtures are
+    deliberately absent — nothing in this module reads them.
+    """
+    from solve.storeys import element_blocks
+
+    walls, spaces, openings = [], [], []
+    for _tag, elements in element_blocks(model):
+        # An opening hosts on a wall BY INDEX into its own storey's list, so
+        # concatenation must carry the offset or every upper-storey door
+        # re-hosts onto a ground-floor wall. (`boundedBy` on spaces has the
+        # same local meaning; nothing in this module reads it, and a consumer
+        # that does must work per block, not on this concatenation.)
+        offset = len(walls)
+        walls.extend(elements.get("walls", []))
+        spaces.extend(elements.get("spaces", []))
+        for opening in elements.get("openings", []):
+            host = opening.get("wall")
+            if isinstance(host, int) and offset:
+                opening = {**opening, "wall": host + offset}
+            openings.append(opening)
+    return {"walls": walls, "spaces": spaces, "openings": openings}
+
 def _flag(costing: "Costing", reason: str) -> None:
     """
     Mark the bill provisional and RECORD the reason alongside any others.
@@ -396,8 +426,9 @@ def _wall_volumes(model: dict, height: float) -> WallTake:
     with no window, `None` for a ratio with no floor area, and now run with no
     measured thickness. Each began as a number that looked computed and was not.
     """
-    walls = model.get("elements", {}).get("walls", [])
-    openings = model.get("elements", {}).get("openings", [])
+    building = _building_elements(model)
+    walls = building["walls"]
+    openings = building["openings"]
 
     take = WallTake()
 
@@ -590,8 +621,9 @@ def build(
                 "reported and NOT priced, which makes this total a floor rather "
                 "than an estimate. The drawing has to be checked before quoting."
             ))
-    rooms = model.get("elements", {}).get("spaces", [])
-    openings = model.get("elements", {}).get("openings", [])
+    building = _building_elements(model)
+    rooms = building["spaces"]
+    openings = building["openings"]
 
     # Ground is not floor.
     #

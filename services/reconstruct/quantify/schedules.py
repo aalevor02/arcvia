@@ -70,7 +70,14 @@ def room_schedule(model: dict) -> dict:
     the figure an agent quotes and a surveyor does not — both are reported
     because the difference is exactly the sort of thing an argument is about.
     """
-    spaces = model.get("elements", {}).get("spaces", [])
+    from solve.storeys import element_blocks
+
+    spaces = []
+    for tag, elements in element_blocks(model):
+        for space in elements.get("spaces", []):
+            spaces.append(
+                {**space, "storeyTitle": tag.get("title")} if tag else space
+            )
 
     rows = []
     for space in spaces:
@@ -81,6 +88,9 @@ def room_schedule(model: dict) -> dict:
         rows.append({
             "index": space.get("index"),
             "name": space.get("name"),
+            # Which floor, on a multi-storey building — two TOILETs on two
+            # floors must be two rows a reader can tell apart.
+            **({"storeyTitle": space["storeyTitle"]} if space.get("storeyTitle") else {}),
             # Explicit rather than implied by a null name. A reader scanning a
             # column of names needs the gaps to be visible as gaps.
             "named": bool(space.get("name")),
@@ -150,9 +160,11 @@ def opening_schedule(model: dict) -> dict:
     The villa's eight openings are all identical, which is itself the finding —
     they come from one block definition, so the drawing specifies one door type.
     """
-    elements = model.get("elements", {})
-    openings = elements.get("openings", [])
-    walls = elements.get("walls", [])
+    from quantify.boq import _building_elements
+
+    building = _building_elements(model)
+    openings = building["openings"]
+    walls = building["walls"]
 
     groups: dict[tuple, list[dict]] = defaultdict(list)
     orphans = []
@@ -220,7 +232,8 @@ def _opening_caveats(rows, doors, windows, orphans, model) -> list[str]:
     # schedule has no window section" rather than "this building has no windows",
     # and the second is a claim somebody has to check.
     if windows == 0:
-        spaces = len(model.get("elements", {}).get("spaces", []))
+        from quantify.boq import _building_elements
+        spaces = len(_building_elements(model)["spaces"])
         caveats.append(
             f"NO WINDOWS. Every opening read from this drawing is a door, across "
             f"{spaces} spaces. Either the drawing places none on this storey, or "
