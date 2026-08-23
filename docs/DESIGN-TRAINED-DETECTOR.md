@@ -147,6 +147,24 @@ multi-task room+icon+heatmap net is the right shape; fine-tune it (or a compact
 equivalent) rather than inventing one. Overlays: `p0_ground_walls.png`,
 `p0_basement_walls.png` in the session scratchpad.
 
+## Downstream unlocks the segment backend enables (studio session, 2026-08-24)
+
+Two capabilities the model earns light up existing, ready-and-waiting product code
+with **zero** downstream change — worth building the fine-tune to surface:
+
+- **Fixture-derived scale anchors.** A detected toilet/sink/bathtub is exactly the
+  small, well-enclosed region the survey's confirm-anchor logic already prefers.
+  When the backend reports fixtures, feed them into `survey`'s `confirmDimensions`
+  as candidate anchors (a fixture's known typical size is itself a scale prior).
+  P0 already detected these zero-shot, so this is close.
+- **Openings → codecheck.** If door/window detection lands, the deck `building.json`
+  gains `openings` (currently always empty on the raster path). The studio's
+  codecheck engine already has rules that *skip loudly* without them — the
+  ventilation rule keys on "importer records no windows", and egress door-width
+  checks need door spans. Both activate for raster imports the moment openings
+  arrive, no code change on the studio side. Design the opening output to match
+  the DXF path's `openings` shape so those rules bind unchanged.
+
 ## Boundaries / coordination
 
 Detector + engine geometry = this session's lane (floorplan-ai, reconstruct). The
