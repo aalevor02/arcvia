@@ -129,6 +129,13 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [site, setSite] = useState<Site | null>(null)
   /** The declared SBUA, typed in by the architect. Never derived. */
   const [sbua, setSbua] = useState<number | null>(null)
+  /**
+   * The scene's stored model, for projects that never drew a plan — a GLB
+   * import, or a CAD reconstruction. Plan-drawn scenes also carry a modelUrl
+   * (the bake flow writes one), but for them the plan is the truth and this
+   * is ignored: see the geometry effect.
+   */
+  const [storedModel, setStoredModel] = useState<string | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -165,6 +172,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setOptions(scene.options ?? null)
         setSite(scene.site ?? null)
         setSbua(scene.sbua ?? null)
+        setStoredModel(scene.modelUrl ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -266,6 +274,29 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     const viewer = viewerRef.current
     if (!viewer) return
 
+    // ── A project with no plan shows its stored model ────────────────────────
+    // GLB imports and CAD reconstructions have no walls to build from — their
+    // geometry IS the stored file. The branch is on the PLAN being empty, not
+    // on modelUrl existing, because plan-drawn scenes also carry a modelUrl
+    // (the bake flow uploads one) and for them the drawing stays the truth.
+    const planEmpty = plan.floors.every(
+      (floor) =>
+        Object.keys(floor.walls).length === 0 && Object.keys(floor.objects).length === 0,
+    )
+    if (planEmpty && storedModel) {
+      setStatus('Loading the model…')
+      void viewer
+        .loadModel(storedUrl(storedModel))
+        .then(() => {
+          viewer.setBakedLighting(false)
+          setBaked(false)
+          if (!walkingRef.current) viewer.frameModel()
+          setStatus('Ready')
+        })
+        .catch(() => setStatus('The stored model could not be loaded.'))
+      return
+    }
+
     const group = buildPlanGeometry(plan.floors, { ceilings, floorFinish: finish })
     viewer.setModel(group)
     // New geometry, so the old atlas no longer describes it. Hand lighting
@@ -290,7 +321,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     // Framing the model fights the walk camera: it would yank the view back
     // outside the building on every edit.
     if (!walkingRef.current) viewer.frameModel()
-  }, [plan, ceilings, finish])
+  }, [plan, ceilings, finish, storedModel])
 
   /**
    * Enter or leave first-person.

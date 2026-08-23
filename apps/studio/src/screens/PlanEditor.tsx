@@ -53,7 +53,8 @@ import {
   writeUnitPreference,
   type UnitSystem,
 } from '../lib/format'
-import { detectFloorplan, getScene, updateScene, type Scene } from '../lib/api'
+import { detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
+import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
@@ -125,6 +126,8 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const [save, setSave] = useState<SaveState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState(true)
+  /** The engine's account of a CAD import, shown until dismissed. */
+  const [importSummary, setImportSummary] = useState<string | null>(null)
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   /** Two picked points awaiting a real-world length. */
   const [calibration, setCalibration] = useState<{ from: Vec2; to: Vec2 } | null>(null)
@@ -741,17 +744,33 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         </p>
       )}
 
-      {/* Said plainly rather than shown as a disabled button that does nothing.
-          The two import starts create a real project — the import step itself
-          is not wired yet, and pretending otherwise wastes someone's time. */}
-      {notice && start === 'model' && (
+      {/* The import step the two upload starts used to apologise for. On
+          landing, the model path goes on the SCENE — not just on screen — and
+          the editor jumps to the 3D view, because the model is the thing the
+          user came to see. */}
+      {notice && (start === 'model' || start === 'cad') && (
+        <ImportPanel
+          kind={start}
+          onDismiss={() => setNotice(false)}
+          onLanded={(modelUrl, summary: CadSummary | null) => {
+            setNotice(false)
+            void updateScene(sceneId, { modelUrl }).catch(() => {})
+            if (summary) {
+              setImportSummary(
+                `Reconstructed: ${summary.rooms ?? 0} rooms (${summary.named ?? 0} named), ` +
+                  `${summary.walls ?? 0} walls, ${summary.openings ?? 0} openings` +
+                  (summary.unit ? ` — unit: ${summary.unit}` : '') + '.',
+              )
+            }
+            setMode('3d')
+          }}
+        />
+      )}
+
+      {importSummary && mode === '3d' && (
         <p className="alert" style={{ margin: 12, display: 'flex', gap: 12 }}>
-          <span style={{ flex: 1 }}>
-            Loading a GLB into the 3D scene is not wired up yet. The project is
-            created, and both the floor-plan editor and tracing over an uploaded
-            drawing work.
-          </span>
-          <button className="icon-btn" onClick={() => setNotice(false)}>
+          <span style={{ flex: 1 }}>{importSummary}</span>
+          <button className="icon-btn" onClick={() => setImportSummary(null)}>
             Dismiss
           </button>
         </p>

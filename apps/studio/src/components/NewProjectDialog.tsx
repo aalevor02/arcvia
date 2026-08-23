@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type ProjectStart = 'draw' | 'floorplan' | 'model'
+export type ProjectStart = 'draw' | 'floorplan' | 'model' | 'cad'
 
 interface Props {
   busy: boolean
@@ -20,6 +20,12 @@ const STARTS: { id: ProjectStart; title: string; body: string; icon: string }[] 
     title: 'Upload a floor plan',
     body: 'Trace over a JPG, PNG, PDF or DWG drawing.',
     icon: '⇪',
+  },
+  {
+    id: 'cad',
+    title: 'Reconstruct from CAD',
+    body: 'The engine reads a DWG or DXF and builds the walls, rooms and 3D model itself.',
+    icon: '⌂',
   },
   {
     id: 'model',
@@ -161,5 +167,7 @@ export function NewProjectDialog({ busy, onCancel, onCreate }: Props) {
 }
 
 function defaultName(start: ProjectStart): string {
-  return start === 'model' ? 'Imported model' : 'Untitled project'
+  if (start === 'model') return 'Imported model'
+  if (start === 'cad') return 'Imported drawing'
+  return 'Untitled project'
 }

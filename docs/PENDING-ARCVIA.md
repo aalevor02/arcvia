@@ -295,10 +295,20 @@ Grep note: `apps/studio/dist` is checked in and contains the whole three.js
 bundle, so a repo-wide grep for anything viewer-related returns ~150 KB of
 noise. Search `src` only.
 
-**Poché is not the studio's front door — 2–3 d. NOW UNBLOCKED.** The thing that
-differentiates Arcvia from every image-generator competitor cannot be reached
-from the product. The studio's GLB-import project start was never finished, and
-Poché emits GLBs. Both ends are small; nobody has joined them.
+~~**Poché is not the studio's front door — 2–3 d. NOW UNBLOCKED.**~~ ✅ **DONE**
+— a fourth project start, "Reconstruct from CAD": DWG/DXF uploads, `/cad/jobs`
+runs, and on completion the GLB lands on the scene and the editor jumps to 3D
+with the ENGINE'S OWN ACCOUNT shown ("22 rooms (15 named), 129 walls, 8
+openings — unit: …") — a reviewer accepts an import on facts, not a spinner.
+Verified in Chrome end to end on the villa DWG through the real UI: upload →
+3 credits → ~75 s → the building standing in the 3D view. ⚠ The correction
+above claiming "the studio's GLB project-start existed" was itself stale —
+PlanEditor's own notice said "not wired up yet". Both import starts now work
+(the GLB start proven in-browser too); the SceneView branch is on the PLAN
+being empty, not on modelUrl existing, because plan-drawn scenes also carry a
+modelUrl (the bake writes one) and for them the drawing stays the truth. The
+envelope-coverage caveat still applies per drawing: check the build report
+before trusting an import.
 
 **This was deliberately held back until `6ea3fea`, and the reason generalises.**
 Until the sheet border stopped eating wall faces, the engine emitted models

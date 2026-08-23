@@ -398,6 +398,49 @@ export const detectFloorplan = (url: string) =>
     body: { url },
   })
 
+// ---- CAD reconstruction ----------------------------------------------------
+// The Poché engine as the studio's front door: a DWG or DXF goes in, walls,
+// rooms and a walkable GLB come out. The API side has existed for some time;
+// these are the calls that finally reach it from the product.
+
+/** What the engine found — the facts a reviewer needs to accept an import. */
+export interface CadSummary {
+  rooms?: number
+  named?: number
+  walls?: number
+  openings?: number
+  unit?: string
+  layers?: string[]
+}
+
+export interface CadJob {
+  jobId: string
+  status: 'queued' | 'rendering' | 'done' | 'failed' | 'cancelled'
+  progress: number
+  outputUrl: string | null
+  planUrl: string | null
+  error: string | null
+  summary: CadSummary | null
+  refunded: number
+}
+
+export const submitCadJob = (key: string) =>
+  request<{
+    jobId: string
+    status: string
+    creditsCharged: number
+    creditsRemaining?: number
+    deduplicated?: boolean
+    message?: string
+  }>('/cad/jobs', { method: 'POST', body: { key } })
+
+export const cadJob = (jobId: string) => request<CadJob>(`/cad/jobs/${jobId}`)
+
+export const cancelCadJob = (jobId: string) =>
+  request<{ jobId: string; status: string; refunded: number }>(`/cad/jobs/${jobId}`, {
+    method: 'DELETE',
+  })
+
 /**
  * Upload generated scene geometry, on its way to the render worker.
  *
