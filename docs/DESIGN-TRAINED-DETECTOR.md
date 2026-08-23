@@ -147,6 +147,35 @@ multi-task room+icon+heatmap net is the right shape; fine-tune it (or a compact
 equivalent) rather than inventing one. Overlays: `p0_ground_walls.png`,
 `p0_basement_walls.png` in the session scratchpad.
 
+## P1 prototype (2026-08-24) — DONE: synthetic-plan generator
+
+`A:\Tools\FloorplanModel\synth_plan.py` (cv2 + numpy only, no torch, no Blender).
+Decision made here and worth recording: **generate the geometry procedurally in 2D,
+do not render real geometry through the farm.** A binary-space-partition tiles a
+footprint into rooms; walls are their boundaries; doors cut shared walls; windows
+sit on the envelope; fixtures (toilet/sink/bathtub/appliance) go by room type;
+watercolour trees and a pool fill the outdoor band. The render is drawn deck-style
+and the label maps are drawn from the SAME geometry, so they are pixel-exact by
+construction — no Blender pass, no alignment step to drift. Output per sample:
+`<id>.png`, `<id>_rooms.npy` (CubiCasa's 12 room classes), `<id>_icons.npy` (11 icon
+classes), `<id>_preview.png`.
+
+Why 2D-procedural beat rendering real geometry: it is **~48 ms/sample** (5,000 in
+~4 min on this CPU, unlimited and free), the masks are exact with zero registration
+work, and — the whole point — the confusers are placed *and labelled correctly*:
+a watercolour tree is Outdoor, a bed is its room, neither is ever Wall. That
+mislabel is precisely what P0 got wrong zero-shot, so it is the supervision that
+matters. Verified: 40-sample batch, wall 8-12% (matches real plans), 5-9 classes
+each, every door/window/fixture class present, no failures.
+
+**The refinement P2 needs (honest gap):** the render STYLE is a clean approximation,
+not a match to a specific client's deck. For fine-tuning to transfer to real decks,
+close the style gap by (a) **domain randomisation** — vary line weights, palettes,
+label fonts, tree texture, orientation, noise — so the model learns the invariants
+rather than one look; and (b) mix a handful of REAL decks (Avarana, Casa Altinho)
+into the fine-tune and hold others out for eval. The generator is structured to add
+style variety at the draw calls; that breadth is the next increment before training.
+
 ## Downstream unlocks the segment backend enables (studio session, 2026-08-24)
 
 Two capabilities the model earns light up existing, ready-and-waiting product code
