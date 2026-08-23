@@ -108,7 +108,7 @@ INCH = 0.0254
 PLAUSIBLE_SIDE = (0.5, 40.0)
 
 
-def read_labels(image: np.ndarray, long_edge: int = 2400) -> list[Label]:
+def read_labels(image: np.ndarray, long_edge: int = 3000) -> list[Label]:
     """Every run of text on the drawing, in normalised coordinates."""
     if _engine is None:
         return []
@@ -116,14 +116,41 @@ def read_labels(image: np.ndarray, long_edge: int = 2400) -> list[Label]:
     import cv2
 
     height, width = image.shape[:2]
-    # Recognition quality falls off below roughly this size and the extra
-    # seconds above it buy nothing, since plan lettering is generous.
-    scale = long_edge / max(width, height)
+    # ── Read at a size the OCR can actually resolve, in BOTH directions ───────
+    # A large sheet is downscaled — recognition gains nothing above this and the
+    # seconds cost. But a SMALL image was previously left untouched, and that is
+    # where room labels go unread: an 8-point caption on a 1200px plan is ten
+    # pixels tall, below what any OCR resolves, so the plan came back with no
+    # names, no furniture (which needs the labels) and no scale — exactly "it
+    # does not detect anything on my file". So a small image is now UPSCALED to
+    # the same target, capped at 3x because past that it is inventing pixels
+    # rather than revealing them. Cubic on the way up, area on the way down —
+    # the interpolation each direction is actually built for.
+    longest = max(width, height)
+    scale = long_edge / longest
     if scale < 1:
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         height, width = image.shape[:2]
+    elif scale > 1.05:
+        factor = min(scale, 3.0)
+        image = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+        height, width = image.shape[:2]
 
     result, _ = _engine(image)  # type: ignore[misc]
+
+    # A faint scan or a screenshot with a grey wash reads poorly at native
+    # contrast; a second pass on a contrast-stretched greyscale copy catches
+    # captions the first missed. Deduplicated by position below, so a label both
+    # passes find is not counted twice — the cost is one extra OCR on the images
+    # that need it and nothing on the ones that do not.
+    extra = None
+    if len(result or []) < 6:
+        grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        stretched = cv2.normalize(grey, None, 0, 255, cv2.NORM_MINMAX)
+        boosted = cv2.cvtColor(stretched, cv2.COLOR_GRAY2BGR)
+        extra, _ = _engine(boosted)  # type: ignore[misc]
+
+    result = _merge_ocr(result or [], extra or [])
     if not result:
         return []
 
@@ -141,6 +168,51 @@ def read_labels(image: np.ndarray, long_edge: int = 2400) -> list[Label]:
             )
         )
     return labels
+
+
+def _merge_ocr(first: list, second: list) -> list:
+    """
+    Combine two OCR passes, dropping a run the second found that the first
+    already has at the same place. Same text within a small normalised distance
+    is the same caption seen twice, not two captions — keeping both would double
+    a room's vote on the scale and list its name twice.
+    """
+    def centre(box):
+        return (
+            sum(p[0] for p in box) / 4,
+            sum(p[1] for p in box) / 4,
+        )
+
+    # Reduce a run to its letters and digits, so `17.9 x 12.7` and `17.9 × 12.7`
+    # compare equal — the same caption read with different separators. The `×`
+    # strips as punctuation but the ASCII `x` is a letter and survives, so it is
+    # also removed WHEN IT SITS BETWEEN DIGITS (a dimension separator, not the x
+    # in a word). Without this an OCR wobble on one prime lists a room twice and
+    # doubles its scale vote.
+    def key(text):
+        reduced = re.sub(r"[^a-z0-9]", "", str(text).lower())
+        return re.sub(r"(?<=\d)x(?=\d)", "", reduced)
+
+    # Dedup across BOTH passes AND within each — a single pass on an upscaled
+    # image can find the same caption twice on its own. Same text within roughly
+    # a caption's own width is one caption; two genuinely distinct rooms with
+    # identical names sit far further apart than this on any plan.
+    merged: list = []
+    for box, text, conf in [*first, *second]:
+        cx, cy = centre(box)
+        clean = key(text)
+        if not clean:
+            merged.append((box, text, conf))
+            continue
+        dup = False
+        for ebox, etext, _ in merged:
+            ex, ey = centre(ebox)
+            if key(etext) == clean and abs(ex - cx) < 120 and abs(ey - cy) < 60:
+                dup = True
+                break
+        if not dup:
+            merged.append((box, text, conf))
+    return merged
 
 
 def classify(text: str) -> str:
