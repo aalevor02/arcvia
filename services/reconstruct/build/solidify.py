@@ -160,28 +160,116 @@ def _segment(mesh: MeshBuilder, wall, start: float, end: float,
     )
 
 
-def build_slabs(mesh: MeshBuilder, spaces, base_z: float = 0.0) -> dict:
-    """A floor slab per room, at the finished face."""
+#: Room kinds and name-words that mean a floor is open ground, not building
+#: interior — so its slab is grass, not stone. Mirrors quantify/schedules.py's
+#: OUTDOOR_WORDS; kept local so build/ does not depend on quantify/.
+_OUTDOOR_WORDS = ("lawn", "garden", "patio", "deck", "terrace", "balcony",
+                  "court", "pool", "barbeque", "barbecue", "driveway", "parking")
+
+
+def _space_is_outdoor(space) -> bool:
+    if str(getattr(space, "kind", "") or "").lower() == "outdoor":
+        return True
+    name = str(getattr(space, "name", "") or "").lower()
+    return any(word in name for word in _OUTDOOR_WORDS)
+
+
+def build_slabs(mesh: MeshBuilder, spaces, base_z: float = 0.0,
+                lawn: "MeshBuilder | None" = None) -> dict:
+    """
+    A floor slab per room, at the finished face.
+
+    An OUTDOOR room's slab — a lawn, a patio, a garden — goes into `lawn` when
+    it is supplied, so the GLB can paint it green rather than the beige of a
+    tiled interior floor. A beige lawn was half of what made the garden read as
+    a warehouse. Indoor floors are unchanged.
+    """
     built = 0
+    lawned = 0
     for space in spaces:
-        mesh.add_polygon_slab(space.loop, base_z - SLAB_THICKNESS, SLAB_THICKNESS)
+        target = mesh
+        if lawn is not None and _space_is_outdoor(space):
+            target = lawn
+            lawned += 1
+        target.add_polygon_slab(space.loop, base_z - SLAB_THICKNESS, SLAB_THICKNESS)
         built += 1
-    return {"slabs": built, "thickness": SLAB_THICKNESS}
+    return {"slabs": built, "thickness": SLAB_THICKNESS, "lawn": lawned}
+
+
+#: Catalogue items that are greenery, not furniture. A box is the right
+#: stand-in for a bed — it answers "does it fit" — and the wrong one for a
+#: plant, which has no straight edges and which a client reads as a block of
+#: stone the moment it is beige. These get foliage geometry and a green
+#: material instead. `plant` is the one the reconstruction actually produces
+#: today; the rest are here so a studio-authored tree or hedge lands correctly
+#: through the same path.
+_VEGETATION = {"plant", "tree", "tree-small", "shrub", "hedge", "planter-outdoor"}
+
+
+def _build_planting(plants: MeshBuilder, trunks: MeshBuilder, item: str,
+                    px: float, py: float, w: float, d: float, h: float,
+                    base_z: float) -> None:
+    """
+    A stylised plant: a canopy of a few squashed spheres, on a trunk if it is
+    tall enough to have one.
+
+    Coarse on purpose — this is the reconstruction's dimensioned stand-in, the
+    same role the box played, just shaped like a plant. The real GLB swap
+    (Definition.meshUrl) still replaces it later without anything here changing.
+    A tree gets a bare trunk and a layered crown; a low plant is a single
+    rounded clump sitting on the ground, which is what a potted plant or a
+    shrub actually looks like from across a room.
+    """
+    radius = max(w, d) / 2
+
+    tall = h >= 2.0  # a tree, versus a shrub or a potted plant
+    if tall:
+        clear = h * 0.4                      # bare trunk up to the crown
+        trunk_r = max(0.04, w * 0.05)
+        # A trunk is a thin vertical box; add_box_from_segment needs a segment,
+        # so give it a hair of length along x.
+        trunks.add_box_from_segment(
+            px - trunk_r, py, px + trunk_r, py,
+            trunk_r * 2, clear, base_z=base_z,
+        )
+        crown_base = base_z + clear
+        crown_h = h - clear
+        cr = radius * 0.95
+        for (dx, dz, cy, k) in (
+            (0.0, 0.0, crown_base + crown_h * 0.35, 1.0),
+            (cr * 0.4, cr * 0.2, crown_base + crown_h * 0.62, 0.72),
+            (-cr * 0.35, -cr * 0.25, crown_base + crown_h * 0.55, 0.66),
+        ):
+            plants.add_sphere(px + dx, py + dz, cy, cr * k, squash=0.85)
+    else:
+        # A single clump. Sit its bottom on the ground and let it rise to h.
+        r = min(radius, h / 2) if h > 0 else radius
+        r = max(r, 0.12)
+        plants.add_sphere(px, py, base_z + h - r, r, squash=0.9)
 
 
 def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
-                   base_z: float = 0.0) -> dict:
+                   base_z: float = 0.0,
+                   plants: "MeshBuilder | None" = None,
+                   trunks: "MeshBuilder | None" = None) -> dict:
     """
-    A box per identified fixture, at the catalogue's own dimensions.
+    A box per identified fixture, at the catalogue's own dimensions — except
+    greenery, which gets foliage geometry into `plants`/`trunks` when those are
+    supplied.
 
     Boxes, not models — a correctly *dimensioned* stand-in is what makes
     clearances checkable, which is the job at this stage. `Definition.meshUrl`
     is the seam where a real GLB replaces one without anything else changing.
+    Vegetation is the exception the seam did not cover: a beige box is a
+    passable stand-in for a wardrobe and an embarrassing one for a garden, so
+    a plant is drawn as a plant here rather than waiting for a GLB that the
+    reconstruction path never applies.
     """
     import math
 
     built = 0
     skipped = 0
+    planted = 0
 
     for placement in placements:
         item = placement.get("item")
@@ -202,6 +290,12 @@ def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
         w, d, h = spec["w"], spec["d"], spec["h"]
         base = spec["mount"] or 0.0
 
+        if item in _VEGETATION and plants is not None and trunks is not None:
+            _build_planting(plants, trunks, item, px, py, w, d, h, base_z + base)
+            planted += 1
+            built += 1
+            continue
+
         ax = px - math.cos(rot) * w / 2
         ay = py - math.sin(rot) * w / 2
         bx = px + math.cos(rot) * w / 2
@@ -210,4 +304,4 @@ def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
         mesh.add_box_from_segment(ax, ay, bx, by, d, h, base_z=base_z + base)
         built += 1
 
-    return {"fixtures": built, "skipped": skipped}
+    return {"fixtures": built, "skipped": skipped, "planted": planted}

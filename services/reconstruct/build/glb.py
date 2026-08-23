@@ -123,6 +123,43 @@ class MeshBuilder:
             p1, p2 = p2, p1
         self.add_tri(p0, p1, p2)
 
+    def add_sphere(
+        self, px: float, py: float, cy: float, r: float,
+        rings: int = 6, segments: int = 8, squash: float = 1.0,
+    ) -> None:
+        """
+        A low-poly sphere centred at PLAN (px, py) and height cy.
+
+        For foliage — a plant or a tree canopy — so it is deliberately coarse
+        (6x8 ≈ 96 triangles). `squash` scales the vertical axis: a canopy reads
+        better slightly flattened than as a perfect ball. Plan (x, y) maps to
+        glTF (x, -y) with height on Y, the same convention the box uses, so a
+        sphere and a box placed at the same plan point coincide.
+        """
+        def v(theta: float, phi: float):
+            # theta: 0..pi (pole to pole), phi: 0..2pi (around)
+            sx = r * math.sin(theta) * math.cos(phi)
+            sy = r * math.cos(theta) * squash
+            sz = r * math.sin(theta) * math.sin(phi)
+            # centre at glTF (px, cy, -py); the sphere's own XZ is a plan offset
+            return (px + sx, cy + sy, -py + sz)
+
+        for i in range(rings):
+            t0 = math.pi * i / rings
+            t1 = math.pi * (i + 1) / rings
+            for j in range(segments):
+                p0 = 2 * math.pi * j / segments
+                p1 = 2 * math.pi * (j + 1) / segments
+                a, b, c, d = v(t0, p0), v(t0, p1), v(t1, p1), v(t1, p0)
+                # The poles collapse to a point, so those rings are triangles;
+                # the rest are quads. add_tri drops degenerate ones on its own.
+                if i == 0:
+                    self.add_tri(a, c, d)
+                elif i == rings - 1:
+                    self.add_tri(a, b, c)
+                else:
+                    self.add_quad(a, b, c, d)
+
     def add_box_from_segment(
         self, ax: float, ay: float, bx: float, by: float,
         thickness: float, height: float, base_z: float = 0.0,
@@ -215,6 +252,67 @@ def _pad(data: bytearray, to: int = 4, fill: int = 0) -> None:
         data.append(fill)
 
 
+#: The GLB's material palette. Index 0 is the default beige poché every wall and
+#: floor wears; the rest exist so a garden does not render the colour of stone.
+#: Kept small and named because the writer picks by mesh name, not per triangle.
+_MATERIALS = [
+    {
+        "name": "poche",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.82, 0.80, 0.77, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9,
+        },
+    },
+    {
+        # Foliage. A muted, slightly desaturated green — a fully saturated leaf
+        # green reads as plastic under the neutral studio light, and this is a
+        # stand-in for a plant, not a botanical render.
+        "name": "foliage",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.36, 0.52, 0.28, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.85,
+        },
+    },
+    {
+        "name": "bark",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.34, 0.26, 0.19, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.95,
+        },
+    },
+    {
+        # Lawn / planted ground. Greener and rougher than foliage so a lawn
+        # slab and a bush do not read as the same surface.
+        "name": "lawn",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.33, 0.46, 0.25, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 1.0,
+        },
+    },
+]
+
+#: Which material a mesh gets, by a substring of its name. First match wins, so
+#: the specific names come before the generic fall-through to poché (0).
+_MATERIAL_BY_NAME = (
+    ("plants", 1),
+    ("foliage", 1),
+    ("trunks", 2),
+    ("lawn", 3),
+)
+
+
+def _material_for(name: str) -> int:
+    lowered = name.lower()
+    for token, index in _MATERIAL_BY_NAME:
+        if token in lowered:
+            return index
+    return 0
+
+
 def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
     """
     Write one GLB containing a named node + mesh per entry.
@@ -276,7 +374,12 @@ def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
             "primitives": [{
                 "attributes": {"POSITION": base, "NORMAL": base + 1},
                 "indices": base + 2,
-                "material": 0,
+                # Material by mesh name: foliage and bark are their own colours,
+                # everything else is the beige poché. Named meshes rather than
+                # per-triangle materials keeps the writer simple and the seam
+                # obvious — see cli.py, which puts vegetation in *_plants and
+                # *_trunks meshes exactly so a garden does not render beige.
+                "material": _material_for(name),
             }],
         })
         nodes.append({"name": name, "mesh": len(gltf_meshes) - 1})
@@ -287,14 +390,7 @@ def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
         "scenes": [{"nodes": list(range(len(nodes)))}],
         "nodes": nodes,
         "meshes": gltf_meshes,
-        "materials": [{
-            "name": "poche",
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [0.82, 0.80, 0.77, 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.9,
-            },
-        }],
+        "materials": _MATERIALS,
         "accessors": accessors,
         "bufferViews": buffer_views,
         "buffers": [{"byteLength": len(buffer)}],

@@ -589,10 +589,18 @@ def reconstruct(
                 })
 
         # ---- Meshes ------------------------------------------------------------
+        # Vegetation gets two meshes of its own — foliage and trunks — so the
+        # GLB can paint them green and brown instead of the beige every other
+        # surface wears. build_fixtures routes plants into them; furniture still
+        # goes into fixture_mesh as a box. See build/glb.py's material palette.
         wall_mesh, floor_mesh, fixture_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
+        plant_mesh, trunk_mesh, lawn_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
         wall_build = build_walls(wall_mesh, walls, holes, height)
-        slab_build = build_slabs(floor_mesh, rooms)
-        fixture_build = build_fixtures(fixture_mesh, fixtures, CATALOGUE_DIMS)
+        slab_build = build_slabs(floor_mesh, rooms, lawn=lawn_mesh)
+        fixture_build = build_fixtures(
+            fixture_mesh, fixtures, CATALOGUE_DIMS,
+            plants=plant_mesh, trunks=trunk_mesh,
+        )
 
         return {
             "walls": walls, "rooms": rooms, "holes": holes,
@@ -600,7 +608,7 @@ def reconstruct(
             "chosen": chosen_here, "layerChoice": layer_choice,
             "wallStats": wall_stats, "roomStats": room_stats,
             "openingStats": opening_stats,
-            "meshes": (wall_mesh, floor_mesh, fixture_mesh),
+            "meshes": (wall_mesh, floor_mesh, fixture_mesh, plant_mesh, trunk_mesh, lawn_mesh),
             "builds": (wall_build, slab_build, fixture_build),
         }
 
@@ -653,7 +661,7 @@ def reconstruct(
     wall_stats = storey["wallStats"]
     room_stats = storey["roomStats"]
     opening_stats = storey["openingStats"]
-    wall_mesh, floor_mesh, fixture_mesh = storey["meshes"]
+    wall_mesh, floor_mesh, fixture_mesh, plant_mesh, trunk_mesh, lawn_mesh = storey["meshes"]
     wall_build, slab_build, fixture_build = storey["builds"]
 
 
@@ -662,6 +670,15 @@ def reconstruct(
     meshes = {"storey0_walls": wall_mesh, "storey0_floors": floor_mesh}
     if fixture_build["fixtures"]:
         meshes["storey0_fixtures"] = fixture_mesh
+    # `_plants` / `_trunks` in the name is what glb.py keys the green and bark
+    # materials on — see build/glb.py. Only added when non-empty so an
+    # indoor-only building carries no empty vegetation node.
+    if plant_mesh.indices:
+        meshes["storey0_plants"] = plant_mesh
+    if trunk_mesh.indices:
+        meshes["storey0_trunks"] = trunk_mesh
+    if lawn_mesh.indices:
+        meshes["storey0_lawn"] = lawn_mesh
 
     storey_report: list[dict] = []
     # ── Furniture belongs to the building, not to the primary storey ─────────
@@ -695,12 +712,18 @@ def reconstruct(
         for n, (level, result, shift) in enumerate(
             sorted(solved, key=lambda item: item[0].level)
         ):
-            w_mesh, f_mesh, x_mesh = result["meshes"]
+            w_mesh, f_mesh, x_mesh, p_mesh, t_mesh, l_mesh = result["meshes"]
             w_build, s_build, x_build = result["builds"]
             meshes[f"storey{n}_walls"] = w_mesh
             meshes[f"storey{n}_floors"] = f_mesh
             if x_build["fixtures"]:
                 meshes[f"storey{n}_fixtures"] = x_mesh
+            if p_mesh.indices:
+                meshes[f"storey{n}_plants"] = p_mesh
+            if t_mesh.indices:
+                meshes[f"storey{n}_trunks"] = t_mesh
+            if l_mesh.indices:
+                meshes[f"storey{n}_lawn"] = l_mesh
             all_fixtures.extend({**f, "storey": n} for f in result["fixtures"])
             if result is storey:
                 primary_storey = n

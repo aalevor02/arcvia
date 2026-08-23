@@ -83,6 +83,18 @@ const VOCABULARY = {
   'wall-light': { want: ['wall lamp', 'sconce', 'wall light'], avoid: [] },
   rug: { want: ['rug', 'carpet'], avoid: [] },
   plant: { want: ['potted plant', 'houseplant', 'plant', 'pot plant'], avoid: ['outdoor', 'tree', 'dead'] },
+  // ── Outdoor greenery ──────────────────────────────────────────────────────
+  // The garden slots were never in this map, so they never matched and every
+  // one fell back to a parametric block — a green box for a tree. The hub is
+  // full of real CC0 vegetation (jacaranda, island and pine trees, ferns,
+  // planters), it was simply never pointed at these slots. Trees are
+  // photogrammetry-scanned and enormous (300k–17M triangles), so conditioning
+  // to the catalogue's budget is not optional here; from-hub only matches, the
+  // decimation is condition_asset.py's job.
+  tree: { want: ['tree', 'jacaranda', 'island tree'], avoid: ['dead', 'trunk', 'palm', 'seating'] },
+  'tree-small': { want: ['tree', 'pine', 'fir', 'sapling'], avoid: ['dead', 'trunk', 'jacaranda'] },
+  shrub: { want: ['shrub', 'bush', 'fern', 'nettle', 'periwinkle', 'plant'], avoid: ['tree', 'potted', 'pot', 'dead', 'flower'] },
+  'planter-outdoor': { want: ['planter', 'planter box'], avoid: ['plant', 'flower'] },
   tv: { want: ['television', 'tv', 'monitor'], avoid: ['stand', 'unit'] },
   painting: { want: ['painting', 'picture frame', 'framed', 'artwork'], avoid: [] },
   mirror: { want: ['mirror'], avoid: ['car'] },

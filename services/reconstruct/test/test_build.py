@@ -753,5 +753,80 @@ ok("so the SAME layer set grades differently on the two bases — the whole bug"
 ok("and the default is the basis cli.py builds on", _grade().rooms == _ringed.rooms)
 
 
+# ---------------------------------------------------------------------------
+# Greenery is green, and a garden is not beige
+#
+# Every fixture used to be a beige box and every floor beige stone, so a
+# reconstructed garden read as a warehouse. Vegetation fixtures now build
+# foliage geometry into a `plants`/`trunks` mesh and outdoor floors into a
+# `lawn` mesh, and glb.py paints those by name. These pin the routing and the
+# material assignment, because a beige plant is the kind of thing that passes
+# every geometry test and still looks wrong.
+# ---------------------------------------------------------------------------
+
+print("\n-- greenery --")
+
+from build.solidify import build_fixtures  # noqa: E402
+from build.glb import _material_for  # noqa: E402
+
+_DIMS = {
+    "plant": {"w": 0.5, "d": 0.5, "h": 1.3, "mount": 0.0, "placement": "floor"},
+    "tree": {"w": 4.5, "d": 4.5, "h": 6.0, "mount": 0.0, "placement": "floor"},
+    "bed-queen": {"w": 1.6, "d": 2.1, "h": 0.5, "mount": 0.0, "placement": "floor"},
+}
+
+
+def _placed(item, x, y):
+    return {"label": "fixture", "item": item, "position": {"x": x, "y": y}, "rotation": 0.0}
+
+
+# A plant, a tree and a bed. The plant and tree are greenery; the bed is not.
+_fix, _plants, _trunks = MeshBuilder(), MeshBuilder(), MeshBuilder()
+_report = build_fixtures(
+    _fix,
+    [_placed("plant", 1, 1), _placed("tree", 5, 5), _placed("bed-queen", 8, 8)],
+    _DIMS, plants=_plants, trunks=_trunks,
+)
+
+ok("a plant and a tree are counted as planted, the bed is not",
+   _report["planted"] == 2, f"planted {_report['planted']}")
+ok("greenery went to the plants mesh, not the box mesh", _plants.indices != [])
+ok("the tall tree grew a trunk, on its own mesh", _trunks.indices != [])
+ok("the bed is still a box in the fixture mesh", _fix.indices != [])
+
+# The plant foliage is rounded — a sphere has many distinct face normals, where
+# a box has six. This is the difference between a plant and a block.
+_plant_only = MeshBuilder()
+build_fixtures(_plant_only, [_placed("plant", 0, 0)], _DIMS,
+               plants=_plant_only, trunks=MeshBuilder())
+_distinct_normals = len({tuple(round(c, 3) for c in n) for n in _plant_only.normals})
+ok("a plant is rounded geometry, not a six-sided box", _distinct_normals > 12,
+   f"{_distinct_normals} distinct normals")
+
+# Without the plant meshes, vegetation falls back to a box — the old behaviour,
+# still available so build_fixtures has no hard dependency on the new meshes.
+_fallback = MeshBuilder()
+_fb = build_fixtures(_fallback, [_placed("plant", 0, 0)], _DIMS)
+ok("with no plant mesh, a plant is still built (as a box) rather than dropped",
+   _fb["fixtures"] == 1 and _fallback.indices != [])
+
+# build_slabs routes an outdoor room's floor to the lawn mesh.
+_floor, _lawn = MeshBuilder(), MeshBuilder()
+_garden = sp.Space(index=0, loop=[(0, 0), (4, 0), (4, 4), (0, 4)],
+                   area=16, gross_area=16, perimeter=16, name="Garden", kind="outdoor")
+_living = sp.Space(index=1, loop=[(4, 0), (8, 0), (8, 4), (4, 4)],
+                   area=16, gross_area=16, perimeter=16, name="Living", kind="living")
+_slabs = build_slabs(_floor, [_garden, _living], lawn=_lawn)
+ok("the outdoor room's slab went to the lawn mesh", _lawn.indices != [] and _slabs["lawn"] == 1)
+ok("the indoor room's slab stayed on the floor mesh", _floor.indices != [])
+
+# glb.py picks the material from the mesh name.
+ok("a *_plants mesh is painted foliage (material 1)", _material_for("storey0_plants") == 1)
+ok("a *_trunks mesh is painted bark (material 2)", _material_for("storey0_trunks") == 2)
+ok("a *_lawn mesh is painted lawn (material 3)", _material_for("storey1_lawn") == 3)
+ok("walls and floors keep the poche material (0)",
+   _material_for("storey0_walls") == 0 and _material_for("storey0_floors") == 0)
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
