@@ -146,6 +146,21 @@ export interface AssetModel {
    * the times it is wrong look exactly like the times it is right.
    */
   upAxis?: 'y' | 'z'
+  /**
+   * Fill the catalogue footprint on every axis, distorting the model if the
+   * two disagree.
+   *
+   * OPT-IN PER ASSET, and the flag is a claim about the DATA: "this item's
+   * width, depth and height are real measurements, not nominal figures, and
+   * the footprint is what a plan exists to check." Under the default uniform
+   * fit a king bed whose model is proportioned taller than the catalogue box
+   * draws 0.91 m wide — a king rendering as a single. Per-axis fitting was
+   * once tried for the whole catalogue and made things worse, because many
+   * catalogue depths are nominal (a television listed at 60 mm whose model
+   * has a stand) — stretching to those distorts models that were fine. The
+   * flag keeps per-axis where the dimensions deserve it and nowhere else.
+   */
+  fitFootprint?: boolean
 }
 
 /** An instance of a catalogue item, placed on a floor. */

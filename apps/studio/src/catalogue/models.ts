@@ -105,6 +105,17 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  * on measurement rather than on the argument alone, because the argument was
  * right and the result was still worse.
  *
+ * ── The revisit: per-axis, but only where the data earns it ─────────────────
+ * The blanket experiment failed for two reasons and only one of them was the
+ * orientation bugs. The other is permanent: many catalogue dimensions are
+ * nominal (that 60 mm television), and stretching a model to a nominal figure
+ * distorts an asset that was fine. So per-axis fitting is now OPT-IN via
+ * `fitFootprint` on the catalogue entry — a claim that this item's three
+ * dimensions are real measurements. Flagged items fill the box on every axis
+ * that carries information; flat axes follow the mean of the informed scales,
+ * exactly the treatment the uniform path gives them. Everything unflagged
+ * takes the identical code path it always did.
+ *
  * ── A warning was tried too, and dropped ────────────────────────────────────
  * Comparing the model's plan aspect against its slot's does identify assets
  * that cannot fill their footprint. It fired on 28 of 38 — 74% — because many
@@ -121,12 +132,14 @@ function prototype(url: string): Promise<THREE.Object3D | null> {
  * builders all draw upward from y=0 and everything downstream — placement,
  * elevation, wall snapping — assumes that.
  */
-function fit(
+export function fit(
   model: THREE.Object3D,
   catalogueSize: { width: number; height: number; depth: number },
   upAxis: 'y' | 'z' = 'y',
   /** The facing correction that will be applied AFTER this, in degrees. */
   yaw = 0,
+  /** Fill every informed axis exactly. Only for measured catalogue dims. */
+  fitFootprint = false,
 ): void {
   // Stand a Z-up model up BEFORE measuring it. Measuring first and rotating
   // after would fit the object's depth to the catalogue's height, which is the
@@ -195,8 +208,26 @@ function fit(
   }
 
   const informed = (['x', 'y', 'z'] as const).filter((axis) => carries[axis])
-  const scale = Math.min(...informed.map((axis) => own[axis]))
-  model.scale.setScalar(scale)
+  if (fitFootprint) {
+    // Every informed axis meets its own target. A flat axis has no opinion
+    // about scale (see above), so it follows the mean of the ones that do —
+    // the same treatment the uniform path gives it, just averaged.
+    const mean = informed.reduce((sum, axis) => sum + own[axis], 0) / informed.length
+    const world = {
+      x: carries.x ? own.x : mean,
+      y: carries.y ? own.y : mean,
+      z: carries.z ? own.z : mean,
+    }
+    // `own` targets WORLD extents, but `model.scale` is LOCAL — and a Z-up
+    // model was just rotated -90° about x, which maps its local y to world -z
+    // and local z to world +y. Uniform scaling never noticed; per-axis must
+    // swap, or the height correction lands on the depth.
+    if (upAxis === 'z') model.scale.set(world.x, world.z, world.y)
+    else model.scale.set(world.x, world.y, world.z)
+  } else {
+    const scale = Math.min(...informed.map((axis) => own[axis]))
+    model.scale.setScalar(scale)
+  }
 
   // Re-measured after scaling rather than arithmetic on the old box: a model
   // with a non-identity transform on its root would make that arithmetic wrong
@@ -241,13 +272,14 @@ export function upgradeModels(
     // it must survive the object being rotated.
     const yaw = Number(child.userData.modelYaw ?? 0)
     const upAxis = child.userData.modelUpAxis === 'z' ? 'z' : 'y'
+    const fitFootprint = child.userData.modelFitFootprint === true
 
     pending.push(
       prototype(url).then((loaded) => {
         if (!loaded) return false
 
         const instance = loaded.clone(true)
-        fit(instance, size, upAxis, yaw)
+        fit(instance, size, upAxis, yaw, fitFootprint)
         if (yaw !== 0) {
           // Wrapped, so the correction turns the model about its own centre
           // *after* fitting has seated it. Rotating the fitted object directly

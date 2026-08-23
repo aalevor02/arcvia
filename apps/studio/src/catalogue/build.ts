@@ -530,6 +530,12 @@ export function buildObject(
     // per asset, because a great many exports are Z-up and nothing in the file
     // says which.
     group.userData.modelUpAxis = object.customUrl ? 'y' : (item.model?.upAxis ?? 'y')
+    // Per-axis footprint fill, only where the catalogue asserts its dims are
+    // real measurements (see AssetModel.fitFootprint). Never for uploads: a
+    // stranger's file makes no such claim.
+    group.userData.modelFitFootprint = object.customUrl
+      ? false
+      : Boolean(item.model?.fitFootprint)
   }
 
   /**

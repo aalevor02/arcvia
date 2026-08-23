@@ -226,6 +226,10 @@ export const CATALOGUE: CatalogueItem[] = [
         'https://sketchfab.com/3d-models/large-king-size-bed-5cbdfeb2136849acb15ca8694ab16c72',
       triangles: 5000,
       yaw: 180,
+      // A bed's slot is a real measurement, and width is the one dimension a
+      // plan exists to check: under the uniform fit this king drew 0.91 m —
+      // a single. Measured before/after in tools/measure-fit.mjs.
+      fitFootprint: true,
     },
   },
   {
@@ -247,6 +251,7 @@ export const CATALOGUE: CatalogueItem[] = [
         'https://sketchfab.com/3d-models/double-bed-c505ffffc1524865ba63af837346f1f7',
       triangles: 5000,
       yaw: 270,
+      fitFootprint: true,
     },
   },
   {
@@ -264,6 +269,7 @@ export const CATALOGUE: CatalogueItem[] = [
       source:
         'https://sketchfab.com/3d-models/single-bed-2-81ada0e24e1647d8a0d6d0708a696f84',
       triangles: 3554,
+      fitFootprint: true,
     },
   },
   {
