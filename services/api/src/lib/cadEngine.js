@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 /**
@@ -166,6 +166,63 @@ export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers 
   }
 
   return { model, modelPath, glbPath: model.glb?.path ?? null, plan, views }
+}
+
+/**
+ * What plans a presentation PDF holds, and what the scale evidence is.
+ *
+ * Phase one of the two-phase deck flow: cheap (extraction plus detection, no
+ * engine build), so the user confirms ONE printed dimension before the single
+ * paid build — never build-then-rebuild at a second charge for our own
+ * uncertainty. Returns the survey JSON verbatim; the route rewrites preview
+ * paths into served URLs, because a disk path means nothing to a browser.
+ */
+export async function deckSurvey({ inputPath, outDir, detector, signal }) {
+  const jsonPath = resolve(outDir, 'deck-survey.json')
+  const args = ['survey', '--input', inputPath, '--out', outDir, '--json', jsonPath]
+  if (detector) args.push('--detector', detector)
+
+  await runEngine('deck', args, { signal })
+
+  try {
+    return JSON.parse(await readFile(jsonPath, 'utf8'))
+  } catch {
+    throw new EngineError('The deck survey reported success but wrote no JSON.')
+  }
+}
+
+/**
+ * Phase two: reconstruct ONE chosen plan sheet at a confirmed scale.
+ *
+ * Mirrors `reconstruct`'s return shape so the queue's cad branch treats the
+ * two identically. The sheet's stem is derived engine-side from its caption,
+ * so the model is found as the one building.json in the job's own outDir —
+ * which is why every deck job gets a fresh directory.
+ */
+export async function deckBuild({
+  inputPath, outDir, page, index = 0, scale, height, detector, onProgress, signal,
+}) {
+  const args = [
+    'build', '--input', inputPath, '--out', outDir,
+    '--page', String(page), '--index', String(index),
+  ]
+  if (scale) args.push('--scale', String(scale))
+  if (height) args.push('--height', String(height))
+  if (detector) args.push('--detector', detector)
+
+  await runEngine('deck', args, { onProgress, signal })
+
+  const written = (await readdir(outDir)).filter((f) => f.endsWith('.building.json'))
+  if (written.length !== 1) {
+    throw new EngineError(
+      written.length === 0
+        ? 'The deck build reported success but wrote no model.'
+        : `The deck build wrote ${written.length} models into one job directory.`,
+    )
+  }
+  const modelPath = resolve(outDir, written[0])
+  const model = JSON.parse(await readFile(modelPath, 'utf8'))
+  return { model, modelPath, glbPath: model.glb?.path ?? null, plan: null, views: null }
 }
 
 /** Read-only, free, and fast enough to answer synchronously. */

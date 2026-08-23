@@ -441,6 +441,65 @@ export const cancelCadJob = (jobId: string) =>
     method: 'DELETE',
   })
 
+// ---- Presentation decks -----------------------------------------------------
+// Two-phase: a cheap survey finds the plan sheets and the printed dimensions,
+// the user confirms ONE of them, and a single build runs at the settled scale.
+
+/** A printed dimension the user can confirm to anchor the sheet's scale. */
+export interface DeckDimension {
+  room: string
+  kind: string
+  sizeMetres: [number, number]
+  longSideMetres: number
+  /** The room's long side as a fraction of the image width. */
+  drawnSpanFraction: number
+  impliedScale: number
+  /** True when the region is well-enclosed — the trustworthy kind of anchor. */
+  reliableAnchor: boolean
+}
+
+export interface DeckSheet {
+  page: number
+  index: number
+  floor: string | null
+  caption: string | null
+  stem: string
+  /** Served preview URL (path — absolutise with storedUrl). */
+  preview: string | null
+  width: number
+  height: number
+  rooms: number
+  scale: { metresPerUnit: number | null; samples: number; spread: number | null; trustworthy: boolean }
+  suggestedScale: number | null
+  confirmDimensions: DeckDimension[]
+}
+
+export interface DeckSurvey {
+  source: string
+  pages: number
+  plansFound: number
+  sheets: DeckSheet[]
+  otherSheets: { page: number; kind: string; caption: string | null }[]
+}
+
+export const deckSurvey = (key: string) =>
+  request<DeckSurvey>('/cad/deck/survey', { method: 'POST', body: { key } })
+
+export const submitDeckBuild = (input: {
+  key: string
+  page: number
+  index: number
+  scale: number | null
+}) =>
+  request<{
+    jobId: string
+    status: string
+    creditsCharged: number
+    creditsRemaining?: number
+    deduplicated?: boolean
+    message?: string
+  }>('/cad/deck/jobs', { method: 'POST', body: input })
+
 /**
  * Upload generated scene geometry, on its way to the render worker.
  *

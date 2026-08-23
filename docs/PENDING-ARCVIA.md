@@ -310,6 +310,21 @@ modelUrl (the bake writes one) and for them the drawing stays the truth. The
 envelope-coverage caveat still applies per drawing: check the build report
 before trusting an import.
 
+**And the same door now takes presentation PDFs** (with aalev-35's deck
+engine, `c27748d`): upload a rendered deck → a cheap survey finds the plan
+sheets and the printed dimensions → the user confirms ONE dimension (anchor
+defaults to an engine-flagged well-enclosed room) → a single 3-credit build at
+the settled scale. Two-phase BY DESIGN — build-then-rebuild would charge twice
+for our own scale uncertainty. Deck jobs ride preset `cad` with
+`spec.kind='deck'`, inheriting lane/refunds/reconciliation. Verified in Chrome
+on the Avarana deck: survey found both plans, Toilet 4.88 m anchor → 20.09 m
+across the sheet, build landed 13 walls / 8 rooms — the engine CLI's own
+numbers. ⚠ On heavily-rendered sheets walls under-detect (open-plan has no
+partitions to find); the panel promises "a massing model from your plan",
+never watertight walls. The failure path was live-tested by a real detector
+outage mid-build: the engine's verbatim message reached the panel and the
+refund settled.
+
 **This was deliberately held back until `6ea3fea`, and the reason generalises.**
 Until the sheet border stopped eating wall faces, the engine emitted models
 containing two phantom walls among the thickest in the building — 13.40 m at

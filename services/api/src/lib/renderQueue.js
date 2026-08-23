@@ -350,21 +350,37 @@ async function runJob(job) {
     running.set(job.id, { child: null, controller, startedAt: Date.now(), progress: 0, markers: {} })
 
     try {
-      const { reconstruct } = await import('./cadEngine.js')
-      const { model, glbPath, plan } = await reconstruct({
-        inputPath: job.spec.inputPath,
-        outDir: job.spec.outDir,
-        unit: job.spec.unit,
-        layers: job.spec.layers,
-        autoLayers: job.spec.autoLayers !== false,
-        height: job.spec.height,
-        frame: job.spec.frame,
-        signal: controller.signal,
-        onProgress: (percent) => {
-          const active = running.get(job.id)
-          if (active) active.progress = percent
-        },
-      })
+      const engine = await import('./cadEngine.js')
+      const onProgress = (percent) => {
+        const active = running.get(job.id)
+        if (active) active.progress = percent
+      }
+      // A deck sheet is a CAD-class job for every purpose this queue has —
+      // lane, tariff, refunds, restart handling — so it shares the preset and
+      // only the engine entry point differs. spec.kind is that dispatch.
+      const { model, glbPath, plan } =
+        job.spec.kind === 'deck'
+          ? await engine.deckBuild({
+              inputPath: job.spec.inputPath,
+              outDir: job.spec.outDir,
+              page: job.spec.page,
+              index: job.spec.index,
+              scale: job.spec.scale,
+              height: job.spec.height,
+              signal: controller.signal,
+              onProgress,
+            })
+          : await engine.reconstruct({
+              inputPath: job.spec.inputPath,
+              outDir: job.spec.outDir,
+              unit: job.spec.unit,
+              layers: job.spec.layers,
+              autoLayers: job.spec.autoLayers !== false,
+              height: job.spec.height,
+              frame: job.spec.frame,
+              signal: controller.signal,
+              onProgress,
+            })
 
       // A blocking verdict means the engine built something it does not
       // believe. Publishing that is worse than failing: a villa 4 cm across
@@ -393,6 +409,14 @@ async function runJob(job) {
           openings: model.openings?.total ?? 0,
           unit: model.unit,
           layers: model.layersUsed,
+          // Deck sheets carry scale evidence instead of a drawing unit; the
+          // reviewer's question there is "was the scale confirmed or guessed".
+          ...(model.scale
+            ? {
+                scale: model.scale.metresPerUnit,
+                scaleConfirmed: Boolean(model.scale.confirmed),
+              }
+            : {}),
         },
       })
     } catch (error) {

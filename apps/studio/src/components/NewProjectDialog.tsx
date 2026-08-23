@@ -23,8 +23,8 @@ const STARTS: { id: ProjectStart; title: string; body: string; icon: string }[] 
   },
   {
     id: 'cad',
-    title: 'Reconstruct from CAD',
-    body: 'The engine reads a DWG or DXF and builds the walls, rooms and 3D model itself.',
+    title: 'Reconstruct from CAD or PDF',
+    body: 'The engine reads a DWG, DXF or presentation PDF and builds the rooms and 3D model itself.',
     icon: '⌂',
   },
   {

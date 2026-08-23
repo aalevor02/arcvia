@@ -3,10 +3,14 @@ import { useEffect, useRef, useState } from 'react'
 import {
   cadJob,
   cancelCadJob,
+  deckSurvey,
+  storedUrl,
   submitCadJob,
+  submitDeckBuild,
   uploadFloorplan,
   uploadScene,
   type CadSummary,
+  type DeckSurvey,
 } from '../lib/api'
 
 interface Props {
@@ -20,25 +24,30 @@ interface Props {
 type Phase =
   | { at: 'pick' }
   | { at: 'uploading'; name: string }
+  | { at: 'surveying'; name: string }
+  | { at: 'choose'; key: string; survey: DeckSurvey; sheet: number; anchor: number; metres: string }
   | { at: 'working'; jobId: string; progress: number; charged: number }
   | { at: 'failed'; message: string; refunded: boolean }
 
 /**
  * The import step the two upload starts were missing.
  *
- * Both starts already created a real project and then apologised — a notice
- * saying the import was "not wired up yet". This is the wiring.
- *
  * `model` is one hop: the GLB goes to storage and its path onto the scene.
- * `cad` is the front door to the reconstruction engine: the drawing uploads,
- * a job runs (tens of seconds, 3 credits), and what lands is not just a model
- * but the engine's own account of it — rooms, walls, openings, the unit it
- * settled on — because a reviewer accepts an import on facts, not on a
- * spinner reaching 100%.
+ * `cad` covers two kinds of file through one door, split by what the file is:
  *
- * Failures show the engine's message verbatim. It writes refusals for people
- * ("the drawing did not reconstruct", with the blocking checks named), and a
- * paraphrase would only lose information.
+ *   DWG / DXF   straight to the engine — vectors are exact, one job.
+ *   PDF         a presentation deck: a cheap SURVEY finds the plan sheets and
+ *               the dimensions printed on them, the user confirms ONE, and a
+ *               single build runs at the settled scale. Two phases by design —
+ *               build-then-rebuild would charge twice for our own scale
+ *               uncertainty.
+ *
+ * The scale anchor defaults to a well-enclosed room (the engine flags which):
+ * a toilet's outline survives a rendered plan far better than an open-plan
+ * living room's, so it is the dimension whose drawn span can be trusted.
+ *
+ * Failures show the engine's message verbatim. It writes refusals for people,
+ * and a paraphrase would only lose information.
  */
 export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
   const [phase, setPhase] = useState<Phase>({ at: 'pick' })
@@ -53,6 +62,36 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
     }
   }, [])
 
+  function watch(jobId: string, charged: number) {
+    jobRef.current = jobId
+    setPhase({ at: 'working', jobId, progress: 0, charged })
+    pollRef.current = setInterval(async () => {
+      try {
+        const job = await cadJob(jobId)
+        if (job.status === 'done' && job.outputUrl) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          onLanded(job.outputUrl, job.summary)
+          return
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPhase({
+            at: 'failed',
+            message: job.error ?? 'The reconstruction did not finish.',
+            refunded: job.refunded > 0,
+          })
+          return
+        }
+        setPhase((prev) =>
+          prev.at === 'working' ? { ...prev, progress: job.progress ?? 0 } : prev,
+        )
+      } catch {
+        // One missed poll is a blip; the next tick asks again. The job is
+        // server-side either way — nothing is lost by staying quiet here.
+      }
+    }, 2500)
+  }
+
   async function picked(file: File) {
     setPhase({ at: 'uploading', name: file.name })
     try {
@@ -63,44 +102,71 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
       }
 
       const stored = await uploadFloorplan(file)
-      const submitted = await submitCadJob(stored.key)
-      setPhase({
-        at: 'working',
-        jobId: submitted.jobId,
-        progress: 0,
-        charged: submitted.creditsCharged,
-      })
-      jobRef.current = submitted.jobId
 
-      pollRef.current = setInterval(async () => {
-        try {
-          const job = await cadJob(submitted.jobId)
-          if (job.status === 'done' && job.outputUrl) {
-            if (pollRef.current) clearInterval(pollRef.current)
-            onLanded(job.outputUrl, job.summary)
-            return
-          }
-          if (job.status === 'failed' || job.status === 'cancelled') {
-            if (pollRef.current) clearInterval(pollRef.current)
-            setPhase({
-              at: 'failed',
-              message: job.error ?? 'The reconstruction did not finish.',
-              refunded: job.refunded > 0,
-            })
-            return
-          }
-          setPhase((prev) =>
-            prev.at === 'working' ? { ...prev, progress: job.progress ?? 0 } : prev,
-          )
-        } catch {
-          // One missed poll is a blip; the next tick asks again. The job is
-          // server-side either way — nothing is lost by staying quiet here.
+      if (/\.pdf$/i.test(file.name)) {
+        setPhase({ at: 'surveying', name: file.name })
+        const survey = await deckSurvey(stored.key)
+        if (!survey.sheets.length) {
+          setPhase({
+            at: 'failed',
+            message:
+              `No floor plans found across ${survey.pages} page(s) — ` +
+              `${survey.otherSheets.length} sheet(s) look like renders, elevations or boards.`,
+            refunded: false,
+          })
+          return
         }
-      }, 2500)
+        const anchor = Math.max(
+          0,
+          survey.sheets[0].confirmDimensions.findIndex((d) => d.reliableAnchor),
+        )
+        setPhase({
+          at: 'choose',
+          key: stored.key,
+          survey,
+          sheet: 0,
+          anchor,
+          metres: String(survey.sheets[0].confirmDimensions[anchor]?.longSideMetres ?? ''),
+        })
+        return
+      }
+
+      const submitted = await submitCadJob(stored.key)
+      watch(submitted.jobId, submitted.creditsCharged)
     } catch (error) {
       setPhase({
         at: 'failed',
         message: error instanceof Error ? error.message : 'The upload failed.',
+        refunded: false,
+      })
+    }
+  }
+
+  /** The scale the current choice implies, in metres across the sheet image. */
+  function chosenScale(p: Extract<Phase, { at: 'choose' }>): number | null {
+    const sheet = p.survey.sheets[p.sheet]
+    const dim = sheet.confirmDimensions[p.anchor]
+    const metres = Number(p.metres)
+    if (dim && Number.isFinite(metres) && metres > 0 && dim.drawnSpanFraction > 0) {
+      return metres / dim.drawnSpanFraction
+    }
+    return sheet.suggestedScale
+  }
+
+  async function build(p: Extract<Phase, { at: 'choose' }>) {
+    const sheet = p.survey.sheets[p.sheet]
+    try {
+      const submitted = await submitDeckBuild({
+        key: p.key,
+        page: sheet.page,
+        index: sheet.index,
+        scale: chosenScale(p),
+      })
+      watch(submitted.jobId, submitted.creditsCharged)
+    } catch (error) {
+      setPhase({
+        at: 'failed',
+        message: error instanceof Error ? error.message : 'The build could not start.',
         refunded: false,
       })
     }
@@ -124,8 +190,8 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
     }
   }
 
-  const accept = kind === 'model' ? '.glb' : '.dwg,.dxf'
-  const title = kind === 'model' ? 'Load a 3D model' : 'Reconstruct from CAD'
+  const accept = kind === 'model' ? '.glb' : '.dwg,.dxf,.pdf'
+  const title = kind === 'model' ? 'Load a 3D model' : 'Reconstruct from CAD or a plan PDF'
 
   return (
     <div className="alert" style={{ margin: 12, display: 'grid', gap: 8 }}>
@@ -136,7 +202,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
           <span style={{ fontSize: 12.5 }}>
             {kind === 'model'
               ? 'Pick a GLB and it becomes this project’s 3D scene.'
-              : 'Pick a DWG or DXF. The engine builds the walls, rooms and a walkable model — about a minute, 3 credits.'}
+              : 'Pick a DWG or DXF for an exact reconstruction, or a presentation PDF — the engine finds the plan pages and builds a massing model from your plan. 3 credits per build.'}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
@@ -158,6 +224,136 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
 
       {phase.at === 'uploading' && (
         <span style={{ fontSize: 12.5 }}>Uploading {phase.name}…</span>
+      )}
+
+      {phase.at === 'surveying' && (
+        <span style={{ fontSize: 12.5 }}>
+          Reading {phase.name} — finding the plan pages and their printed dimensions…
+        </span>
+      )}
+
+      {phase.at === 'choose' && (
+        <>
+          <span style={{ fontSize: 12.5 }}>
+            {phase.survey.plansFound} floor plan{phase.survey.plansFound === 1 ? '' : 's'} in{' '}
+            {phase.survey.pages} pages. Pick the one this project is about.
+          </span>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {phase.survey.sheets.map((sheet, i) => (
+              <button
+                key={`${sheet.page}.${sheet.index}`}
+                className="choice"
+                aria-pressed={i === phase.sheet}
+                style={{
+                  width: 168,
+                  display: 'grid',
+                  gap: 4,
+                  outline: i === phase.sheet ? '2px solid var(--accent, #4a9eff)' : 'none',
+                }}
+                onClick={() => {
+                  const anchor = Math.max(
+                    0,
+                    sheet.confirmDimensions.findIndex((d) => d.reliableAnchor),
+                  )
+                  setPhase({
+                    ...phase,
+                    sheet: i,
+                    anchor,
+                    metres: String(sheet.confirmDimensions[anchor]?.longSideMetres ?? ''),
+                  })
+                }}
+              >
+                {sheet.preview && (
+                  <img
+                    src={storedUrl(sheet.preview)}
+                    alt={sheet.floor ?? sheet.stem}
+                    style={{ width: '100%', borderRadius: 4 }}
+                  />
+                )}
+                <span style={{ fontSize: 12 }}>
+                  <strong>{sheet.floor ?? sheet.caption ?? sheet.stem}</strong>
+                  <br />
+                  <span className="muted">
+                    page {sheet.page} · {sheet.rooms} room{sheet.rooms === 1 ? '' : 's'}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {(() => {
+            const sheet = phase.survey.sheets[phase.sheet]
+            const scale = chosenScale(phase)
+            return (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {sheet.confirmDimensions.length > 0 ? (
+                  <>
+                    <span style={{ fontSize: 12 }}>
+                      Confirm one printed dimension so the model is the right size —
+                      small enclosed rooms are the reliable anchors.
+                    </span>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select
+                        value={phase.anchor}
+                        style={{ fontSize: 12 }}
+                        onChange={(e) => {
+                          const anchor = Number(e.target.value)
+                          setPhase({
+                            ...phase,
+                            anchor,
+                            metres: String(
+                              sheet.confirmDimensions[anchor]?.longSideMetres ?? '',
+                            ),
+                          })
+                        }}
+                      >
+                        {sheet.confirmDimensions.map((dim, i) => (
+                          <option key={i} value={i}>
+                            {dim.room} — {dim.sizeMetres[0]} × {dim.sizeMetres[1]} m
+                            {dim.reliableAnchor ? '' : ' (open region)'}
+                          </option>
+                        ))}
+                      </select>
+                      <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+                        long side
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={phase.metres}
+                          style={{ width: 80, fontSize: 12 }}
+                          onChange={(e) => setPhase({ ...phase, metres: e.target.value })}
+                        />
+                        m
+                      </label>
+                      {scale && (
+                        <span className="muted" style={{ fontSize: 11.5 }}>
+                          → {scale.toFixed(2)} m across the sheet
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 12 }}>
+                    {sheet.scale.trustworthy
+                      ? `Scale read from the drawing: ${sheet.scale.metresPerUnit?.toFixed(2)} m across the sheet.`
+                      : 'No printed dimensions were readable on this sheet — the model will build at the detector’s best guess, and its size should be treated as approximate.'}
+                  </span>
+                )}
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={() => void build(phase)}>
+                    Build this plan — 3 credits
+                  </button>
+                  <button className="icon-btn" onClick={onDismiss}>
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
+        </>
       )}
 
       {phase.at === 'working' && (

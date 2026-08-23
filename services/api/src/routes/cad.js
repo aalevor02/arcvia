@@ -124,6 +124,154 @@ export async function registerCadRoutes(app) {
     }
   })
 
+  // ---- Presentation decks: survey, then one build --------------------------
+  // A rendered deck PDF is neither a drawing (no vectors worth reading) nor a
+  // single raster (27 pages, two of which are plans). The flow is two-phase
+  // BY DESIGN: the survey is cheap and finds the plan sheets plus the printed
+  // dimensions; the user confirms ONE dimension; the build runs once at that
+  // settled scale. Build-then-rebuild would charge the user twice for our own
+  // scale uncertainty, which is why this shape exists.
+
+  app.post('/deck/survey', { preHandler: requireAuth }, async (request, reply) => {
+    const file = await resolveInput(request.body?.key, reply)
+    if (!file) return reply
+    if (file.contentType && file.contentType !== 'application/pdf') {
+      return reply.status(415).send({
+        message: `A deck survey reads a PDF. Got ${file.contentType}.`,
+      })
+    }
+
+    const out = resolve(WORK_ROOT, request.auth.userId, 'deck-survey')
+    await mkdir(out, { recursive: true })
+
+    // Detection is the real work here (one detector pass per candidate
+    // sheet), so it rides the detect tariff — not the free cadSurvey one.
+    try {
+      await spend(request.auth.userId, 'floorplanDetect', { key: request.body.key, deck: true })
+    } catch (error) {
+      if (error instanceof InsufficientCredits) {
+        return reply.status(402).send({
+          message: 'Not enough credits.',
+          needed: error.needed,
+          available: error.available,
+        })
+      }
+      throw error
+    }
+
+    let result
+    try {
+      result = await engine.deckSurvey({ inputPath: file.path, outDir: out })
+    } catch (error) {
+      return reply.status(422).send({ message: error.message })
+    }
+
+    // Preview paths are files on this machine's disk; a browser needs URLs.
+    // Stored content-addressed, so re-surveying the same deck costs no disk.
+    const { readFile } = await import('node:fs/promises')
+    const { put } = await import('../lib/storage.js')
+    for (const sheet of result.sheets ?? []) {
+      try {
+        const stored = await put(await readFile(sheet.preview), 'image/png', {
+          prefix: `decks/${request.auth.userId}`,
+        })
+        sheet.preview = stored.url
+      } catch {
+        sheet.preview = null
+      }
+    }
+    return result
+  })
+
+  app.post('/deck/jobs', { preHandler: requireAuth }, async (request, reply) => {
+    const file = await resolveInput(request.body?.key, reply)
+    if (!file) return reply
+    if (file.contentType && file.contentType !== 'application/pdf') {
+      return reply.status(415).send({
+        message: `A deck build reads a PDF. Got ${file.contentType}.`,
+      })
+    }
+    const page = Number(request.body?.page)
+    if (!Number.isInteger(page) || page < 1) {
+      return reply.status(400).send({ message: 'Which page? The survey reports it.' })
+    }
+    const index = Number.isInteger(Number(request.body?.index)) ? Number(request.body.index) : 0
+    const scale = Number(request.body?.scale) > 0 ? Number(request.body.scale) : null
+
+    // The scale is in the fingerprint on purpose: rebuilding the same sheet at
+    // a corrected scale is a genuinely different reconstruction, and merging
+    // the two would hand the user the wrongly-scaled model back.
+    const { existing, fields: idempotency } = await checkSubmission(request, [
+      'deck', request.body?.key ?? null, page, index, scale,
+      request.body?.height ?? null,
+    ])
+    if (existing) {
+      return reply.status(200).send({
+        jobId: existing.id,
+        status: existing.status,
+        creditsCharged: 0,
+        deduplicated: true,
+        message:
+          'This looks like the same sheet and scale as an existing job, so it ' +
+          'was not charged or queued again.',
+      })
+    }
+
+    let charge
+    try {
+      charge = await spend(request.auth.userId, 'cadReconstruct', {
+        key: request.body.key, deck: true, page, index,
+      })
+    } catch (error) {
+      if (error instanceof InsufficientCredits) {
+        return reply.status(402).send({
+          message: 'Not enough credits.',
+          needed: error.needed,
+          available: error.available,
+        })
+      }
+      throw error
+    }
+
+    // A fresh directory per job: the sheet's stem is derived from its caption
+    // engine-side, so "the one model in this directory" is only deterministic
+    // if the directory is this job's own.
+    const { nanoid } = await import('../store.js')
+    const out = resolve(WORK_ROOT, request.auth.userId, 'deck', nanoid(8))
+    await mkdir(out, { recursive: true })
+
+    const job = await db.insert('renderJobs', {
+      sceneId: request.body?.sceneId ?? null,
+      ownerId: request.auth.userId,
+      preset: 'cad',
+      action: 'cadReconstruct',
+      status: 'queued',
+      progress: 0,
+      creditsCharged: charge.charged,
+      ...idempotency,
+      spec: {
+        kind: 'deck',
+        inputPath: file.path,
+        outDir: out,
+        page,
+        index,
+        scale,
+        height: request.body?.height ?? null,
+      },
+      outputUrl: null,
+      error: null,
+    })
+
+    await enqueue(job)
+
+    return reply.status(201).send({
+      jobId: job.id,
+      status: 'queued',
+      creditsCharged: charge.charged,
+      creditsRemaining: charge.remaining,
+    })
+  })
+
   // ---- The job ------------------------------------------------------------
 
   app.post('/jobs', { preHandler: requireAuth }, async (request, reply) => {
