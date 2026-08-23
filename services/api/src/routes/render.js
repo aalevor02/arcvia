@@ -2,7 +2,14 @@ import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
 import { spend, balanceFor, InsufficientCredits } from '../lib/credits.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
-import { enqueue, jobStatus, cancelJob, queueDepth } from '../lib/renderQueue.js'
+import {
+  enqueue,
+  jobStatus,
+  cancelJob,
+  queueDepth,
+  timeoutFor,
+  isRemoteOwned,
+} from '../lib/renderQueue.js'
 import { resolveUrl, isOwnUpload, isEnvAsset } from '../lib/storage.js'
 import { checkSubmission } from '../lib/idempotency.js'
 import { AI_STYLES, isStyle } from '../lib/aiRender.js'
@@ -81,40 +88,131 @@ const PRESETS = {
 }
 
 /**
- * Reclaim jobs that a restart orphaned.
+ * How many times a job orphaned MID-RENDER may be re-queued before it is
+ * failed instead. One, by default: the first restart gets a free retry (the
+ * multi-view renderer even resumes from its per-view cache), but a job that
+ * takes the server down every time it runs must not be handed the gun again.
+ * Jobs orphaned while still QUEUED never count against this — they ran
+ * nothing, so they cannot have caused anything.
+ */
+const RESTART_RETRIES = Number(process.env.RENDER_RESTART_RETRIES ?? 1)
+
+/**
+ * The floor on how long a watched remote job is given to call back after a
+ * restart, whatever remains of its time budget. A worker that finished during
+ * the deploy needs a moment to deliver the result; failing the job in the
+ * same tick would throw away GPU work that is already paid for and done.
+ */
+const WATCHDOG_FLOOR_MS = 5_000
+
+/**
+ * Reclaim jobs that a restart orphaned — by finishing their journey, not by
+ * killing them.
  *
- * The queue's `running` map is in memory. When the process goes down — a
- * deploy, a crash, a file watcher noticing an edit — the Blender child dies
- * with it, so nothing is ever going to call `finish()` for the jobs it was
- * tracking. Left alone they sit at `rendering` forever: the client polls until
- * its own timeout, the row never resolves, and the credits stay spent for work
- * that produced nothing.
+ * The queue's `running` map is in memory; the rows are not. When the process
+ * goes down — a deploy, a crash, a file watcher noticing an edit — every job
+ * still marked queued or rendering is orphaned. This used to fail and refund
+ * all of them, which made every deploy a small massacre: ten queued bakes
+ * died for nothing, because a queued job's spec is entirely in its row and it
+ * lost no work at all.
  *
- * So on boot, anything still claiming to be queued or rendering is by
- * definition abandoned — this process has just started and is running none of
- * them — and is failed and refunded.
+ * So instead, each orphan gets what its state deserves:
  *
- * Refunds go through `settleRefund`, which pays back the recorded
- * `creditsCharged` and stamps the job so no other path can pay it twice.
+ *   queued                    Re-queued, oldest first. Nothing ran, nothing
+ *                             was lost, the credits stay spent on work that
+ *                             will now happen. Never counts as a retry.
+ *
+ *   rendering, remote-owned   Left alone, with a watchdog. The worker pool
+ *                             did not die with us and will call back
+ *                             (`/jobs/:id/callback` writes straight to the
+ *                             row, so it needs no in-memory state). Failing
+ *                             it here would discard GPU seconds already
+ *                             bought. If the callback never comes, the
+ *                             watchdog fails and refunds it when whatever
+ *                             remains of its time budget runs out.
+ *
+ *   rendering, in-process     The child died with the process; the work is
+ *                             gone. Re-queued once (`RENDER_RESTART_RETRIES`),
+ *                             because half the time the restart was a deploy
+ *                             and the job is blameless — and failed with a
+ *                             refund the time after, because the other half
+ *                             it was the job that killed the box.
+ *
+ * Refunds still go through `settleRefund`, which stamps the decision so two
+ * crashes in a row cannot pay out twice.
  */
 export async function reconcileRenderJobs() {
   const orphans = await db.find(
     'renderJobs',
     (j) => j.status === 'queued' || j.status === 'rendering',
   )
+  // Oldest first, so re-queued jobs run in the order they were submitted.
+  orphans.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
+
+  const outcome = { requeued: 0, watched: 0, failed: 0 }
 
   for (const job of orphans) {
-    await db.update('renderJobs', job.id, {
-      status: 'failed',
-      error: 'The render server restarted while this job was running.',
+    if (job.status === 'rendering' && isRemoteOwned(job)) {
+      watchRemoteJob(job)
+      outcome.watched += 1
+      continue
+    }
+
+    const restarts = job.restarts ?? 0
+    if (job.status === 'rendering' && restarts >= RESTART_RETRIES) {
+      await db.update('renderJobs', job.id, {
+        status: 'failed',
+        error:
+          `The render server restarted ${restarts + 1} times while this job ` +
+          'was running, so it was not retried again.',
+      })
+      // No `PRESETS` guard. A job whose preset is no longer registered still
+      // took the user's credits, and skipping it was exactly how orphaned
+      // jobs kept them — silently, because nothing errors on a missed lookup.
+      await settleRefund(job.id, 'restart', PRESETS[job.preset]?.action)
+      outcome.failed += 1
+      continue
+    }
+
+    const fresh = await db.update('renderJobs', job.id, {
+      status: 'queued',
+      progress: 0,
+      restarts: job.status === 'rendering' ? restarts + 1 : restarts,
     })
-    // No `PRESETS` guard. A job whose preset is no longer registered still
-    // took the user's credits, and skipping it was exactly how orphaned jobs
-    // kept them — silently, because nothing errors when a lookup misses.
-    await settleRefund(job.id, 'restart', PRESETS[job.preset]?.action)
+    await enqueue(fresh)
+    outcome.requeued += 1
   }
 
-  return orphans.length
+  return outcome
+}
+
+/**
+ * Wait out a remote job's remaining time budget, then fail it if the worker
+ * never reported back. Everything is re-read at the moment of firing, because
+ * the healthy outcome is that the callback resolved the row first and this
+ * timer finds nothing left to do.
+ */
+function watchRemoteJob(job) {
+  const startedAt =
+    typeof job.startedAt === 'number' ? job.startedAt : Date.now()
+  const remaining = Math.max(
+    WATCHDOG_FLOOR_MS,
+    startedAt + timeoutFor(job) - Date.now(),
+  )
+  const timer = setTimeout(async () => {
+    const row = await db.findOne('renderJobs', (j) => j.id === job.id)
+    if (!row || row.status !== 'rendering') return
+    await db.update('renderJobs', job.id, {
+      status: 'failed',
+      error:
+        'The render server restarted while this job ran on the worker pool, ' +
+        'and the worker never reported back.',
+    })
+    await settleRefund(job.id, 'restart', PRESETS[job.preset]?.action)
+  }, remaining)
+  // A held timer must not keep the process alive; it exists to serve the
+  // process, not the other way round.
+  timer.unref?.()
 }
 
 export async function registerRenderRoutes(app) {
@@ -398,6 +496,18 @@ export async function registerRenderRoutes(app) {
     const { status, progress, outputUrl, error } = request.body ?? {}
     const job = await db.findOne('renderJobs', (j) => j.id === request.params.id)
     if (!job) return reply.status(404).send({ message: 'Job not found.' })
+
+    // ── A settled job stays settled ─────────────────────────────────────────
+    // A worker can finish after the row has already been resolved without it:
+    // the owner cancelled, or the restart watchdog timed the job out and paid
+    // the refund. Accepting the result now would flip a refunded 'failed' to
+    // 'done' — the user keeps the refund AND gets the render, and the books
+    // stop balancing. The work is acknowledged, and declined.
+    if (['done', 'failed', 'cancelled'].includes(job.status)) {
+      return reply.status(409).send({
+        message: `This job already resolved as '${job.status}'; the result was not applied.`,
+      })
+    }
 
     await db.update('renderJobs', job.id, {
       status: status ?? job.status,

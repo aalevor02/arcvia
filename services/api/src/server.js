@@ -90,12 +90,18 @@ app.setErrorHandler((error, request, reply) => {
   })
 })
 
-// Before accepting traffic: nothing from a previous life of this process is
-// still running, so any job that still claims to be is abandoned. Failing and
-// refunding them here is the difference between a deploy costing users credits
-// and a deploy being invisible.
+// Before accepting traffic: pick up whatever a previous life of this process
+// left behind. Queued jobs re-queue (they lost nothing), remote renders get a
+// watchdog while their worker calls back, and in-process work gets one retry
+// before it is failed and refunded. This is the difference between a deploy
+// costing users credits and a deploy being invisible.
 const reclaimed = await reconcileRenderJobs()
-if (reclaimed > 0) app.log.warn(`Reclaimed ${reclaimed} render job(s) orphaned by a restart`)
+if (reclaimed.requeued + reclaimed.watched + reclaimed.failed > 0) {
+  app.log.warn(
+    `Restart reconciliation: ${reclaimed.requeued} job(s) re-queued, ` +
+      `${reclaimed.watched} awaiting their worker, ${reclaimed.failed} failed and refunded`,
+  )
+}
 
 try {
   await app.listen({ port: PORT, host: HOST })

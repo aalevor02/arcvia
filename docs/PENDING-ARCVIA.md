@@ -464,7 +464,17 @@ options (3–4 d).
 
 ### Operations
 
-Queue persistence (2–3 d) · per-preset queue lanes (1–2 d).
+~~Queue persistence (2–3 d)~~ ✅ **DONE** — restart reconciliation now finishes
+each orphan's journey instead of killing it: queued jobs re-queue oldest-first
+(they lost nothing; no refund), remote-owned renders are left for their worker
+with a watchdog on the remains of their time budget (the callback writes to
+the row, so it lands fine after a restart), in-process work gets one retry
+(`RENDER_RESTART_RETRIES`, default 1) then fails-and-refunds. Late callbacks
+on settled jobs are refused (409) — a refunded job must not flip to 'done'.
+`test/queue-persistence.mjs` proves all three branches with real SIGKILLs
+between boots.
+
+Per-preset queue lanes (1–2 d).
 
 ### Two `TODO(you)` markers that are business decisions, not work
 

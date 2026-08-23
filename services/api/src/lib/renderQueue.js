@@ -72,7 +72,20 @@ const CONCURRENCY = Number(process.env.RENDER_CONCURRENCY ?? 1)
 const JOB_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS ?? 10 * 60 * 1000)
 const BAKE_TIMEOUT_MS = Number(process.env.BAKE_TIMEOUT_MS ?? 45 * 60 * 1000)
 
-const timeoutFor = (job) => (job.preset === 'bake' ? BAKE_TIMEOUT_MS : JOB_TIMEOUT_MS)
+export const timeoutFor = (job) => (job.preset === 'bake' ? BAKE_TIMEOUT_MS : JOB_TIMEOUT_MS)
+
+/**
+ * Whether a restart of THIS process leaves the job's work still running
+ * somewhere else.
+ *
+ * In remote mode a Blender job is owned by the worker pool: our process dying
+ * does not stop the GPU, and the worker will still call back with the result.
+ * AI and CAD jobs are in-process regardless of mode — the fetch or the Python
+ * child dies with us. Reconciliation branches on this: remote-owned work is
+ * waited for, in-process work is gone and can only be re-run.
+ */
+export const isRemoteOwned = (job) =>
+  MODE === 'remote' && job.preset !== 'ai' && job.preset !== 'cad'
 
 /**
  * Daily cap on completed jobs across the whole install. Once hit, submissions
@@ -194,7 +207,26 @@ async function start(job) {
 }
 
 async function runJob(job) {
-  await db.update('renderJobs', job.id, { status: 'rendering' })
+  // ── A job that resolved while it waited must not be re-run ───────────────
+  // Reconciliation re-queues jobs a restart orphaned, and in remote mode the
+  // old worker may still finish one and call back while its requeued copy
+  // sits in `pending`. Without this read, starting the copy would flip a
+  // 'done' row back to 'rendering' and run the work twice. The same read
+  // makes a cancel that landed between shift() and here stick.
+  const current = await db.findOne('renderJobs', (j) => j.id === job.id)
+  if (current && ['cancelled', 'failed', 'done'].includes(current.status)) {
+    const active = running.get(job.id)
+    if (active?.timer) clearTimeout(active.timer)
+    running.delete(job.id)
+    drain()
+    return
+  }
+
+  // `startedAt` is persisted, not just held in `running`, because it is what
+  // lets a restart compute how much of the job's time budget remains — the
+  // in-memory copy dies with the process, which is exactly the moment the
+  // number is needed.
+  await db.update('renderJobs', job.id, { status: 'rendering', startedAt: Date.now() })
 
   const finish = async (status, patch = {}) => {
     const active = running.get(job.id)
