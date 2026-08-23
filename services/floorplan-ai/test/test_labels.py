@@ -72,6 +72,32 @@ ok("the x and the × separators both parse",
    and (L.parse_dimension("3.6 × 4.2") is not None))
 ok("a non-dimension string is rejected", L.parse_dimension("KITCHEN") is None)
 
+
+def close(dims, a, b, tol=0.06):
+    """A parsed pair matches an expected pair of metres, either order."""
+    return dims is not None and abs(dims[0] - a) < tol and abs(dims[1] - b) < tol
+
+
+# The prime OCR drops. `10'6"` reads back as `106`, and the naive reader called
+# it 106 feet — a 32 m room that quietly wrecked the scale. In feet-and-inches
+# the inch part is 0-11, so a three-digit run is feet with its last digit(s) as
+# inches. These are the exact strings the Avarana deck produced.
+ok("a dropped prime (10'6\") is read as feet-and-inches, not 106 feet",
+   close(L.parse_dimension("6'0\"X106\""), 1.83, 3.20))
+ok("a dropped prime (12'2\") is read as feet-and-inches",
+   close(L.parse_dimension("8\"10\"X122\""), 2.69, 3.71))
+ok("both primes lost still reads (18'3\" x 13'6\")",
+   close(L.parse_dimension("183X136"), 5.56, 4.11))
+# `810` must split as 8'10" (nobody's room is 81 feet), while `200` must stay
+# 20'0" (an ordinary room) rather than collapse to 2'0" — the foot-count is what
+# tells the two apart.
+ok("810 splits as 8'10\", not 81'0\"", close(L.parse_dimension("810X810"), 2.69, 2.69))
+ok("200 stays 20'0\", not 2'0\"", close(L.parse_dimension("200X200"), 6.10, 6.10))
+# The rescue must not corrupt the readings that were never broken.
+ok("a plain foot count is untouched (6' x 16')",
+   close(L.parse_dimension("6'X16'"), 1.83, 4.88))
+ok("a metric dimension is untouched", close(L.parse_dimension("3.6 x 4.2"), 3.6, 4.2))
+
 # ---- Classification: the words that route a label ------------------------
 
 ok("a pool is outdoor", L.classify("SWIMMING POOL") == "outdoor")

@@ -237,6 +237,54 @@ def classify(text: str) -> str:
     return "noise"
 
 
+def _feet_and_inches(value: int) -> float | None:
+    """
+    A run of digits with the foot mark lost, read back as feet and inches.
+
+    OCR drops the prime in `10'6"` and leaves `106`; the naive reader then calls
+    it a hundred and six feet — a plausible-looking 32 m that quietly wrecks the
+    scale. In feet-and-inches the inch part is always 0-11, so a bare integer of
+    three or more digits is feet with its last one or two digits as inches, never
+    the number itself: `106` is 10'6", `122` is 12'2", `810` is 8'10".
+
+    One and two digit runs are left as feet as written — `16'` is sixteen feet,
+    and a two-digit run is too ambiguous to reinterpret without breaking the many
+    plans that really do print a plain foot count. The consensus scale absorbs
+    the occasional two-digit misread; a three-digit one it cannot, because 32 m
+    sits inside the plausible band and drags the median with it.
+
+    Where a run splits two ways — `810` as 81'0" or as 8'10" — every reading with
+    a valid inch count and a plausible side is kept and the smallest is taken:
+    the dropped prime only ever inflates the figure, so the smallest plausible
+    reading is the one nearest what was actually drawn.
+    """
+    if value < 100:
+        metres = value * FOOT  # 1-2 digits: a plain foot count, as written
+        return metres if PLAUSIBLE_SIDE[0] <= metres <= PLAUSIBLE_SIDE[1] else None
+
+    digits = str(value)
+    # Inches is the last digit — unless that leaves a foot count no room has, in
+    # which case it is the last two. `810` split at the last digit is 81'0", and
+    # nobody's room is eighty-one feet, so it is really 8'10"; `200` split the
+    # same way is 20'0", which is an ordinary twenty-foot room, so it stays. A
+    # single side over forty feet is the tell that the split fell in the wrong
+    # place.
+    fallback = []
+    for cut in (len(digits) - 1, len(digits) - 2):  # inches = last one, then last two
+        if cut < 1:
+            continue
+        feet, inches = int(digits[:cut]), int(digits[cut:])
+        if inches >= 12:
+            continue
+        metres = feet * FOOT + inches * INCH
+        if not PLAUSIBLE_SIDE[0] <= metres <= PLAUSIBLE_SIDE[1]:
+            continue
+        if feet <= 40:
+            return metres  # a room-plausible foot count settles it
+        fallback.append(metres)
+    return min(fallback) if fallback else None
+
+
 def parse_dimension(text: str) -> tuple[float, float] | None:
     """
     A printed room size in metres, from however it happens to be written.
@@ -244,13 +292,13 @@ def parse_dimension(text: str) -> tuple[float, float] | None:
     Plans print sizes in feet and inches, in metres, and in several typographic
     conventions for each — and OCR mangles the primes, which is the whole
     difficulty. `7'0"X5'9"` comes back intact, `19'10"X6'5"` comes back as
-    `19"10"X6'5"`, and `8'10"` sometimes loses its prime and reads `810"`.
+    `19"10"X6'5"`, and `8'10"` loses its prime and reads `810`.
 
     So the marks are not trusted at all. Each side is reduced to the numbers in
     it: two numbers are feet and inches, one number with a decimal point is
-    metres, one whole number is feet. What that cannot rescue — `810` — falls
-    outside any plausible room size and is discarded, which costs nothing
-    because the scale is a consensus across every labelled room on the sheet.
+    metres, and a bare whole number is handed to `_feet_and_inches`, which reads
+    a three-digit run back as feet-and-inches rather than as a room the length of
+    a cricket pitch.
     """
     parts = re.split(r"[xX×]", text)
     if len(parts) != 2:
@@ -262,7 +310,12 @@ def parse_dimension(text: str) -> tuple[float, float] | None:
         if len(numbers) >= 2:
             metres = numbers[0] * FOOT + numbers[1] * INCH
         elif len(numbers) == 1:
-            metres = numbers[0] if "." in part else numbers[0] * FOOT
+            if "." in part:
+                metres = numbers[0]  # a decimal is metres, written plainly
+            else:
+                metres = _feet_and_inches(int(numbers[0]))
+                if metres is None:
+                    return None
         else:
             return None
 
