@@ -168,13 +168,24 @@ mislabel is precisely what P0 got wrong zero-shot, so it is the supervision that
 matters. Verified: 40-sample batch, wall 8-12% (matches real plans), 5-9 classes
 each, every door/window/fixture class present, no failures.
 
-**The refinement P2 needs (honest gap):** the render STYLE is a clean approximation,
-not a match to a specific client's deck. For fine-tuning to transfer to real decks,
-close the style gap by (a) **domain randomisation** — vary line weights, palettes,
-label fonts, tree texture, orientation, noise — so the model learns the invariants
-rather than one look; and (b) mix a handful of REAL decks (Avarana, Casa Altinho)
-into the fine-tune and hold others out for eval. The generator is structured to add
-style variety at the draw calls; that breadth is the next increment before training.
+**Domain randomisation — DONE (2026-08-24).** A per-sample `Style` now varies the
+LOOK while the geometry (and mask) stay exact: wall rendering (solid poché vs
+double-line CAD), wall colour (grey/near-black/brown/blue-grey) and thickness,
+paper (white/cream/scan-tint), label font + scale + placement + optional dims,
+landscaping palette (green/teal-watercolour/grey-green/autumn) and density
+(including none), pool presence/colour, orientation (exact 90° turns) plus an
+occasional small skew, and render noise/blur. Masks stay pixel-exact through it:
+90° turns rotate image and both masks identically; the skew uses INTER_NEAREST on
+the masks so labels never interpolate to fractional classes — verified on a
+rotated+skewed sample, walls/rooms/fixtures all still register. 150-sample batch:
+~100 ms/sample, wall 6-16%, both orientations, zero failures. The point is the
+model must now learn what a wall IS across that whole space, not our one renderer's
+wall. Grid: `synth_dr_grid.png`.
+
+**The one remaining P1 step before training:** mix a handful of REAL decks
+(Avarana, Casa Altinho) into the fine-tune set and hold others out for honest eval
+— synthetic teaches the invariants, the real decks anchor the exact target domain
+and measure transfer. That plus P2 (the cloud-GPU train) is what's left.
 
 ## Downstream unlocks the segment backend enables (studio session, 2026-08-24)
 
