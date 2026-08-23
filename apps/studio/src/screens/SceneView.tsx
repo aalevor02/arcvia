@@ -24,6 +24,7 @@ import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
 import OptionsPanel from '../components/OptionsPanel'
 import CommentsPanel from '../components/CommentsPanel'
+import SunPanel, { type Site } from '../components/SunPanel'
 import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
@@ -124,6 +125,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [environment, setEnvironment] = useState<string | null>(null)
   /** Client options for the published page, loaded with the scene. */
   const [options, setOptions] = useState<SceneOptions | null>(null)
+  /** Where the building is, for the sun study. */
+  const [site, setSite] = useState<Site | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -158,6 +161,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setGated(Boolean(scene.protected))
         setEnvironment(scene.hdriUrl ?? null)
         setOptions(scene.options ?? null)
+        setSite(scene.site ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -740,6 +744,17 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           viewer={viewerRef.current}
           value={environment}
           onChange={updateEnvironment}
+        />
+
+        <SunPanel
+          viewer={viewerRef.current}
+          site={site}
+          onSiteChange={(next) => {
+            setSite(next)
+            void updateScene(sceneId, { site: next }).catch(() =>
+              setStatus('That change could not be saved. Check your connection.'),
+            )
+          }}
         />
 
         <OptionsPanel plan={plan} value={options} onSave={updateOptions} />

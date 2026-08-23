@@ -177,6 +177,8 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
    * same way it carries its credits.
    */
   options?: SceneOptions
+  /** Where the building is, for the sun study. Set once per project. */
+  site?: { latitude: number; longitude: number } | null
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }

@@ -112,6 +112,10 @@ export async function registerSceneRoutes(app) {
       // choice needs into this API's storage first, so the published page
       // never has to reach back into the studio's origin for a file.
       'options',
+      // Where the building is, for the sun study. Latitude and longitude only
+      // — no address, nothing a geocoder touched, just what solar geometry
+      // needs.
+      'site',
     ]
     // ── Why this rejects instead of filtering ───────────────────────────────
     // This used to be `.filter(([k]) => allowed.includes(k))`. A caller sending

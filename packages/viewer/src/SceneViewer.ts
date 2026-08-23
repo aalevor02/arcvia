@@ -199,6 +199,56 @@ export class SceneViewer {
    * bleed between surfaces and no contact darkening in the corners, and that is
    * the remaining gap to a photoreal walkthrough — see docs/roadmap-parity.md.
    */
+  /** The default rig's sun and sky bounce, for the sun study to drive. */
+  private defaultSun: THREE.DirectionalLight | null = null
+  private defaultBounce: THREE.DirectionalLight | null = null
+
+  /**
+   * Point the default sun along a real solar direction.
+   *
+   * ── What it drives, and what it deliberately does not ────────────────────
+   * The direction and a plain intensity/colour ramp: low sun is warmer and
+   * dimmer, below the horizon is night. It does NOT recolour the sky or the
+   * environment — the study answers "where do the shadows fall at 4pm", and a
+   * full time-of-day sky is a different feature wearing the same slider.
+   *
+   * No-ops (returning false) when an authored light rig has replaced the
+   * default one: the author placed those lights on purpose, and a slider that
+   * silently rewrites an authored rig is the editor arguing with its user.
+   *
+   * `direction` is the unit vector FROM the scene TOWARD the sun, world
+   * space. The caller owns the compass convention; this owns the light.
+   */
+  setSunDirection(direction: { x: number; y: number; z: number }): boolean {
+    const sun = this.defaultSun
+    if (!sun || !sun.parent) return false
+
+    if (direction.y <= 0) {
+      // Night. The sun is off rather than repositioned below the floor, where
+      // it would light interiors from beneath — memorably wrong. The bounce
+      // stays faintly on so the model remains legible: this is a study, not a
+      // power cut.
+      sun.intensity = 0
+      if (this.defaultBounce) this.defaultBounce.intensity = 0.25
+      this.needsRender = true
+      return true
+    }
+
+    // Inside the shadow camera's reach (far = 60, box ±20), whatever the angle.
+    const DISTANCE = 30
+    sun.position.set(direction.x * DISTANCE, direction.y * DISTANCE, direction.z * DISTANCE)
+
+    // Low sun: dimmer and warmer. The ramp is perceptual, not radiometric —
+    // enough that 8am reads as morning next to noon, no more.
+    const height = Math.min(1, Math.max(0, direction.y))
+    sun.intensity = 2.6 * (0.3 + 0.7 * Math.min(1, height * 2.2))
+    sun.color.setHSL(0.084, 0.55, 0.62 + 0.28 * Math.min(1, height * 2))
+    if (this.defaultBounce) this.defaultBounce.intensity = 0.55
+
+    this.needsRender = true
+    return true
+  }
+
   private addDefaultRig(): void {
     // Warm, low-ish sun. Pure white from directly above is the giveaway look
     // of a default rig; real daylight arrives at an angle and has a colour.
@@ -219,6 +269,12 @@ export class SceneViewer {
     // rather than black. This is the cheap stand-in for sky illumination.
     const bounce = new THREE.DirectionalLight(0xbdd4ff, 0.55)
     bounce.position.set(-7, 4, -5)
+
+    // Kept as fields so the sun study can drive them. Assigned here rather
+    // than where they are declared, because this rig can be rebuilt — an
+    // authored light rig replaces it, and clearing one re-creates it.
+    this.defaultSun = sun
+    this.defaultBounce = bounce
 
     this.lightGroup.add(sun, bounce)
     this.applyRoomEnvironment()
