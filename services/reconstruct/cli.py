@@ -814,6 +814,27 @@ def reconstruct(
         # half of the work. Recorded rather than swallowed.
         model["clearance"] = {"error": f"{type(error).__name__}: {error}"}
 
+    # ---- Measured against the rulebook -------------------------------------
+    # Same shape as clearance and embedded for the same reason: clearance sat
+    # finished and unreachable for weeks because it lived behind a separate CLI
+    # command nobody ran. The default rulebook is a transcription of NBC 2016
+    # the architect must verify (data/rulebooks/); which book was used is
+    # recorded beside the findings, because a finding without its rulebook is
+    # a number without a unit.
+    try:
+        from solve import codecheck as cc
+
+        book = cc.load_rulebook(DEFAULT_RULEBOOK)
+        code_findings, code_coverage = cc.check(model, book)
+        model["codecheck"] = {
+            "rulebook": book.get("title"),
+            "summary": cc.summarise(code_findings, code_coverage, book),
+            "findings": [f.as_dict() for f in code_findings],
+            "coverage": code_coverage,
+        }
+    except Exception as error:  # pragma: no cover - never fail a build for this
+        model["codecheck"] = {"error": f"{type(error).__name__}: {error}"}
+
     (out / f"{source.stem}.building.json").write_text(
         json.dumps(model, indent=2), encoding="utf-8"
     )
@@ -956,6 +977,18 @@ def _print_build(model: dict) -> None:
                     print(f"        !! {issue.get('message', '')[:96]}")
         else:
             print("\nCLEARANCE  nothing to report")
+
+    code = model.get("codecheck") or {}
+    if code.get("error"):
+        print(f"\nCODE     not computed: {code['error']}")
+    elif code.get("summary"):
+        s = code["summary"]
+        print(f"\nCODE     {code.get('rulebook')}")
+        print(f"         {s['total']} findings across {s['checked']} checks; "
+              f"{s['skipped']} not measurable")
+        for finding in code.get("findings", [])[:6]:
+            where = finding.get("roomName") or "-"
+            print(f"      !  [{where[:22]:<22}] {finding.get('message', '')[:96]}")
 
     g = model["glb"]
     print(f"\nGLB      {g['path']}")
@@ -1136,6 +1169,50 @@ def clearance_report(model_path: str) -> dict:
     }
 
 
+def codecheck_report(model_path: str, rulebook_path: str) -> dict:
+    """
+    Measured against a rulebook the architect owns.
+
+    Findings carry a citation each; coverage carries everything that could NOT
+    be checked and why. See solve/codecheck.py for the boundary with clearance.
+    """
+    from solve import codecheck as cc
+
+    model = json.loads(Path(model_path).read_text(encoding="utf-8"))
+    book = cc.load_rulebook(rulebook_path)
+    findings, coverage = cc.check(model, book)
+    return {
+        "source": model.get("source"),
+        "rulebook": book.get("title"),
+        "summary": cc.summarise(findings, coverage, book),
+        "findings": [f.as_dict() for f in findings],
+        "coverage": coverage,
+    }
+
+
+def _print_codecheck(report: dict) -> None:
+    s = report["summary"]
+    print("")
+    print(f"CODE     {report['rulebook']}")
+    print(f"         {s['total']} findings across {s['checked']} checks; "
+          f"{s['skipped']} not measurable")
+    for finding in report["findings"][:20]:
+        where = finding["roomName"] or (
+            f"room {finding['room']}" if finding["room"] is not None else "-")
+        print(f"      !  [{where[:22]:<22}] {finding['message'][:96]}")
+        print(f"           {finding['cite']}")
+    if len(report["findings"]) > 20:
+        print(f"     ... {len(report['findings']) - 20} more")
+    skipped = [(row["rule"], skip) for row in report["coverage"]
+               for skip in row["skipped"]]
+    for rule, skip in skipped[:8]:
+        print(f"      ?  {rule}: {skip['subject']} — {skip['reason']}")
+    if len(skipped) > 8:
+        print(f"     ... {len(skipped) - 8} more unmeasured")
+    print("")
+    print(f"  {s['basis']}")
+
+
 def _print_clearance(report: dict) -> None:
     s = report["summary"]
     print("")
@@ -1226,6 +1303,10 @@ def _real_plan_titles(titles: list) -> list:
 
 #: The rate library, relative to the repo root.
 DEFAULT_RATES = Path(__file__).resolve().parents[2] / "data" / "rates" / "hyderabad-2026.csv"
+DEFAULT_RULEBOOK = (
+    Path(__file__).resolve().parents[2]
+    / "data" / "rulebooks" / "nbc-2016-residential.json"
+)
 
 #: Mirrored from `quantify.rates` rather than imported, so this CLI still starts
 #: when the rate library is absent — `survey` and `reconstruct` do not need it.
@@ -1410,6 +1491,14 @@ def main() -> int:
     C.add_argument("--model", required=True)
     C.add_argument("--json", dest="json_out", default=None)
 
+    K = sub.add_parser("codecheck",
+                       help="Measured against a rulebook. Citations, no verdict.")
+    K.add_argument("--model", required=True, help="A building.json from reconstruct.")
+    K.add_argument("--rulebook", default=str(DEFAULT_RULEBOOK),
+                   help="A rulebook JSON. The default is an NBC 2016 transcription "
+                        "the architect must verify.")
+    K.add_argument("--json", dest="json_out", default=None)
+
     Q = sub.add_parser("costing", help="A priced bill of quantities from a model.")
     Q.add_argument("--model", required=True, help="A building.json from reconstruct.")
     Q.add_argument("--rates", default=str(DEFAULT_RATES))
@@ -1522,6 +1611,13 @@ def main() -> int:
     if ns.command == "clearance":
         report = clearance_report(ns.model)
         _print_clearance(report)
+        if ns.json_out:
+            Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        return 0
+
+    if ns.command == "codecheck":
+        report = codecheck_report(ns.model, ns.rulebook)
+        _print_codecheck(report)
         if ns.json_out:
             Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
         return 0

@@ -357,8 +357,23 @@ they are what the plan drawing draws — so clearance filters to
 Closing that needs per-storey walls in the model, which is a real change, not a
 flag.
 
-Then sun path / shadow study (4–6 d) and code checks — min room, corridor,
-egress (8–12 d).
+~~Then sun path / shadow study (4–6 d)~~ ✅ **DONE**, `de93fcd` — studio
+SunPanel + `setSunDirection` on the viewer; NOAA-verified solar math; assumes
+top-of-plan = north (stated in the panel; per-scene north angle is the
+follow-up).
+
+~~and code checks — min room, corridor, egress (8–12 d).~~ ✅ **DONE**,
+`solve/codecheck.py` — the sibling `clearance.py`'s docstring reserved:
+rulebook-as-data (`data/rulebooks/nbc-2016-residential.json`, a citation per
+rule, the architect owns the file), measured facts with no verdict, coverage
+lists everything it could NOT check and why. Corridor width is measured by
+erosion-connectivity between the corridor's doors — the pinch you walk
+through, not the widest pocket an inscribed circle finds. Embedded in every
+`building.json` at build time (the clearance lesson: a report behind a
+separate CLI command is a finished producer with no consumer). Ventilation
+rule sits ready but skips loudly until the importer detects windows. Egress is
+reachability on the primary storey's door graph; stairs are not modelled, and
+a storey with no exterior door says so rather than guessing.
 
 ~~**Daylight factor** (6–8 d).~~ ✅ **DONE**, aalev-51, `4a8faec`.
 

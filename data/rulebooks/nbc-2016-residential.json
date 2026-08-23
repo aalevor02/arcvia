@@ -1,0 +1,117 @@
+{
+  "title": "NBC 2016 — residential dwellings (working transcription)",
+  "jurisdiction": "India. National code; local development-control rules prevail wherever they are stricter.",
+  "basis": "A working transcription made as a starting point, not a certification. The architect of record owns this file: verify every figure and citation against the published National Building Code of India 2016 and the local byelaws before relying on any of it. Where the code has sub-cases the importer cannot yet tell apart, this file applies the smallest figure in the ladder — the one that is never a false alarm — and says so in the rule's note.",
+  "rules": [
+    {
+      "id": "habitable-area",
+      "metric": "room-area",
+      "appliesTo": ["bedroom", "living", "dining", "study"],
+      "min": 9.5,
+      "unit": "m2",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — habitable rooms",
+      "note": "Where a dwelling has two habitable rooms the code lets the second be 7.5 m2. This file applies the single-room figure to every habitable room, which over-asks in that case — an architect reviewing the finding decides, not this check."
+    },
+    {
+      "id": "habitable-width",
+      "metric": "room-width",
+      "appliesTo": ["bedroom", "living", "dining", "study"],
+      "min": 2.4,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — habitable rooms",
+      "note": "Width here is the diameter of the largest circle the finished room can contain: an L-shaped room passes if its main body is wide enough."
+    },
+    {
+      "id": "kitchen-area",
+      "metric": "room-area",
+      "appliesTo": ["kitchen"],
+      "min": 4.5,
+      "unit": "m2",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — kitchen",
+      "note": "The code's ladder: 4.5 m2 with a separate store, 5.0 m2 with a separate dining space, 7.5 m2 where the kitchen is also the dining room. The importer cannot tell which case a plan is, so this file applies the 4.5 m2 floor."
+    },
+    {
+      "id": "kitchen-width",
+      "metric": "room-width",
+      "appliesTo": ["kitchen"],
+      "min": 1.8,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — kitchen"
+    },
+    {
+      "id": "sanitary-area",
+      "metric": "room-area",
+      "appliesTo": ["bathroom"],
+      "min": 1.1,
+      "unit": "m2",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — bathrooms and water-closets",
+      "note": "The code's ladder: WC alone 1.1 m2 (0.9 m wide), bathroom 1.8 m2 (1.2 m wide), combined 2.8 m2. The classifier labels all three 'bathroom', so this file applies the WC floor. Split this rule when the classifier can tell them apart."
+    },
+    {
+      "id": "sanitary-width",
+      "metric": "room-width",
+      "appliesTo": ["bathroom"],
+      "min": 0.9,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — bathrooms and water-closets",
+      "note": "The WC-alone floor, for the same reason as sanitary-area."
+    },
+    {
+      "id": "store-area",
+      "metric": "room-area",
+      "appliesTo": ["store"],
+      "min": 3.0,
+      "unit": "m2",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — store room"
+    },
+    {
+      "id": "corridor-width",
+      "metric": "corridor-width",
+      "appliesTo": ["circulation"],
+      "min": 0.9,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3 — internal passage within a dwelling",
+      "note": "0.9 m is the figure for a passage inside one dwelling. A common corridor serving more than one dwelling needs 1.0 m or more under Part 4 — raise this when the building is not a single house."
+    },
+    {
+      "id": "exit-door-width",
+      "metric": "exit-door-width",
+      "min": 0.9,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 4 — exit doorways",
+      "note": "Applied to every door with the outside, or an outdoor space, on one side."
+    },
+    {
+      "id": "internal-door-sanitary",
+      "metric": "internal-door-width",
+      "servesAny": ["bathroom", "store"],
+      "min": 0.7,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — doorway widths",
+      "note": "Doors serving bathrooms and stores may be narrower. Door rules are matched in file order and the first match wins, so this must stay above internal-door."
+    },
+    {
+      "id": "internal-door",
+      "metric": "internal-door-width",
+      "min": 0.75,
+      "unit": "m",
+      "cite": "NBC 2016 Vol. 1, Part 3, cl. 12 — doorway widths"
+    },
+    {
+      "id": "egress-reach",
+      "metric": "egress-reach",
+      "appliesTo": ["bedroom", "living", "dining", "kitchen", "study"],
+      "cite": "NBC 2016 Vol. 1, Part 4 — means of egress",
+      "note": "Reachability only: every room of these kinds must reach a door to the outside through door openings on the primary storey. Doors into outdoor spaces count as exits; stairs are not modelled, so a storey with no exterior door reports that fact rather than guessing."
+    },
+    {
+      "id": "ventilation",
+      "metric": "ventilation-ratio",
+      "appliesTo": ["bedroom", "living", "dining", "study", "kitchen"],
+      "min": 0.1,
+      "unit": "ratio",
+      "cite": "NBC 2016 Vol. 1, Part 3 — openings for light and ventilation, one-tenth of floor area",
+      "note": "Counts windows and doors to the open air, using width x height. The importer does not yet detect windows, so on current models every room reports as unmeasured rather than passing silently. The rule sits ready for the day the importer does."
+    }
+  ]
+}
