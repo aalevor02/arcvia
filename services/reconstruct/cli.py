@@ -1500,6 +1500,34 @@ def main() -> int:
                    help="Metres across the image, if the drawing prints none.")
     R.add_argument("--no-perimeter", action="store_true")
 
+    # A client's presentation PDF, not a single plan image. Two phases so the
+    # scale the user confirms is not billed twice — survey reads, build models.
+    DK = sub.add_parser("deck", help="A presentation PDF -> a GLB per floor plan.")
+    dk_sub = DK.add_subparsers(dest="deck_mode", required=True)
+
+    dks = dk_sub.add_parser("survey", help="What plans are inside, and their scale.")
+    dks.add_argument("--input", required=True, help="The PDF.")
+    dks.add_argument("--out", required=True, help="Where preview images are written.")
+    dks.add_argument("--detector", default=None,
+                     help="Where services/floorplan-ai is listening.")
+    dks.add_argument("--long-edge", type=int, default=2400)
+    dks.add_argument("--json", dest="json_out", default=None,
+                     help="Write the survey JSON here as well as stdout.")
+
+    dkb = dk_sub.add_parser("build", help="Reconstruct one chosen plan sheet.")
+    dkb.add_argument("--input", required=True, help="The PDF.")
+    dkb.add_argument("--out", required=True)
+    dkb.add_argument("--page", type=int, required=True,
+                     help="The sheet's page, as survey reported it.")
+    dkb.add_argument("--index", type=int, default=0,
+                     help="Which image on that page (survey reports it).")
+    dkb.add_argument("--scale", type=float, default=None,
+                     help="Metres across the image, from the confirmed dimension.")
+    dkb.add_argument("--height", type=float, default=DEFAULT_WALL_HEIGHT)
+    dkb.add_argument("--detector", default=None)
+    dkb.add_argument("--no-perimeter", action="store_true")
+    dkb.add_argument("--long-edge", type=int, default=2400)
+
     L = sub.add_parser("layers", help="Which layers hold walls, with evidence.")
     L.add_argument("--input", required=True)
     L.add_argument("--work", default="A:/tmp/reconstruct")
@@ -1584,6 +1612,71 @@ def main() -> int:
               f"median thickness {model['walls']['medianThickness']} m")
         print(f"ROOMS    {model['rooms']['count']} "
               f"({model['rooms']['fromWallGraph']} from the wall graph alone)")
+        v = model["verify"]
+        print(f"VERIFY   {'PASS' if v.get('ok') else 'BLOCKED'}  "
+              f"({v.get('blocking', 0)} blocking, {v.get('warnings', 0)} warnings)")
+        print(f"GLB      {model['glb']['path']}")
+        print(f"         {model['glb']['triangles']:,} triangles")
+        print()
+        return
+
+    if ns.command == "deck":
+        from ingest.deck_build import survey_deck, build_sheet
+
+        if ns.deck_mode == "survey":
+            result = survey_deck(
+                ns.input, ns.out, detector_url=ns.detector, long_edge=ns.long_edge
+            )
+            if ns.json_out:
+                Path(ns.json_out).parent.mkdir(parents=True, exist_ok=True)
+                Path(ns.json_out).write_text(
+                    json.dumps(result, indent=2), encoding="utf-8"
+                )
+            print()
+            print(f"DECK     {result['pages']} pages, {result['plansFound']} floor "
+                  f"plan(s) found")
+            for sheet in result["sheets"]:
+                trust = "trustworthy" if sheet["scale"]["trustworthy"] else "UNCONFIRMED"
+                print(f"  [{sheet['page']}.{sheet['index']}] {sheet['stem']:16} "
+                      f"{sheet['rooms']} named room(s), scale {trust}"
+                      f"  suggest {sheet['suggestedScale']} m across")
+                anchor = next(
+                    (c for c in sheet["confirmDimensions"] if c["reliableAnchor"]), None
+                )
+                if anchor:
+                    print(f"        confirm e.g. {anchor['room']} "
+                          f"{anchor['longSideMetres']} m -> "
+                          f"--scale {anchor['impliedScale']}")
+            if result["otherSheets"]:
+                print(f"  ({len(result['otherSheets'])} non-plan sheet(s): "
+                      f"renders, elevations, board)")
+            print()
+            return
+
+        model = build_sheet(
+            ns.input, ns.page, ns.index, ns.out,
+            height=ns.height,
+            detector_url=ns.detector,
+            unit_scale=ns.scale,
+            with_perimeter=not ns.no_perimeter,
+            long_edge=ns.long_edge,
+        )
+        stem = model["sheet"]["stem"]
+        (Path(ns.out) / f"{stem}.building.json").write_text(
+            json.dumps(model, indent=2), encoding="utf-8"
+        )
+        scale = model["scale"]
+        print()
+        print(f"SHEET    {stem}  (page {ns.page}.{ns.index})")
+        print(f"SCALE    {scale['metresPerUnit']:.2f} m across the image, "
+              f"{scale['samples']} sample(s)"
+              + (f", {scale['spread']:.0%} spread" if scale.get("spread") is not None
+                 else ""))
+        if scale.get("warning"):
+            print(f"         !! {scale['warning']}")
+        print(f"WALLS    {model['walls']['total']}, "
+              f"median thickness {model['walls']['medianThickness']} m")
+        print(f"ROOMS    {model['rooms']['count']}")
         v = model["verify"]
         print(f"VERIFY   {'PASS' if v.get('ok') else 'BLOCKED'}  "
               f"({v.get('blocking', 0)} blocking, {v.get('warnings', 0)} warnings)")
