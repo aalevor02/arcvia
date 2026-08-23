@@ -117,6 +117,36 @@ decks clients send, synthetic-domain fine-tuning is the credible route to the
 90%+ wall completeness the heuristic cannot reach — because it learns the one
 thing the heuristic never can: what is a wall and what is furniture.
 
+## P0 result (2026-08-24) — DONE, verdict: proceed
+
+Ran the CubiCasa5K pretrained `hg_furukawa_original` model (209 MB, the authors'
+published weights) **zero-shot** on the Avarana ground + basement rasters. Rig at
+`A:\Tools\FloorplanModel` (isolated torch venv, kept out of the serving envs;
+`p0_infer.py`). Notes: the pinned `torch==1.0.0` is dead on 3.12 — modern torch
+(CPU) runs the net fine since it's pure `torch.nn`, no torchvision; skip
+`init_weights()` (loads a training-only ImageNet backbone by relative path, and
+we overwrite the whole state dict anyway).
+
+**Transfer is partial but real, and already beats the heuristic on walls:**
+- The model traces the building envelope and the major partitions across BOTH
+  plans — visibly more complete than the heuristic's 13 sparse walls. Basement
+  came out cleaner than ground.
+- **Bonus capability the heuristic entirely lacks:** it detected Window, Door,
+  Closet, Toilet, Sink, Bathtub, Fire Place as icons — the fixtures that furnish
+  a plan.
+- **Failure mode is exactly the predicted one:** false positives on render-ONLY
+  content a clean-plan model never trained on — it paints watercolour trees and
+  some furniture (a bed) as "wall". Modest, and precisely what fine-tuning on
+  synthetic rendered plans removes (teach it a watercolour tree is Outdoor).
+
+**Conclusion:** the segmentation approach is validated. Even with zero adaptation
+a clean-plan model is already the better wall detector here AND adds fixtures. The
+one gap (render-domain false positives) is the exact thing the synthetic-data
+lever (P1) is for. Green-light P1/P2. Decision on model family settled too: this
+multi-task room+icon+heatmap net is the right shape; fine-tune it (or a compact
+equivalent) rather than inventing one. Overlays: `p0_ground_walls.png`,
+`p0_basement_walls.png` in the session scratchpad.
+
 ## Boundaries / coordination
 
 Detector + engine geometry = this session's lane (floorplan-ai, reconstruct). The
