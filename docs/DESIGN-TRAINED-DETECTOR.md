@@ -182,10 +182,34 @@ rotated+skewed sample, walls/rooms/fixtures all still register. 150-sample batch
 model must now learn what a wall IS across that whole space, not our one renderer's
 wall. Grid: `synth_dr_grid.png`.
 
-**The one remaining P1 step before training:** mix a handful of REAL decks
+~~**The one remaining P1 step before training:** mix a handful of REAL decks
 (Avarana, Casa Altinho) into the fine-tune set and hold others out for honest eval
 — synthetic teaches the invariants, the real decks anchor the exact target domain
-and measure transfer. That plus P2 (the cloud-GPU train) is what's left.
+and measure transfer. That plus P2 (the cloud-GPU train) is what's left.~~
+
+## P1 CLOSED, P2 turnkey (2026-08-24, second session)
+
+The "mix real decks into the fine-tune set" wording above was refined on
+contact: real decks have no masks, so they are the EVAL, not training
+material — `A:\Tools\FloorplanModel\realdecks\` holds the owner's own uploaded
+plan with their five annotated detection failures as the acceptance test
+(`*.notes.md`), plus the client deck PDF.
+
+`train.py` is the whole P2 pipeline in one file, smoke-tested end to end on
+CPU: fine-tunes the pretrained checkpoint on generator-made samples (data is
+GENERATED on the training box — pre-rendering 6,000 samples measured 19 GB;
+the generator is 500 lines at ~100 ms/sample, so it travels instead), scores
+fixed held-out synthetic seeds, renders real-deck evidence overlays every
+eval, exports ONNX — and the serving venv's onnxruntime was proven to consume
+that ONNX at dynamic sizes. `RUNBOOK-P2.md` has the rental spec ($2–10
+all-in), upload list, and acceptance criteria. **P2 is one user go-ahead and
+one command.**
+
+Interim relief shipped meanwhile: the vision ADJUDICATOR
+(`services/floorplan-ai/adjudicate.py`, c06c881) second-guesses heuristic
+proposals with a hosted VLM — on the owner's plan it already removes the
+bed/plant false walls and flags railing/boundary. It stays in front of
+whichever backend serves, so P3 does not obsolete it.
 
 ## Downstream unlocks the segment backend enables (studio session, 2026-08-24)
 
