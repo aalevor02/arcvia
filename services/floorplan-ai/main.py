@@ -35,6 +35,7 @@ from typing import Literal, NamedTuple
 import cv2
 import numpy as np
 
+import adjudicate as adjudicate_pass
 import deck
 import labels as text_labels
 import pdfbackend
@@ -149,6 +150,10 @@ class DetectionResult(BaseModel):
     scale: PlanScale | None
     # Surfaced so the UI can say "check these" instead of implying certainty.
     low_confidence: bool
+    # What the adjudication pass did, in words a reviewer can act on —
+    # "dropped 4 proposed wall(s) — bed (85%)". Empty without an adjudicator,
+    # so existing consumers see the shape they always saw.
+    notes: list[str] = []
 
 
 # --------------------------------------------------------------------------
@@ -169,6 +174,9 @@ def health() -> dict:
         # an extra round trip. Anything other than "permissive" here means a
         # human deliberately selected it — see requirements-dev.txt.
         "pdf_backend": pdfbackend.backend_name(),
+        # The vision model that second-guesses proposals, or null when none is
+        # configured. Named so a bug report says which model judged the plan.
+        "adjudicator": adjudicate_pass.name(),
     }
 
 
@@ -191,6 +199,16 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
     else:
         walls, objects, rooms, scale = detect_heuristic(image)
 
+    # A vision model second-guesses the proposals against the picture itself —
+    # the heuristic keeps deciding WHERE, the model only ever decides WHAT.
+    # Opt-in by key, fail-open by contract: without a key, or on any network
+    # or parsing failure, the result is exactly what the heuristic said.
+    notes: list[str] = []
+    if adjudicate_pass.available():
+        walls, objects, rooms, notes = adjudicate_pass.adjudicate(
+            image, walls, objects, rooms, Detection,
+        )
+
     confidences = [w.confidence for w in walls] + [o.confidence for o in objects]
     mean_confidence = float(np.mean(confidences)) if confidences else 0.0
 
@@ -202,6 +220,7 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
         objects=objects,
         rooms=rooms,
         scale=scale,
+        notes=notes,
         # No enclosed rooms is the signal that matters. A detector pointed at a
         # brochure returns plenty of confident straight lines and not one room,
         # so wall count and mean confidence both read as success on exactly the
