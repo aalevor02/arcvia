@@ -78,6 +78,17 @@ const TERMS = {
   'ceiling-light': 'ceiling light fixture',
   pendant: 'pendant lamp hanging light',
   'wall-light': 'wall sconce light',
+  // ── Outdoor slots the hub cannot serve ────────────────────────────────────
+  // Parasol and pergola: the hub simply holds none. The trees: it holds only
+  // photogrammetry scans, and all three sizes were measured to be
+  // unconditionable (349k-triangle floor, 24.5 GB peak, 24-53 MB outputs).
+  // What these searches want is the thing scans are not: a HAND-MODELLED
+  // tree, built with a polygon budget by a person, which is exactly the kind
+  // of asset Sketchfab's 1k-60k face band is full of.
+  parasol: 'patio umbrella parasol',
+  pergola: 'garden pergola wooden',
+  tree: 'realistic tree',
+  'tree-small': 'small young tree',
 }
 
 /**
@@ -144,6 +155,11 @@ const BUDGET = {
   'dining-chair': 3000,
   bedside: 2000,
   'side-table': 2000,
+  parasol: 2500,
+  pergola: 2500,
+  // Foliage needs the headroom — a tree at 5k triangles is a lollipop.
+  tree: 9000,
+  'tree-small': 7000,
 }
 
 function scoreCandidate(model, term) {

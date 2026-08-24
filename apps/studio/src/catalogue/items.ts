@@ -900,6 +900,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 4.5, depth: 4.5, height: 6 },
     shape: 'tree',
     tone: 'plant',
+    model: {
+      url: '/models/tree.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Daniel',
+      source:
+        'https://sketchfab.com/3d-models/realistic-tree-d989c0f801d847b9a74992ec4ddcfdfc',
+      triangles: 9000,
+      yaw: 180,
+    },
   },
   {
     id: 'tree-small',
@@ -980,6 +989,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 2.7, depth: 2.7, height: 2.4 },
     shape: 'parasol',
     tone: 'fabric',
+    model: {
+      url: '/models/parasol.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'k3v1nc0',
+      source:
+        'https://sketchfab.com/3d-models/floating-parasol-sunshade-patio-umbrella-280a65bca20b425e96617b0dd78cce21',
+      triangles: 2500,
+    },
   },
   {
     id: 'pergola',
@@ -990,6 +1007,14 @@ export const CATALOGUE: CatalogueItem[] = [
     shape: 'pergola',
     tone: 'wood',
     note: 'Slatted, so it casts the striped shade that is the point of building one.',
+    model: {
+      url: '/models/pergola.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'DELTAHEDRA',
+      source:
+        'https://sketchfab.com/3d-models/wooden-garden-pergola-93f03897386d48f798f88e529555f665',
+      triangles: 6935,
+    },
   },
   {
     id: 'fence',

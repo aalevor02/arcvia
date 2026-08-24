@@ -155,14 +155,17 @@ const MINIMUM_SCORE = 40
  * land — 7.8M triangles refused to decimate below 349k (a 53 MB entry) and
  * the 17.4M pine crashed the export. Measured, not predicted.
  *
- * The jacaranda is the one full tree in the hub at an order of magnitude
- * fewer triangles (312k), and it is the right tree for this product's market
- * besides. `tree-small` is pinned to nothing on purpose: every candidate is
- * either a 400k+ scan or stylised low-poly, so the parametric stand-in is the
- * honest option until a better source exists.
+ * Both tree slots are pinned to nothing, and that is a MEASURED verdict, not
+ * a shrug. Every full tree in the hub is photogrammetry, and all three sizes
+ * were tried: the 7.8M-tri fir stalled at 349k (53 MB out), the 17.4M pine
+ * committed 24.5 GB of RAM and had to be killed, and the jacaranda — whose
+ * manifest polycount said 312k — imported at 3.86M and stalled at 193k
+ * (24.5 MB). Scanned foliage does not decimate; it shreds. The route to a
+ * real tree is a hand-modelled one (see batch.mjs's tree terms), and until
+ * one lands the parametric stand-in is the honest option.
  */
 const PINNED = {
-  tree: 'polyhaven:jacaranda_tree',
+  tree: null,
   'tree-small': null,
 }
 

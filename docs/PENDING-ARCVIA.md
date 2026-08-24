@@ -258,6 +258,16 @@ renderer**, which is what the roadmap actually asked for.
 | surfaces | 8 keys, live in the editor (`e501c20`) |
 | environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
 
+**2026-08-24 — every outdoor slot that can be filled, is; the tree verdict
+is a measured negative worth keeping.** Hub photogrammetry trees are
+unconditionable as a class: fir 7.8M tris → stalled at 349k (53 MB), pine
+17.4M → 24.5 GB RAM, killed; jacaranda (manifest said 312k) imported at
+3.86M → stalled at 193k (24.5 MB). Scanned foliage shreds, it does not
+decimate. The slots filled instead from Sketchfab hand-modelled stock
+(batch.mjs gained the terms): parasol, pergola, and a 19.9k-face tree —
+all CC-BY, credits automatic. `tree-small` stays parametric: the search's
+best candidate was literally a sea monster, and the threshold held.
+
 **2026-08-24 — the whole hub is browsable from inside the editor.**
 `GET /assets/hub` (search/stats, authed) + `/hub/preview/*` and
 `/hub/conditioned/*` (files, unauthenticated like `/uploads`) in
