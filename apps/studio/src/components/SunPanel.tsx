@@ -6,6 +6,9 @@ import { siteLocalToUtc, solarPosition, sunDirection } from '../lib/sun'
 export interface Site {
   latitude: number
   longitude: number
+  /** Compass bearing the top of the plan faces, degrees clockwise from
+   *  north. Absent means 0 — the convention of nearly every drawing. */
+  northDeg?: number
 }
 
 interface Props {
@@ -37,6 +40,7 @@ export default function SunPanel({ viewer, site, onSiteChange }: Props) {
   const [enabled, setEnabled] = useState(false)
   const [latitude, setLatitude] = useState(site?.latitude ?? DEFAULT_SITE.latitude)
   const [longitude, setLongitude] = useState(site?.longitude ?? DEFAULT_SITE.longitude)
+  const [northDeg, setNorthDeg] = useState(site?.northDeg ?? 0)
   // Month and day only — a shadow study cares about the season, and a year
   // selector implies the answer changes year to year, which it does not.
   const [month, setMonth] = useState(new Date().getMonth() + 1)
@@ -48,6 +52,7 @@ export default function SunPanel({ viewer, site, onSiteChange }: Props) {
     if (site) {
       setLatitude(site.latitude)
       setLongitude(site.longitude)
+      setNorthDeg(site.northDeg ?? 0)
     }
   }, [site])
 
@@ -66,17 +71,18 @@ export default function SunPanel({ viewer, site, onSiteChange }: Props) {
       viewer.setSunDirection({ x: 0.51, y: 0.77, z: 0.34 })
       return
     }
-    viewer.setSunDirection(sunDirection(position))
-  }, [viewer, enabled, position.elevation, position.azimuth])
+    viewer.setSunDirection(sunDirection(position, northDeg))
+  }, [viewer, enabled, position.elevation, position.azimuth, northDeg])
 
-  const commitSite = () => onSiteChange({ latitude, longitude })
+  const commitSite = () => onSiteChange({ latitude, longitude, northDeg })
 
   return (
     <section>
       <span className="eyebrow">Sun study</span>
       <p className="note">
-        Real shadows for a date and time. Assumes the top of your plan faces
-        north; times are solar time at the site.
+        Real shadows for a date and time. The top of your plan is assumed to
+        face north — if the drawing is rotated, set the bearing it faces
+        below. Times are solar time at the site.
       </p>
 
       <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
@@ -109,6 +115,20 @@ export default function SunPanel({ viewer, site, onSiteChange }: Props) {
                 step="0.0001"
                 value={longitude}
                 onChange={(e) => setLongitude(Number(e.target.value))}
+                onBlur={commitSite}
+              />
+            </label>
+            <label style={{ fontSize: 11.5 }}>
+              Plan top faces (°)
+              <input
+                type="number"
+                min={0}
+                max={359}
+                step={1}
+                value={northDeg}
+                onChange={(e) =>
+                  setNorthDeg(((Number(e.target.value) % 360) + 360) % 360)
+                }
                 onBlur={commitSite}
               />
             </label>

@@ -126,9 +126,20 @@ export function siteLocalToUtc(
  *
  * Plan +y is world -z, so north is -z and east is +x.
  */
-export function sunDirection(position: SunPosition): { x: number; y: number; z: number } {
+export function sunDirection(
+  position: SunPosition,
+  /**
+   * The compass bearing the TOP OF THE PLAN actually faces, degrees clockwise
+   * from north. Zero is the near-universal drawing convention and the default;
+   * a plan whose top faces east passes 90 and its shadows swing to match.
+   * Subtracted from the azimuth because the world's -Z axis IS the plan's top:
+   * rotating the site under the sun and rotating the sun over the site are the
+   * same thing, and the sun is the one we can move.
+   */
+  northDeg = 0,
+): { x: number; y: number; z: number } {
   const elevation = position.elevation * RAD
-  const azimuth = position.azimuth * RAD
+  const azimuth = (position.azimuth - northDeg) * RAD
   return {
     x: Math.sin(azimuth) * Math.cos(elevation),
     y: Math.sin(elevation),

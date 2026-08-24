@@ -94,5 +94,27 @@ const near = (value: number, target: number, tolerance: number) =>
   check('north sun points from -z', north.z < -0.9, north.z.toFixed(2))
 }
 
+// ---- A rotated plan --------------------------------------------------------------
+{
+  // The per-scene north angle: the bearing the plan's TOP actually faces.
+  // Omitting it must change nothing — every stored site predates the field.
+  const flat = sunDirection({ elevation: 30, azimuth: 120 })
+  const zero = sunDirection({ elevation: 30, azimuth: 120 }, 0)
+  check('northDeg 0 is the old answer exactly',
+    flat.x === zero.x && flat.y === zero.y && flat.z === zero.z)
+
+  // A plan whose top faces EAST (90): the eastern sun stands at the plan's
+  // top, which is world -z.
+  const rotated = sunDirection({ elevation: 0, azimuth: 90 }, 90)
+  check('east sun tops a plan facing east',
+    rotated.z < -0.99 && near(rotated.x, 0, 0.01), rotated.z.toFixed(2))
+
+  // A plan drawn upside down (180): the north sun appears from +z, and the
+  // elevation is untouched — rotation is about the vertical axis only.
+  const flipped = sunDirection({ elevation: 45, azimuth: 0 }, 180)
+  check('flipped plan flips the bearing, not the height',
+    flipped.z > 0.6 && near(flipped.y, Math.SQRT1_2, 0.01))
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
