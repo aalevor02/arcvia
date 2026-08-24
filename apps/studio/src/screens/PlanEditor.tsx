@@ -53,7 +53,8 @@ import {
   writeUnitPreference,
   type UnitSystem,
 } from '../lib/format'
-import { detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
+import { cadModel, detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
+import { furnishFromCad } from '../plan/cadFurnish'
 import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
@@ -756,9 +757,23 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         <ImportPanel
           kind={start}
           onDismiss={() => setNotice(false)}
-          onLanded={(modelUrl, summary: CadSummary | null) => {
+          onLanded={(modelUrl, summary: CadSummary | null, modelJsonUrl?: string | null) => {
             setNotice(false)
             void updateScene(sceneId, { modelUrl }).catch(() => {})
+
+            // The drawing's own furniture, through the same review the raster
+            // path uses. The engine classified every block to a catalogue item
+            // while it built the model, so proposing costs one JSON fetch —
+            // and a reconstruction whose JSON is missing simply proposes
+            // nothing, exactly like a drawing with no blocks.
+            if (modelJsonUrl) {
+              void cadModel(modelJsonUrl).then((model) => {
+                if (!model) return
+                const pieces = furnishFromCad(model)
+                if (pieces.length > 0) setFurniture(pieces)
+              })
+            }
+
             if (summary && (summary.storeys ?? 0) > 1) {
               // A two-storey villa reported with one storey's room count reads
               // as half the building going missing.
@@ -771,7 +786,13 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
               setImportSummary(
                 `Reconstructed: ${summary.rooms ?? 0} rooms (${summary.named ?? 0} named), ` +
                   `${summary.walls ?? 0} walls, ${summary.openings ?? 0} openings` +
-                  (summary.unit ? ` — unit: ${summary.unit}` : '') + '.',
+                  (summary.unit ? ` — unit: ${summary.unit}` : '') + '.' +
+                  // The review itself lives in the 2D sidebar, and the import
+                  // has just switched to 3D — without this line the proposals
+                  // sit unseen behind a view the user has no reason to leave.
+                  (summary.fixtures
+                    ? ` ${summary.fixtures} furniture placements read from the drawing — switch to 2D to review them.`
+                    : ''),
               )
             }
             setMode('3d')

@@ -358,7 +358,7 @@ async function runJob(job) {
       // A deck sheet is a CAD-class job for every purpose this queue has —
       // lane, tariff, refunds, restart handling — so it shares the preset and
       // only the engine entry point differs. spec.kind is that dispatch.
-      const { model, glbPath, plan } =
+      const { model, modelPath, glbPath, plan } =
         job.spec.kind === 'deck'
           ? await engine.deckBuild({
               inputPath: job.spec.inputPath,
@@ -398,12 +398,21 @@ async function runJob(job) {
 
       const outputUrl = glbPath ? await publish(glbPath, job) : null
       const planUrl = plan ? await publish(plan, job).catch(() => null) : null
+      // The model JSON rides along because the GLB alone is a picture: the
+      // fixture placements inside it — positions, rotations, catalogue item
+      // ids the classifier already resolved — are what lets the studio offer
+      // "furnish this building" instead of an empty plan beside a model.
+      // Best-effort like the plan: a reconstruction without its JSON is
+      // degraded, not failed.
+      const modelJsonUrl = modelPath ? await publish(modelPath, job).catch(() => null) : null
       await finish('done', {
         progress: 100,
         outputUrl,
         planUrl,
+        modelJsonUrl,
         markers: {
           device: 'cpu',
+          fixtures: model.elements?.fixtures?.length ?? 0,
           rooms: model.rooms?.count ?? 0,
           named: model.rooms?.named ?? 0,
           walls: model.walls?.total ?? 0,
@@ -620,6 +629,7 @@ async function publish(outputPath, job) {
     '.glb': 'model/gltf-binary',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.json': 'application/json',
   }
   const contentType = BY_EXTENSION[extname(outputPath)] ?? 'image/png'
 

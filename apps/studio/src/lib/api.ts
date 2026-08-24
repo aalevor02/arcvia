@@ -415,6 +415,8 @@ export interface CadSummary {
   named?: number
   walls?: number
   openings?: number
+  /** Block placements the engine classified to catalogue items. */
+  fixtures?: number
   unit?: string
   layers?: string[]
   /** Present when the sheet drew several floors of ONE building. */
@@ -430,9 +432,28 @@ export interface CadJob {
   progress: number
   outputUrl: string | null
   planUrl: string | null
+  /** The building.json behind the GLB — fixture placements included. */
+  modelJsonUrl: string | null
   error: string | null
   summary: CadSummary | null
   refunded: number
+}
+
+/**
+ * Fetch a reconstruction's building.json.
+ *
+ * A plain unauthenticated fetch, exactly like the GLB itself: the URL is
+ * content-addressed storage, and it is fetched by URL rather than through
+ * `request()` because it lives beside the model, not behind the JSON API.
+ */
+export async function cadModel(url: string): Promise<import('../plan/cadFurnish').CadModel | null> {
+  try {
+    const response = await fetch(`${apiBase}${url}`)
+    if (!response.ok) return null
+    return (await response.json()) as import('../plan/cadFurnish').CadModel
+  } catch {
+    return null
+  }
 }
 
 export const submitCadJob = (key: string) =>

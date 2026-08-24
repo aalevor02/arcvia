@@ -388,6 +388,10 @@ export async function registerCadRoutes(app) {
       progress: job.progress,
       outputUrl: job.outputUrl,
       planUrl: job.planUrl ?? null,
+      // The building.json behind the GLB — fixture placements included, which
+      // is what the studio furnishes from. Null on jobs from before it was
+      // published, and the studio treats that as "nothing to propose".
+      modelJsonUrl: job.modelJsonUrl ?? null,
       error: job.error,
       // The markers carry what the engine found — rooms, named rooms, walls,
       // openings, the unit it settled on and the layers it used. That is what a

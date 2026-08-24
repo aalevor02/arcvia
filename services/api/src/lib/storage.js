@@ -64,6 +64,11 @@ const ALLOWED = new Map([
   // ATTACHMENT, never inline — an SVG can carry script, and these URLs are
   // unauthenticated and same-origin with the API. See uploads.js's disposition.
   ['image/svg+xml', '.svg'],
+  // The reconstruction engine's building.json — walls, rooms and fixture
+  // placements the studio reads back to furnish the plan. Server-side puts
+  // only in practice: user uploads are separately gated by magic-byte
+  // sniffing, which recognises no JSON.
+  ['application/json', '.json'],
 ])
 
 export const allowedTypes = () => [...ALLOWED.keys()]

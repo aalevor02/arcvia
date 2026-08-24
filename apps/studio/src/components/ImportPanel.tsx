@@ -16,8 +16,12 @@ import {
 interface Props {
   /** Which door the user came in through. */
   kind: 'model' | 'cad'
-  /** Called with the stored model path once there is a model to show. */
-  onLanded(modelUrl: string, summary: CadSummary | null): void
+  /**
+   * Called with the stored model path once there is a model to show.
+   * `modelJsonUrl` is the reconstruction's building.json when the engine
+   * produced one — the fixture placements the editor can furnish from.
+   */
+  onLanded(modelUrl: string, summary: CadSummary | null, modelJsonUrl?: string | null): void
   onDismiss(): void
 }
 
@@ -70,7 +74,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         const job = await cadJob(jobId)
         if (job.status === 'done' && job.outputUrl) {
           if (pollRef.current) clearInterval(pollRef.current)
-          onLanded(job.outputUrl, job.summary)
+          onLanded(job.outputUrl, job.summary, job.modelJsonUrl)
           return
         }
         if (job.status === 'failed' || job.status === 'cancelled') {

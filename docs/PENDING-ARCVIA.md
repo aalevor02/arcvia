@@ -258,6 +258,22 @@ renderer**, which is what the roadmap actually asked for.
 | surfaces | 8 keys, live in the editor (`e501c20`) |
 | environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
 
+**2026-08-24 — a CAD import furnishes itself.** The engine always knew where
+the furniture was (`kernel.furniture`: exact block positions, rotations, the
+four-signal classifier resolving to catalogue item ids); nothing carried it
+to the editor. Now: the queue publishes `building.json` beside the GLB
+(`modelJsonUrl` on `/cad/jobs/:id`, `fixtures` count in the summary), and
+`plan/cadFurnish.ts` converts `elements.fixtures` into the SAME `Proposal[]`
+/ FurnitureReview flow the raster path uses — one review surface, one accept
+path, one credit trail. Coordinates are the identity by contract (sheet
+frame, already origin-shifted; verified walls 90.6–119.2 vs fixtures
+91.5–119.8 on the villa — do NOT re-transform). In-wall items (doors,
+windows) are filtered: the villa proposed eight door leaves standing in
+rooms before that filter existed. Live E2E: villa DXF → job →
+modelJsonUrl → 55 fixtures, 42 classified; studio proposes 18 floor pieces
+in 4 rooms. 22 assertions in `test/cadFurnish.test.ts`. Storey 0 only for
+now (`furnishFromCad({storey})` exists; multi-floor plan wiring is open).
+
 **2026-08-24 — every outdoor slot that can be filled, is; the tree verdict
 is a measured negative worth keeping.** Hub photogrammetry trees are
 unconditionable as a class: fir 7.8M tris → stalled at 349k (53 MB), pine
