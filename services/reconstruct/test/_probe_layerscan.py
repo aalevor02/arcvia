@@ -59,14 +59,13 @@ def within_frame(bbox):
                 and min(f.ay, f.by) >= y0 - 1 and max(f.ay, f.by) <= y1 + 1):
             by_layer.setdefault(f.layer, []).append(f)
     labels = [l for l in all_labels if x0 <= l.x <= x1 and y0 <= l.y <= y1]
-    blocks = []
-    for p in placed:
-        px = (p["position"]["x"] - ox) * scale
-        py = (p["position"]["y"] - oy) * scale
-        if x0 <= px <= x1 and y0 <= py <= y1:
-            q = dict(p)
-            q["position"] = {"x": px, "y": py}
-            blocks.append(q)
+    # `kernel.furniture` already origin-shifts and scales its positions —
+    # re-applying the transform here displaced every block out of its frame
+    # and silently zeroed the openings term of every grade. Use them as-is.
+    blocks = [
+        p for p in placed
+        if x0 <= p["position"]["x"] <= x1 and y0 <= p["position"]["y"] <= y1
+    ]
     return by_layer, labels, blocks
 
 

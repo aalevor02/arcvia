@@ -308,21 +308,8 @@ def reconstruct(
                 f"{len(all_walls)} walls) and ignoring {len(loose) - 1} other(s)"
             )
 
-    if frames:
-        picked = frames[min(frame_index, len(frames) - 1)]
-        walls = [all_walls[i] for i in picked.wall_indices]
-        x0, y0, x1, y1 = picked.bbox
-    else:
-        picked = None
-        walls = all_walls
-        xs = [c for w in walls for c in (w.ax, w.bx)] or [0]
-        ys = [c for w in walls for c in (w.ay, w.by)] or [0]
-        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
-        framing_note = (
-            f"no frames at all; building the WHOLE sheet as one drawing "
-            f"({len(all_walls)} walls)"
-        )
-
+    # The pick itself happens BELOW, after the ranking pass — which needs the
+    # titles and labels read first. Nothing between here and there consumes it.
     doc, _auditor = blk.open_dxf(str(dxf_path))
 
     # ---- What the drawing calls each frame ---------------------------------
@@ -348,48 +335,20 @@ def reconstruct(
         if named:
             frame.title = named[0].text
 
-    # ---- Are any of these storeys of one building? -------------------------
-    # Reported, not acted on. `storey0` is still hardcoded downstream, so this
-    # does not yet change what gets built — but the question is now ANSWERED and
-    # recorded, and a sheet holding one building with two floors no longer looks
-    # identical to a sheet holding two buildings.
-    from solve.storeys import register_storeys
-
-    storeys = register_storeys(frames, rise=height + 0.3)
-
-    # ── Frame selection: TRIED, MEASURED, AND REVERTED ──────────────────────
-    # The obvious next step, now that storeys are named, is to default to the
-    # GROUND floor rather than to `frames[0]` — which is whichever cluster
-    # carries the most wall segments, a guess on a sheet with 37 drawings.
-    # It is a better reason. It produces a worse building.
-    #
-    # Measured on the villa. Switching the default from frame 0 ('Lower Ground
-    # Floor Plan') to frame 1 ('Ground Floor Plan') moves the per-frame layer
-    # scan onto a different answer — `A1 WALLS HIDDEN + A7 COMPOUND WALL`
-    # instead of `A1 WALLS HIDDEN + A5 FALSE CEILING` — and the result collapses:
-    #
-    #     frame 0 (lower ground)   146 walls   23 rooms   252.76 m2
-    #     frame 1 (ground)          58 walls    5 rooms   296.87 m2, of which
-    #                                                     ONE room is 274.84 m2
-    #
-    # A 274 m2 'LIVING / DINING' is a plan whose partitions did not close. So the
-    # ground-floor frame reconstructs badly for a reason that has nothing to do
-    # with which frame is the right one to pick: `solve/layerscan.py` chooses
-    # wrongly for it. Changing the default before fixing that trades a guess with
-    # a good outcome for a justified choice with a bad one.
-    #
-    # Recorded rather than silently dropped, because the finding is the useful
-    # part: **the layer scan gets frame 1 of the villa wrong**, and that is worth
-    # more than the selection change was. Do not re-attempt this until it is
-    # fixed, and when you do, measure rooms and enclosed area, not just which
-    # frame got chosen — the reason this was caught is that the second column
-    # was there.
+    # ---- Annotations, read once ---------------------------------------------
+    # `room_labels` queries the modelspace on every call, and the ranking pass
+    # below asks about every frame on the sheet — 40 of them on a real drawing.
+    # One query, filtered per ask. classify_room is pure, so this is the same
+    # list the per-call version produced, forty times cheaper.
+    _sheet_labels = [
+        lb for lb in blk.room_labels(doc, scale, (ox, oy))
+        if classify_room(lb.text) != "unknown"
+    ]
 
     def _labels_in(a, b, c, d):
         return [
-            lb for lb in blk.room_labels(doc, scale, (ox, oy))
-            if classify_room(lb.text) != "unknown"
-            and a - 2 <= lb.x <= c + 2 and b - 2 <= lb.y <= d + 2
+            lb for lb in _sheet_labels
+            if a - 2 <= lb.x <= c + 2 and b - 2 <= lb.y <= d + 2
         ]
 
     placed = kernel.furniture(str(dxf_path), reading)
@@ -400,6 +359,228 @@ def reconstruct(
             if a - 1 <= q["position"]["x"] <= c + 1
             and b - 1 <= q["position"]["y"] <= d + 1
         ]
+
+    def _choose_frame_layers(a, b, c, d, labels, in_frame):
+        """
+        Choose the wall layers for one frame and pair its pool.
+
+        ONE implementation, shared by the ranking pass and the build
+        (`_solve_frame`), because the layerscan defect this engine already paid
+        for was exactly two copies of this decision grading on different bases.
+        Returns (walls, selected, trace), or None when the scan chose nothing —
+        the caller keeps whatever walls it had.
+        """
+        from solve import layerscan
+
+        within: dict[str, list] = {}
+        for seg in reading["_segments"]:
+            face = Face(
+                ax=(seg.x1 - ox) * scale, ay=(seg.y1 - oy) * scale,
+                bx=(seg.x2 - ox) * scale, by=(seg.y2 - oy) * scale, layer=seg.layer,
+            )
+            if (min(face.ax, face.bx) >= a - 1 and max(face.ax, face.bx) <= c + 1
+                    and min(face.ay, face.by) >= b - 1 and max(face.ay, face.by) <= d + 1):
+                within.setdefault(seg.layer, []).append(face)
+
+        shortlist = layerscan.recommended(layerscan.scan(within)) | (set(chosen) & set(within))
+        selected, trace = layerscan.select_within_frame(
+            within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
+        )
+        if not selected:
+            return None
+        # `sorted`, because `selected` is a set of layer NAME STRINGS and Python
+        # randomises string hashing per process. Iterating it directly built the
+        # wall-face pool in a different order on every run, and pairing and
+        # corner-joining are order-sensitive — so the same drawing produced 148
+        # walls / 260.3 m2 on one run and 147 / 259.4 on the next, with no code
+        # change between them. That is a quotation that changes when you re-run
+        # it.
+        #
+        # PYTHONHASHSEED=0 pins it, which is how this was identified, but
+        # pinning the seed hides the dependency rather than removing it. Sorting
+        # cannot change WHICH layers were chosen, only the order they are read
+        # in.
+        pool = [f for name in sorted(selected) for f in within[name]]
+        return join_corners(pair_faces(pool)), selected, trace
+
+    # ---- Which frame is the plan? Grade the candidates, then say so. --------
+    # `frames[0]` used to be whichever cluster carried the most wall segments —
+    # a guess on a many-drawing sheet, and a measured-wrong one: dense elevation
+    # linework outranks a sparse floor plan. On `ALL PLANS` the wall-count
+    # leader carries ZERO recognised room labels and reconstructs to 11 rooms
+    # none of which the sheet names, while frame 12, titled FIRST FLOOR PLAN,
+    # reconstructs to 15 rooms with 10 named.
+    #
+    # An earlier attempt (recorded here as TRIED, MEASURED, AND REVERTED) chose
+    # by storey TITLE and produced a worse building, because the layer scan of
+    # the day mis-graded the ground-floor frame. That defect is fixed (`fit_of`
+    # now grades on the pipeline's own basis), and this pass keeps the lesson:
+    # a frame is picked by what it RECONSTRUCTS INTO, not by any prior about
+    # what it is. Grade the plausible candidates the exact way the build would,
+    # and take the one with the most NAMED rooms.
+    #
+    # Named rooms, not raw label count and not room count — both were measured
+    # and both lie: on PLANS_FOR_3D the label-count leader (11 labels) grades to
+    # ZERO rooms (annotation over no closable walls), and unnamed room count
+    # promotes elevations whose hatching closes into boxes. Named rooms cannot
+    # be gamed from either side; it is the same objective the layer scan itself
+    # settled on, one level up.
+    #
+    # Measured across the six-sheet corpus (2026-08-24, graded through the
+    # pipeline's own per-frame scan + perimeter):
+    #
+    #     DOWN VILLA        #0 (13 named)  == wall-count pick, unchanged
+    #     PLANS_FOR_3D      #1 (5 named, 6 rooms)   over #0 (2 named)
+    #     ALL PLANS         #12 FIRST FLOOR PLAN (10 named, 15 rooms)
+    #                                               over #0 (0 named)
+    #     SITE PLAN 16-02   #2 (33 named, 60 rooms) over #0 site plan (0 named)
+    #     REDDY / GARDEN    unchanged (agreement / single frame)
+    #
+    # The compound-wall constraint that made wall count load-bearing still
+    # holds: 8 walls over 28 m with 0 labels grades to 0 named and stays last.
+    #
+    # Cost: at most six per-frame layer scans per import, only on multi-frame
+    # sheets, only when the layers are not a human's explicit choice.
+    frame_ranking = None
+    if auto_layers and not layers and len(frames) > 1:
+        from solve import layerscan
+
+        def _plan_evidence(frame) -> int:
+            fa, fb, fc, fd = frame.bbox
+            return len(_labels_in(fa, fb, fc, fd))
+
+        by_walls = sorted(frames, key=lambda f: -len(f.wall_indices))[:4]
+        by_labels = sorted(
+            frames, key=lambda f: (-_plan_evidence(f), -len(f.wall_indices)),
+        )[:4]
+        # Order-stable dedupe (by identity — Frame is an eq-dataclass and
+        # unhashable), wall-count candidates first: ties in the grade below
+        # resolve toward the incumbent rule, so a sheet where grading cannot
+        # separate the candidates behaves exactly as it always did.
+        shortlist: list = []
+        for f in [*by_walls, *by_labels]:
+            if all(f is not g for g in shortlist):
+                shortlist.append(f)
+        shortlist = shortlist[:6]
+
+        lo_area, hi_area = layerscan.ROOM_AREA
+        graded: list[tuple] = []  # (frame, named, rooms, area, labels, error)
+        for frame in shortlist:
+            fa, fb, fc, fd = frame.bbox
+            labs = _labels_in(fa, fb, fc, fd)
+            blocks = _blocks_in(fa, fb, fc, fd)
+            try:
+                scanned = _choose_frame_layers(fa, fb, fc, fd, labs, blocks)
+                frame_walls = (
+                    scanned[0] if scanned
+                    else [all_walls[i] for i in frame.wall_indices]
+                )
+                # ── A candidate whose scope fuses several drawings must lose ──
+                # Measured on LATEST DRAWINGS: an 11-wall stray cluster whose
+                # bbox spans the whole 1,234 m sheet re-pulls 2,377 walls and
+                # grades at 77 named rooms — the ENTIRE SHEET fused into one
+                # "building", outscoring every real plan. The grade is honest
+                # (picking that frame would build exactly that), which is why
+                # the disqualification uses the engine's own definition of
+                # "separate drawings" rather than a new constant: if the
+                # candidate's walls segment into more than one frame, its scope
+                # is a sheet region, not a drawing. Checked BEFORE the
+                # perimeter, which closes on centrelines and could bridge two
+                # drawings into one ring, hiding the fusion.
+                sub_frames = segment_frames(frame_walls)
+                if len(sub_frames) > 1:
+                    graded.append((
+                        frame, 0, 0, 0.0, len(labs),
+                        f"scope fuses {len(sub_frames)} drawings",
+                    ))
+                    continue
+                if with_perimeter:
+                    frame_walls = add_perimeter(frame_walls)
+                rooms_g = [
+                    s for s in sp.detect_spaces(
+                        frame_walls, labels=labs, classify_room=classify_room,
+                    )
+                    if lo_area <= s.area <= hi_area
+                ]
+                graded.append((
+                    frame,
+                    sum(1 for s in rooms_g if s.name),
+                    len(rooms_g),
+                    round(sum(s.area for s in rooms_g), 2),
+                    len(labs),
+                    None,
+                ))
+            except Exception as exc:  # noqa: BLE001 — an ungradable frame loses, loudly
+                graded.append((frame, 0, 0, 0.0, len(labs), str(exc)))
+
+        best = best_graded_index([(g[1], g[2], g[3]) for g in graded])
+        winner = graded[best][0]
+        promoted = winner is not frames[0]
+        if promoted:
+            leader = frames[0]
+            frames.remove(winner)
+            frames.insert(0, winner)
+            for n, f in enumerate(frames):
+                f.index = n
+            framing_note = (framing_note + "; " if framing_note else "") + (
+                f"picked the frame by what it reconstructs into: "
+                f"{graded[best][1]} named rooms "
+                f"({winner.title or 'untitled'}, {len(winner.wall_indices)} walls) "
+                f"over the wall-count leader "
+                f"({leader.title or 'untitled'}, {len(leader.wall_indices)} walls)"
+            )
+        # A winner that could not be graded as ONE drawing is still built from
+        # its bbox, and that build will contain whatever the bbox contains.
+        # Say so — a model quietly holding two buildings is the failure this
+        # whole file exists to prevent, and on one real sheet (ALL PLANS) every
+        # candidate fuses because the bootstrap merged a stacked column of
+        # storey plans. The ranking cannot fix that; it can refuse to hide it.
+        for f, _n, _r, _a, _l, err in graded:
+            if f is frames[0] and err:
+                framing_note = (framing_note + "; " if framing_note else "") + (
+                    f"the picked frame could not be graded as one drawing "
+                    f"({err}) — the model may contain more than one building"
+                )
+                break
+
+        # Materialised AFTER any re-index, so the frame numbers here are the
+        # ones the rest of the report uses.
+        frame_ranking = {
+            "picked": winner.index,
+            "promoted": promoted,
+            "graded": [
+                {
+                    "frame": f.index, "title": f.title, "named": named,
+                    "rooms": rooms, "area": area, "labels": labels_n,
+                    **({"error": err} if err else {}),
+                }
+                for f, named, rooms, area, labels_n, err in graded
+            ],
+        }
+
+    # ---- The pick -----------------------------------------------------------
+    if frames:
+        picked = frames[min(frame_index, len(frames) - 1)]
+        walls = [all_walls[i] for i in picked.wall_indices]
+        x0, y0, x1, y1 = picked.bbox
+    else:
+        picked = None
+        walls = all_walls
+        xs = [c for w in walls for c in (w.ax, w.bx)] or [0]
+        ys = [c for w in walls for c in (w.ay, w.by)] or [0]
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        framing_note = (
+            f"no frames at all; building the WHOLE sheet as one drawing "
+            f"({len(all_walls)} walls)"
+        )
+
+    # ---- Are any of these storeys of one building? -------------------------
+    # AFTER the ranking pass on purpose: registration stores frame INDICES, and
+    # the promotion above re-numbers them. Registering first would leave every
+    # level pointing one frame to the left of the plan it named.
+    from solve.storeys import register_storeys
+
+    storeys = register_storeys(frames, rise=height + 0.3)
 
     # ── One storey, end to end ──────────────────────────────────────────────
     # Extracted so it can run more than once. `storey0` is hardcoded through the
@@ -426,43 +607,15 @@ def reconstruct(
         # The first pass used the conservative name heuristic, which is plan-only
         # and so lands on the right part of the sheet even when it misses most of
         # the walls. That frame now scopes the layer search — which is what excludes
-        # the elevation layers by geometry rather than by name.
+        # the elevation layers by geometry rather than by name. The scan itself
+        # is `_choose_frame_layers`, shared with the ranking pass — one
+        # implementation, so the frame that was picked for how it reconstructs
+        # is reconstructed by the same decision that graded it.
         layer_choice = None
         if auto_layers and not layers:
-            from solve import layerscan
-
-            within: dict[str, list] = {}
-            for seg in reading["_segments"]:
-                face = Face(
-                    ax=(seg.x1 - ox) * scale, ay=(seg.y1 - oy) * scale,
-                    bx=(seg.x2 - ox) * scale, by=(seg.y2 - oy) * scale, layer=seg.layer,
-                )
-                if (min(face.ax, face.bx) >= x0 - 1 and max(face.ax, face.bx) <= x1 + 1
-                        and min(face.ay, face.by) >= y0 - 1 and max(face.ay, face.by) <= y1 + 1):
-                    within.setdefault(seg.layer, []).append(face)
-
-            shortlist = layerscan.recommended(layerscan.scan(within)) | (chosen_here & set(within))
-            selected, trace = layerscan.select_within_frame(
-                within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
-            )
-            if selected:
-                # `sorted`, because `selected` is a set of layer NAME STRINGS
-                # and Python randomises string hashing per process. Iterating
-                # it directly built the wall-face pool in a different order on
-                # every run, and pairing and corner-joining are order-sensitive
-                # — so the same drawing produced 148 walls / 260.3 m2 on one
-                # run and 147 / 259.4 on the next, with no code change between
-                # them. That is a quotation that changes when you re-run it.
-                #
-                # PYTHONHASHSEED=0 pins it, which is how this was identified,
-                # but pinning the seed hides the dependency rather than
-                # removing it. Sorting cannot change WHICH layers were chosen,
-                # only the order they are read in.
-                #
-                # Note the report on the next line already sorted. The display
-                # was made deterministic and the data it described was not.
-                pool = [f for name in sorted(selected) for f in within[name]]
-                walls = join_corners(pair_faces(pool))
+            scanned = _choose_frame_layers(x0, y0, x1, y1, labels, in_frame)
+            if scanned:
+                walls, selected, trace = scanned
                 chosen_here = selected
                 layer_choice = {"selected": sorted(selected), "trace": trace}
 
@@ -796,6 +949,10 @@ def reconstruct(
         "layerChoice": layer_choice,
         "faces": len(faces),
         "frames": [f.as_dict() for f in frames],
+        # How frames[0] was chosen, with the grades for every candidate — a
+        # reviewer accepting an import should see the race, not just the winner.
+        # None when there was nothing to rank (one frame, or a human's layers).
+        "frameRanking": frame_ranking,
         "frameUsed": picked.as_dict() if picked else None,
         # ── How much linework never reached a frame ─────────────────────────
         # Walls-in versus walls-out was not merely unreported, it was
@@ -1335,6 +1492,22 @@ def _print_report(report: dict) -> None:
 #: scale together, so the ratio survives a unit error that a metre threshold
 #: would invert.
 LEGEND_LINK_CHARHEIGHTS = 8.0
+
+
+def best_graded_index(rows: list[tuple]) -> int:
+    """
+    Which graded frame wins: rows are (named, rooms, area) in shortlist order.
+
+    Named rooms first — the objective the layer scan itself settled on, one
+    level up; raw label count and unnamed room count were both measured and
+    both lie (see the ranking pass in `reconstruct`). Ties resolve to the
+    EARLIEST row, which is the incumbent wall-count order — a grade that cannot
+    separate the candidates changes nothing.
+    """
+    return max(
+        range(len(rows)),
+        key=lambda i: (rows[i][0], rows[i][1], rows[i][2], -i),
+    )
 
 
 def _real_plan_titles(titles: list) -> list:
