@@ -439,6 +439,90 @@ def enable_gpu(cycles) -> None:
 def render_still(out_path: str) -> None:
     bpy.context.scene.render.filepath = out_path
     bpy.ops.render.render(write_still=True)
+    _report_still_validity(out_path)
+
+
+def _report_still_validity(out_path: str) -> None:
+    """
+    Say out loud when a "successful" frame is not a picture.
+
+    ── Why the single-image path needs its own gate ─────────────────────────
+    render_views.py grew inspect_frame after the villa's interiors shipped
+    five frames over 70% blown and a 100%-blown toilet — rc 0, PNG written,
+    ARCVIA_OUTPUT printed, nothing anywhere noticed, because every validity
+    check in this repo looked for BLACK. This path — the queue's user-facing
+    preview and full renders, the ones a customer is charged credits for —
+    had no check of any colour at all.
+
+    Reported, never fatal, same philosophy as the batch gate: a blown frame
+    is still a rendered frame and the caller decides what to do with it. The
+    queue sweeps every ARCVIA_ marker into the job record, so FRAME and
+    SUSPECT arrive on the job with no queue changes; "suspect" in a job's
+    markers is the difference between a support ticket that starts with
+    evidence and one that starts with a white rectangle.
+
+    Thresholds are the batch gate's, minus its style exemptions: everything
+    this path renders is a lit scene, never a line drawing, so a frame that
+    is nearly all white, nearly all black, or carries almost no distinct
+    tones is broken in a way no studio scene legitimately is.
+    """
+    try:
+        img = bpy.data.images.load(out_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ARCVIA_SUSPECT:unreadable ({exc})", flush=True)
+        return
+
+    try:
+        px = img.pixels[:]
+        count = len(px) // 4
+        if not count:
+            print("ARCVIA_SUSPECT:no pixels", flush=True)
+            return
+
+        # 8-bit PNGs hand back display-referred values already; only float
+        # buffers are linear and need encoding. Getting this wrong flagged
+        # one healthy frame in seven on the batch path — see inspect_frame.
+        encode = bool(img.is_float)
+        stride = max(1, count // 100_000)
+
+        dark = blown = seen = 0
+        tones = set()
+        for i in range(0, count, stride):
+            base = i * 4
+            lin = (0.2126 * px[base] + 0.7152 * px[base + 1]
+                   + 0.0722 * px[base + 2])
+            if encode:
+                lin = (1.055 * (max(lin, 0.0) ** (1 / 2.4)) - 0.055
+                       if lin > 0.0031308 else lin * 12.92)
+            tone = max(0, min(255, int(lin * 255 + 0.5)))
+            tones.add(tone)
+            seen += 1
+            if tone <= 8:
+                dark += 1
+            elif tone >= 250:
+                blown += 1
+
+        blown_share = blown / seen
+        dark_share = dark / seen
+        print(
+            "ARCVIA_FRAME:"
+            + json.dumps({"blown": round(blown_share, 4),
+                          "black": round(dark_share, 4),
+                          "tones": len(tones)}),
+            flush=True,
+        )
+
+        reasons = []
+        if blown_share >= 0.7:
+            reasons.append(f"{blown_share:.0%} blown out")
+        if dark_share >= 0.98:
+            reasons.append(f"{dark_share:.0%} black")
+        if len(tones) <= 16:
+            reasons.append(f"only {len(tones)} distinct tones")
+        if reasons:
+            print("ARCVIA_SUSPECT:" + "; ".join(reasons), flush=True)
+    finally:
+        bpy.data.images.remove(img)
 
 
 def bake_lightmap(out_path: str, spec: dict) -> None:
