@@ -277,3 +277,62 @@ source of truth.
 > ⚠ Same licensing position as section 6. This is competitive reference material.
 > Their robots policy remains `ai-train=no`. Nothing observed here was generated,
 > downloaded into the repo, or paid for.
+
+---
+
+## 6. App-page scrape — `/app/interior-ai` (2026-08-24, logged-in DOM, passive)
+
+The tool page itself, read from the rendered DOM. No generation was run.
+
+**Controls**: upload image or sketch (or pick from their Assets library) →
+free-text prompt ("Starting v4.1 and up, long prompts are no longer required")
+→ Render Style: RAW · Auto · Photoreal · CGI · CAD · Freehand Sketch · Model ·
+Illustration · Watercolor (note: near-identical vocabulary to our
+render-worker's style table) → Scene Effects Booster (toggle) → Aspect Ratio →
+Camera Angle AUTO/MANUAL → Room Type → Room Style. 30 credits/run, est.
+25–30 s. Engine picker "v4.4 Ultra / v4.4 Fast" — versioned wrappers; the
+editModel behind the expert remains `google_nano_banana` (§4).
+
+**Room types (27)**: living room, bedroom, bath room, kitchen, dining room,
+reception area, toilet, dressing room, loft, office space, home office,
+meeting room, coworking space, workshop, study room, gaming room, coffee
+shop, restaurant, hotel lobby, hotel room, hotel bathroom, auditorium,
+classroom, lecture hall, fitness gym, clothing store.
+
+**Room styles (33) — WITH their prompt expansions.** The `<option value>`
+attributes carry the literal prompt fragments fed to the model; the product's
+"proprietary" layer is prompt templating over Nano Banana:
+
+| style | prompt fragment |
+|---|---|
+| Modern | Modern interior |
+| Neoclassic | Neoclassic, neoclassical interior |
+| Minimalist | Minimalism, minimal interior |
+| Boho-chic | Boho Decor, bohemian, boho-chic style |
+| Art Deco | Art deco, chrome finishes, exotic materials, luxurious textures |
+| Biophilic | Biophilic, biophilia, indoor plants |
+| Industrial | Industrial, leather furniture |
+| Japandi | Japandi, Minimalism, Natural materials, Neutral color palette, beige, Clean lines, Zen |
+| Luxurious | Luxurious, luxury interior |
+| Art Nouveau | Art nouveau |
+| IKEA | Ikea interior style, Ikea furniture, colorful furniture, sleek design |
+| Warm & Cozy | warm and cozy |
+| Contemporary | contemporary |
+| Wabi-sabi | wabi-sabi, Simplicity, Natural materials, Minimalism, Organic textures, Tranquility, Earthy tones, Serenity, Uncluttered |
+| Zen | Zen Interior, Minimalism, Natural materials, Clean lines |
+| Coastal | Coastal interior, shades of white and blue |
+| Mediterranean | Mediterranean, shades of white and blue, santorini |
+| Shabby Chic | Shabby Chic, Cottage style, Pastel colors, Rustic charm, Charming and whimsical, Distressed wood |
+| Bauhaus | Bauhaus, primary colors |
+| Futuristic | Futuristic interior style |
+| Pharaonic | Pharaonic, ancient egypt style, pharoas |
+| (plain labels) | Eclectic, Tropical, Tribal, Rustic, Midcentury modern, Maximalist, Vintage, Medieval, Baroque, Halloween, Cyberpunk, Christmas |
+
+**What this settles for us**: mnml Interior AI = prompt templating + Nano
+Banana + an upscaler + a credit meter. Arcvia's `ai` render preset
+(`services/api/src/lib/aiRender.js`) already drives the SAME model
+(`gemini-2.5-flash-image`) with a stricter geometry-preserving prompt; the
+missing piece was this vocabulary. What mnml cannot do at any price is the
+other direction — reading a render's design INTO 3D geometry — which is the
+`design.py` pipeline. Their Studio markets "export DWG files" for plan tools;
+unverified beyond marketing copy.
