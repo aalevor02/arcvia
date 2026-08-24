@@ -644,23 +644,25 @@ RAM**, not just the first. Both of the day's two bad-measurement episodes had
 this as the cause and only one of them involved another session. Never run a
 render batch alongside asset conditioning.
 
-Two things found while measuring, both open at the time of writing:
+Two things found while measuring — ~~both open at the time of writing~~ ✅ **both
+closed since, verified in the tree 2026-08-24** (a session re-claimed this
+cluster from this doc and found every piece already committed — the go-and-look
+rule paid again):
 
-- **Three of the six styles do not render.** `cad` and `sketch` die at
-  `arcvia_style.py:139` — `FreestyleLineSet.crease_angle` no longer exists in
-  Blender 5; it moved to `view_layer.freestyle_settings.crease_angle`. That is a
-  fifth instance of the same API-break family as the four already recorded on
-  the AOV path. `raw` renders but produces a flat near-white frame with no
-  structure — possibly correct, since it is emission-based and emission ignores
-  facing, but it is not legible on its own.
-- **Blender exits 0 on a Python traceback.** A render that crashed is
-  indistinguishable from one that worked by return code alone.
-  `renderQueue.js:332` is already guarded — it requires `code === 0 && outputPath`,
-  so a total failure is caught. The **multi-view path is not**: `render_views.py`
-  prints `ARCVIA_DONE:n/n`, the queue captures it into `markers`, and nothing
-  compares the two numbers. A 22-view run where two views die exits 0, publishes
-  the ones that worked, and is marked `done` at 100% with the evidence of
-  incompleteness sitting unread in the job record.
+- ~~**Three of the six styles do not render.**~~ Fixed in `c742c24` —
+  `arcvia_style.py` sets `settings.crease_angle` on the view layer's freestyle
+  settings (the Blender 5 location) with the reasoning in a comment. `raw`'s
+  near-white output is documented as CORRECT in `STYLE_TABLE`'s docstring — it
+  is the emission base layer the `--aov` passes key against, not a picture.
+- ~~**Blender exits 0 on a Python traceback… the multi-view path is not
+  [guarded]**~~ Fixed across `c742c24`/`146fb49`/`0346a6b`/`28e0992`:
+  `render_views.py` wraps main in a catch-all that exits 1, prints
+  `ARCVIA_VALID:n/m` and `ARCVIA_DONE:n/total` ALWAYS, and `renderQueue.js`
+  compares them via the exported `viewsMissing()` — a short run now fails (and
+  refunds) instead of publishing as `done`. Frame validity is two-sided and
+  style-aware (`inspect_frame`: blown-fraction with a measured threshold, tone
+  count labelled honestly as unmeasured, line-art exempt from brightness, `raw`
+  exempt entirely) — the trap-8 "every check looks for BLACK" defect is closed.
 
 **Asset hub conditioning.** Running 2,132 assets through `condition_asset.py`
 and wiring the results into the catalogue is batch work with a long tail of
@@ -852,6 +854,13 @@ generalise beyond the CAD engine:
    test.** (And the test must be style-aware: a `cad` line drawing is white paper
    with thin lines, has 165 grey levels and more edge content than `cgi`, and a
    brightness threshold flags it at "95.8% blown out" incorrectly.)
+
+   ✅ **Built** — `render_views.py::inspect_frame` + `ARCVIA_SUSPECT` /
+   `ARCVIA_VALID` (`146fb49`, `0346a6b`, `28e0992`). Blown threshold measured
+   (clean 29→72 band), tone-count threshold kept but labelled unmeasured,
+   line-art exempt from brightness, `raw` exempt entirely. Suspect frames are
+   reported, never fatal — exposure belongs to the style, aim to the camera
+   solver, and the caller decides.
 
 9. **ambientCG ships two normal maps and one of them is silently wrong, and no
    statistic can tell you which.** Every material has `_NormalGL` and
