@@ -47,9 +47,24 @@ export interface CadFixture {
   storey?: number
 }
 
+/** One per-storey element block — only the registration is read here. */
+export interface CadStoreyBlock {
+  storey: number
+  /**
+   * The registration shift the engine applied to this storey's MESHES to
+   * stack frames drawn at different spots on the sheet. Fixtures are
+   * recorded in frame coordinates WITHOUT it — the engine's own comment
+   * says so — and on the villa the Lower Ground's shift is (0, −17.578):
+   * skipping it stood every basement bed 17.6 metres outside the building,
+   * visibly, in the composed 3D view. Single-frame builds have no storey
+   * blocks and no shift, which is the identity contract below.
+   */
+  shift?: [number, number]
+}
+
 /** The slice of building.json this reads. Everything else is ignored. */
 export interface CadModel {
-  elements?: { fixtures?: CadFixture[] }
+  elements?: { fixtures?: CadFixture[]; storeys?: CadStoreyBlock[] }
 }
 
 const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
@@ -85,6 +100,7 @@ function measured(itemId: string, w: number, d: number): Size | undefined {
  */
 export function furnishFromCad(model: CadModel, { storey = 0 }: { storey?: number } = {}): Proposal[] {
   const fixtures = model.elements?.fixtures ?? []
+  const [shiftX, shiftY] = model.elements?.storeys?.find((s) => s.storey === storey)?.shift ?? [0, 0]
 
   return fixtures
     .filter((fixture) => (fixture.storey ?? 0) === storey)
@@ -97,7 +113,7 @@ export function furnishFromCad(model: CadModel, { storey = 0 }: { storey?: numbe
     .filter((fixture) => BY_ID.get(fixture.item as string)?.placement === 'floor')
     .map((fixture) => ({
       item: fixture.item as string,
-      position: { x: fixture.position.x, y: fixture.position.y },
+      position: { x: fixture.position.x + shiftX, y: fixture.position.y + shiftY },
       rotation: fixture.rotation,
       size: measured(fixture.item as string, fixture.footprint.w, fixture.footprint.d),
       room: fixture.room,

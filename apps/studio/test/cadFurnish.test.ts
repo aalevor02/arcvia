@@ -123,6 +123,28 @@ const model = (fixtures: CadFixture[]): CadModel => ({ elements: { fixtures } })
   check('a fixture with no storey field is storey 0', furnishFromCad(model([fixture({})])).length === 1)
 }
 
+// ---- The multi-storey registration shift ------------------------------------
+{
+  // The villa's real numbers: the Lower Ground frame sits 17.578 m up the
+  // sheet from where its geometry stacks, and skipping the shift stood every
+  // basement bed outside the building.
+  const shifted: CadModel = {
+    elements: {
+      fixtures: [fixture({ storey: 0 }), fixture({ block: 'sofa', item: 'sofa-3', storey: 1, position: { x: 99, y: 320 } })],
+      storeys: [
+        { storey: 0, shift: [0, -17.578] },
+        { storey: 1, shift: [0, 0] },
+      ],
+    },
+  }
+  const [bed] = furnishFromCad(shifted, { storey: 0 })
+  check('the storey shift is applied', Math.abs(bed.position.y - (331.9263 - 17.578)) < 1e-9, String(bed.position.y))
+  const [sofa] = furnishFromCad(shifted, { storey: 1 })
+  check('a zero shift is the identity', sofa.position.y === 320)
+  const [plain] = furnishFromCad(model([fixture({})]))
+  check('no storey blocks means no shift — the single-frame contract', plain.position.y === 331.9263)
+}
+
 // ---- Degenerate input -------------------------------------------------------
 {
   check('an empty model proposes nothing', furnishFromCad({}).length === 0)

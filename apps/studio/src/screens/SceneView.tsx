@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { SceneViewer, WalkController } from '@arcvia/viewer'
 import type { FloorLevel } from '@arcvia/viewer'
 import { buildPlanGeometry } from '../plan/buildGeometry'
@@ -138,6 +140,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * is ignored: see the geometry effect.
    */
   const [storedModel, setStoredModel] = useState<string | null>(null)
+  /**
+   * The pristine CAD reconstruction, when this scene came through that door.
+   * Kept apart from modelUrl because the bake flow overwrites modelUrl with
+   * its combined export — composing furniture over THAT would double it.
+   */
+  const [cadSource, setCadSource] = useState<string | null>(null)
   // The loaded model's storeys, for the walk-mode floor switcher. Read from
   // the geometry (not the plan) so a CAD-imported two-storey building gets
   // the same switcher a plan-drawn one does.
@@ -182,6 +190,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setSite(scene.site ?? null)
         setSbua(scene.sbua ?? null)
         setStoredModel(scene.modelUrl ?? null)
+        setCadSource(scene.cadModelUrl ?? null)
         setDeckUrl(scene.floorPlanUrl ?? null)
       })
       .catch(() => {
@@ -289,11 +298,10 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     // geometry IS the stored file. The branch is on the PLAN being empty, not
     // on modelUrl existing, because plan-drawn scenes also carry a modelUrl
     // (the bake flow uploads one) and for them the drawing stays the truth.
-    const planEmpty = plan.floors.every(
-      (floor) =>
-        Object.keys(floor.walls).length === 0 && Object.keys(floor.objects).length === 0,
-    )
-    if (planEmpty && storedModel) {
+    const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
+    const planHasObjects = plan.floors.some((floor) => Object.keys(floor.objects).length > 0)
+
+    if (!planHasWalls && storedModel && !planHasObjects) {
       setStatus('Loading the model…')
       void viewer
         .loadModel(storedUrl(storedModel))
@@ -304,6 +312,52 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           setStatus('Ready')
         })
         .catch(() => setStatus('The stored model could not be loaded.'))
+      return
+    }
+
+    // ── The hybrid: a reconstruction with furniture accepted onto it ─────────
+    // A CAD import has no plan walls — the building IS the stored GLB — but
+    // accepting the drawing's furniture puts OBJECTS into the plan. Before
+    // this branch existed, that flipped the view to plan-built geometry:
+    // furniture floating in a void, the villa gone. The building and the
+    // furniture live in different representations on purpose (the GLB is
+    // exact solved geometry; the objects are editable catalogue placements),
+    // so the 3D view composes them: the pristine reconstruction underneath,
+    // the object group on top, one root — which also means the bake exports
+    // both halves, because exportForBake reads viewer.modelRoot.
+    //
+    // `cadSource` over `storedModel`: after a bake, modelUrl is the combined
+    // export, and composing objects over THAT doubles every sofa.
+    if (!planHasWalls && planHasObjects && (cadSource ?? storedModel)) {
+      setStatus('Loading the model…')
+      void (async () => {
+        try {
+          // No DRACO: these GLBs come from our own engine and exporter,
+          // neither of which compresses. Mirroring loadModel's CDN decoder
+          // here would add a network dependency to a path that has none.
+          const gltf = await new GLTFLoader().loadAsync(storedUrl(cadSource ?? storedModel!))
+          const composed = new THREE.Group()
+          composed.add(gltf.scene)
+
+          const objects = buildPlanGeometry(plan.floors, { ceilings: false, floorFinish: finish })
+          composed.add(objects)
+
+          viewer.setModel(composed)
+          viewer.setBakedLighting(false)
+          setBaked(false)
+          if (!walkingRef.current) viewer.frameModel()
+          setStatus('Ready')
+
+          void upgradeModels(objects, () => viewer.requestRender()).then((upgraded) => {
+            if (upgraded > 0) {
+              setStatus(`${upgraded} object${upgraded === 1 ? '' : 's'} using real models`)
+            }
+          })
+          void upgradeSurfaces(() => viewer.requestRender())
+        } catch {
+          setStatus('The stored model could not be loaded.')
+        }
+      })()
       return
     }
 
@@ -331,7 +385,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     // Framing the model fights the walk camera: it would yank the view back
     // outside the building on every edit.
     if (!walkingRef.current) viewer.frameModel()
-  }, [plan, ceilings, finish, storedModel])
+  }, [plan, ceilings, finish, storedModel, cadSource])
 
   /**
    * Enter or leave first-person.
@@ -503,10 +557,19 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     try {
       await modelsSettled()
 
-      const complete = buildPlanGeometry(plan.floors, {
-        ceilings: true,
-        floorFinish: finish,
-      })
+      // A hybrid scene (CAD building + placed furniture) exports what the
+      // viewer composed — rebuilding from the plan would export furniture
+      // floating in a void, because the building is the GLB, not the plan.
+      // Ceilings-forced-on only applies to plan-built geometry; a
+      // reconstruction carries whatever ceilings the drawing gave it.
+      const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
+      const complete =
+        !planHasWalls && viewer.modelRoot
+          ? viewer.modelRoot
+          : buildPlanGeometry(plan.floors, {
+              ceilings: true,
+              floorFinish: finish,
+            })
       await upgradeModels(complete)
 
       const { blob, meshes, triangles } = await exportGlb(complete)

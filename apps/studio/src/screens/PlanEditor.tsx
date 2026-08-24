@@ -789,7 +789,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           onDismiss={() => setNotice(false)}
           onLanded={(modelUrl, summary: CadSummary | null, modelJsonUrl?: string | null) => {
             setNotice(false)
-            void updateScene(sceneId, { modelUrl }).catch(() => {})
+            // cadModelUrl as well as modelUrl, and only for the CAD door: the
+            // bake flow overwrites modelUrl with its combined export, and the
+            // 3D view needs the pristine reconstruction to compose furniture
+            // over. A plain GLB import sets it too — same hybrid semantics.
+            void updateScene(sceneId, { modelUrl, cadModelUrl: modelUrl }).catch(() => {})
 
             // The drawing's own furniture, through the same review the raster
             // path uses. The engine classified every block to a catalogue item

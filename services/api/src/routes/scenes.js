@@ -82,6 +82,11 @@ export async function registerSceneRoutes(app) {
     const allowed = [
       'name',
       'modelUrl',
+      // The CAD reconstruction behind a furnished import, preserved
+      // separately because the bake flow OVERWRITES modelUrl with the
+      // combined export — without this field, baking a furnished
+      // reconstruction would destroy the only reference to the building.
+      'cadModelUrl',
       'lightsUrl',
       'hdriUrl',
       'floorPlanUrl',

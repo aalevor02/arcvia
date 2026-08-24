@@ -158,6 +158,12 @@ export interface SceneListItem {
 export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   plan: Plan | null
   lightsUrl: string | null
+  /**
+   * The CAD reconstruction behind a furnished import. Preserved separately
+   * from modelUrl because the bake flow overwrites modelUrl with the
+   * combined export; this field is what the hybrid view composes from.
+   */
+  cadModelUrl?: string | null
   /** The baked lightmap atlas, once a bake has completed. */
   bakedUrl: string | null
   hdriUrl: string | null
