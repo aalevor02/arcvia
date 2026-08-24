@@ -45,9 +45,13 @@ def parse_args() -> argparse.Namespace:
     # with the object — a dining chair does not need a sofa's budget, and a
     # kitchen run needs more.
     parser.add_argument("--budget", type=int, default=6000)
-    parser.add_argument("--width", type=float, required=True)
-    parser.add_argument("--depth", type=float, required=True)
-    parser.add_argument("--height", type=float, required=True)
+    # Optional as a trio: the catalogue ingest always passes them (the slot is
+    # authoritative about size), while on-demand conditioning through the API
+    # has no slot and keeps the model's authored scale. Passing only one or
+    # two is a caller bug and refused below rather than half-applied.
+    parser.add_argument("--width", type=float, default=None)
+    parser.add_argument("--depth", type=float, default=None)
+    parser.add_argument("--height", type=float, default=None)
     # Textures at 4K are common and pointless on a chair seen from two metres
     # away in a room lit by a baked atlas.
     # 512, not 1024. These are seen from across a room, in a scene whose
@@ -166,6 +170,24 @@ def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=
     dimensions = extent(obj)
     if min(dimensions) <= 0:
         raise ValueError("model has zero extent on an axis")
+
+    # No target box: keep the authored scale. The shape-match rotation is also
+    # skipped — it exists to reconcile an asset with a slot, and with no slot
+    # there is nothing to reconcile against — but the floor-sit still happens,
+    # because "origin at the centre of the footprint, sitting on y=0" is what
+    # every downstream consumer assumes regardless of who sized the model.
+    if width is None:
+        if force_rotate is True:
+            obj.data.transform(mathutils.Matrix.Rotation(math.radians(90), 4, "X"))
+            obj.data.update()
+        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+        obj.location = (0, 0, extent(obj).z / 2)
+        bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+        return {
+            "rotated": force_rotate is True,
+            "scale": 1.0,
+            "size": [round(v, 4) for v in extent(obj)],
+        }
 
     # Assets arrive lying down often enough to be worth handling, but the test
     # has to be scale-invariant: a model in centimetres has a height of 80 and
@@ -427,6 +449,9 @@ def main() -> int:
         return 1
 
     report = {"input": args.input, "output": args.output}
+    sizes = [args.width, args.depth, args.height]
+    if any(v is not None for v in sizes) and not all(v is not None for v in sizes):
+        raise SystemExit("--width, --depth and --height come as a trio or not at all.")
     report["placement"] = orient_and_fit(obj, args.width, args.depth, args.height, args.rotate)
     # Before decimation: the heuristic reads vertex heights, and collapsing the
     # mesh first would blur exactly the silhouette it is measuring.

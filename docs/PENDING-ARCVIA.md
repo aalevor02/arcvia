@@ -254,9 +254,42 @@ renderer**, which is what the roadmap actually asked for.
 
 | | |
 |---|---|
-| models | 38 slots, done before this session |
+| models | 38 interior slots done before this session; **+6 outdoor slots 2026-08-24** (shrub, planter, lounger, fence, outdoor table/chair — all CC0, Poly Haven + The Base Mesh via `from-hub.mjs --ingest`) |
 | surfaces | 8 keys, live in the editor (`e501c20`) |
 | environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
+
+**2026-08-24 — the whole hub is browsable from inside the editor.**
+`GET /assets/hub` (search/stats, authed) + `/hub/preview/*` and
+`/hub/conditioned/*` (files, unauthenticated like `/uploads`) in
+`services/api/src/{lib/assetHub.js, routes/assets.js}`, and a collapsed
+**Asset hub** panel under the catalogue in the plan editor
+(`HubBrowserPanel.tsx`). Per model, "Get GLB" runs `condition_asset.py`
+server-side — queued one-Blender-at-a-time, cached in
+`.data/hub-conditioned/`, ≤600k-triangle ceiling refused up front with the
+reason (the 53 MB fir made that number a measurement, not a guess).
+`condition_asset.py`'s `--width/--depth/--height` became optional-as-a-trio
+for this: no slot, no resize, floor-sit kept. Deliberately NOT placement:
+raw hub models never enter scenes; the catalogue stays the only placeable
+source. Verified live: search → condition (8 s, 640 tris, 25 KB flower pot)
+→ served GLB; 15 new assertions in `test/asset-hub.mjs`.
+
+**2026-08-24 — the hub path got the automation the Sketchfab path had.**
+`from-hub.mjs --ingest` now conditions its picks and writes
+`.data/catalogue-additions.json` for `apply.mjs`, instead of stopping at a
+paste file — which is why the interior filled and the outdoor never did. Four
+matcher defects fixed on the way, all of the same species (substring matching
+over name+tags): the catalogue parser skipped every entry that carries a
+comment (`tree` and `pool`, the two annotated ones); avoid-word `plant`
+disqualified every *planter*; avoid-word `trunk` disqualified every LIVING
+tree (Poly Haven tags botany, not damage); and "tree" matched "s**tree**t".
+Plus cross-slot dedupe — one model no longer fills two slots. Still empty and
+honestly so: parasol, pergola (the hub holds none — a Sketchfab
+`batch.mjs --only parasol,pergola` run is the route if wanted), hedge
+(stretching one bush 5:1 loses to the parametric block), pools/deck/paving/
+lawn (surfaces — materials.mjs territory). `tree`/`tree-small` are
+photogrammetry scans conditioning in a long-running job — check
+`.data/from-hub-trees.log`; if absent from items.ts, that job died and
+`from-hub.mjs --ingest --only tree,tree-small` resumes it.
 
 Verified in Chrome rather than inferred, which mattered: the surface upgrade
 mutates the **same cached material instance** every mesh holds, so one call

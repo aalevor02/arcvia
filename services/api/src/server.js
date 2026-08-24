@@ -17,6 +17,7 @@ import { registerReferralRoutes } from './routes/referral.js'
 import { registerUploadRoutes } from './routes/uploads.js'
 import { registerDetectRoutes } from './routes/detect.js'
 import { registerCadRoutes } from './routes/cad.js'
+import { registerAssetRoutes, registerHubFileRoutes } from './routes/assets.js'
 import { isOriginAllowed } from './lib/origins.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -76,6 +77,10 @@ await app.register(registerReferralRoutes, { prefix: '/referral' })
 await app.register(registerUploadRoutes, { prefix: '/uploads' })
 await app.register(registerDetectRoutes, { prefix: '/detect' })
 await app.register(registerCadRoutes, { prefix: '/cad' })
+await app.register(registerAssetRoutes, { prefix: '/assets' })
+// No prefix: preview and conditioned-model URLs are plain `/hub/...` paths an
+// <img> or GLTFLoader can hold without knowing the API's route layout.
+await app.register(registerHubFileRoutes)
 await app.register(registerLeadRoutes)
 // No prefix: `/p/<slug>/` is the address printed on a client's link, and it is
 // served as HTML rather than JSON. See routes/share.js.

@@ -27,6 +27,12 @@ const BASE: string = import.meta.env.VITE_API_URL
   ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
   : `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
 
+/**
+ * The API origin, for the rare asset URL built outside `request()` — an <img>
+ * or a GLTFLoader holds a plain URL and cannot go through the JSON helper.
+ */
+export const apiBase = BASE
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -95,7 +101,7 @@ export function getUser(): StudioUser | null {
  */
 type Request = Omit<RequestInit, 'body'> & { body?: unknown }
 
-async function request<T>(path: string, init: Request = {}): Promise<T> {
+export async function request<T>(path: string, init: Request = {}): Promise<T> {
   const { body, headers, ...rest } = init
   const finalHeaders = new Headers(headers)
 
