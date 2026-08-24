@@ -462,31 +462,32 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
       1. Per-object unwrapping with no self-overlap  (smart_project)
       2. Each object occupying its OWN region of the shared atlas
 
-    Step 2 uses a uniform grid here: ceil(sqrt(n)) cells, one per object, UVs
-    scaled and offset into their cell. That is not an optimal packing — a large
-    floor gets the same texel budget as a doorknob — but it is correct, and
-    correctness was the thing missing. Area-weighted allocation is the obvious
-    next improvement.
+    Step 2 packs one SQUARE per object, side proportional to the square root
+    of the mesh's surface area — see the layout block below. It began life as
+    a uniform ceil(sqrt(n)) grid, which was correct but gave a doorknob the
+    same texel budget as a floor slab.
 
-    ── The empty cell is real, and the obvious fix is worse ─────────────────
-    Every Arcvia GLB has exactly three meshes (walls, floors, fixtures), and
-    ceil(sqrt(3)) = 2, so this always builds a 2x2 grid and always leaves one
-    cell of four untouched. Measured across atlas sizes, the top-right quadrant
-    is 0.00% covered every time. The waste is 1 - n/ceil(sqrt(n))^2 = 25%, by
-    construction, on every bake this pipeline will ever do.
+    ── Area-weighted square cells (the fix the grid's comment prescribed) ───
+    The uniform grid gave a doorknob the same texel budget as a floor slab,
+    and for the standard three-mesh Arcvia GLB it left one cell of four empty
+    by construction. Both were symptoms of ignoring surface area.
 
-    The tempting fix is a 3x1 strip, which would use the whole atlas. Do not do
-    it. The UV transform below scales u and v by the SAME factor, which is what
-    keeps texel density isotropic. A non-square cell needs a per-axis scale,
-    and stretching a smart_project island into a 1/3 x 1 rectangle gives 3:1
-    anisotropic texels — lighting three times coarser along one axis. Judged by
-    the worse axis, effective resolution per object falls from (1/2)^2 to
-    (1/3)^2. Coverage rises to 100% and usable resolution drops by more than the
-    25% recovered.
+    Cells are still SQUARES — the UV transform scales u and v by one factor,
+    which is what keeps texel density isotropic; the once-tempting 3x1 strip
+    stays rejected for the 3:1 anisotropy it would smear into every island.
+    But each square's side is now proportional to the square root of its
+    mesh's surface area, which makes texel DENSITY roughly uniform across
+    objects: the walls of a villa get several times the doorknob's texels
+    because they have several times its surface, not because of where they
+    fell in a list. A floor keeps every square from vanishing — a tiny mesh
+    still needs enough texels to sample — and a shelf packer with a binary
+    search on the global scale fits the squares into the unit atlas. Three
+    equal-area meshes degrade gracefully to the old 2x2-style layout; unequal
+    ones — the only kind real buildings produce — get the allocation the old
+    grid could not express.
 
-    So the empty cell is a symptom of uniform square allocation, not a packing
-    bug to be patched. The cure is the area-weighted allocation named above,
-    which fixes the doorknob problem and the empty cell together.
+    The layout is emitted as ARCVIA_BAKE_LAYOUT so check_atlas.mjs can verify
+    occupancy against what was actually packed rather than guessing a grid.
 
     ── Coverage is not comparable across atlas sizes ────────────────────────
     Measured 40.5% / 21.7% / 11.3% at 512 / 1024 / 2048. Lit texels scale with
@@ -530,11 +531,61 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
         "ArcviaLightmap", width=size, height=size, float_buffer=True
     )
 
-    cells = math.ceil(math.sqrt(len(meshes)))
-    cell = 1.0 / cells
-    # Keep islands off the cell boundary so the bake margin cannot bleed one
-    # object's lighting into its neighbour's region.
-    inset = 0.02 * cell
+    # ---- Area-weighted layout ---------------------------------------------
+    # One square per mesh, side proportional to sqrt(surface area), so texel
+    # density is roughly uniform across objects. The floor of 25% of the
+    # largest side keeps a doorknob-sized mesh sampleable; without it the
+    # side collapses to a few texels and the bake margin IS the lighting.
+    def _surface_area(obj):
+        s = obj.matrix_world.to_scale()
+        # Isotropic approximation of the scale's effect on area. Imported
+        # GLBs almost always carry identity scale; this keeps the rare
+        # scaled one from being starved outright rather than being exact.
+        factor = (abs(s.x * s.y) + abs(s.y * s.z) + abs(s.x * s.z)) / 3.0
+        return max(sum(p.area for p in obj.data.polygons) * factor, 1e-9)
+
+    raw = [math.sqrt(_surface_area(o)) for o in meshes]
+    floor_side = 0.25 * max(raw)
+    sides = [max(r, floor_side) for r in raw]
+
+    def _shelf(scale):
+        """Pack scaled squares left-to-right into shelves; None if they spill."""
+        order = sorted(range(len(sides)), key=lambda i: -sides[i])
+        rects = [None] * len(sides)
+        x = y = shelf = 0.0
+        for i in order:
+            w = sides[i] * scale
+            if w > 1.0:
+                return None
+            if x + w > 1.0:
+                y += shelf
+                x = shelf = 0.0
+            if y + w > 1.0:
+                return None
+            rects[i] = (x, y, w)
+            x += w
+            shelf = max(shelf, w)
+        return rects
+
+    low, high = 0.0, 1.0 / max(sides)
+    for _ in range(48):
+        mid = (low + high) / 2.0
+        if _shelf(mid):
+            low = mid
+        else:
+            high = mid
+    layout = _shelf(low)
+    if layout is None:  # cannot happen for low > 0, but never bake blind
+        raise RuntimeError("lightmap layout failed to pack")
+
+    # For check_atlas.mjs: verify occupancy against what was actually packed
+    # rather than inferring a grid that no longer exists.
+    print(
+        "ARCVIA_BAKE_LAYOUT:"
+        + json.dumps([{"x": round(x, 5), "y": round(y, 5), "side": round(s, 5)}
+                      for x, y, s in layout]),
+        flush=True,
+    )
 
     # ---- Does the caller already own the layout? --------------------------
     #
@@ -604,12 +655,15 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
             bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.04)
             bpy.ops.object.mode_set(mode="OBJECT")
 
-            col, row = index % cells, index // cells
+            rect_x, rect_y, side = layout[index]
+            # Keep islands off the square's boundary so the bake margin cannot
+            # bleed one object's lighting into its neighbour's region.
+            inset = 0.02 * side
             for loop_uv in obj.data.uv_layers[uv_name].data:
                 u, v = loop_uv.uv
                 loop_uv.uv = (
-                    col * cell + inset + u * (cell - 2 * inset),
-                    row * cell + inset + v * (cell - 2 * inset),
+                    rect_x + inset + u * (side - 2 * inset),
+                    rect_y + inset + v * (side - 2 * inset),
                 )
 
         # 4. Point every material at the shared bake target.
@@ -691,7 +745,12 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
 
     view.view_transform = previous
 
-    print(f"ARCVIA_BAKE_CELLS:{cells}x{cells} objects:{len(meshes)}", flush=True)
+    coverage = sum(s * s for _, _, s in layout)
+    print(
+        f"ARCVIA_BAKE_CELLS:area-weighted objects:{len(meshes)} "
+        f"coverage:{coverage:.2f}",
+        flush=True,
+    )
     try:
         print(f"ARCVIA_BAKE_BYTES:{Path(out_path).stat().st_size}", flush=True)
     except OSError:

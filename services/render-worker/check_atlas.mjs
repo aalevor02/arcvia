@@ -121,9 +121,19 @@ function decodePng(buffer) {
 const image = decodePng(readFileSync(file))
 const { width, height, depth, channels, stride, data } = image
 
-// Objects can be given, or inferred from the grid that best explains the lit
-// cells. Given is better — the point is to compare against what was sent.
-const objects = objectsArg ? Number(objectsArg) : null
+// The second argument is either an object count (legacy uniform-grid bakes)
+// or a path to the layout the bake emitted as ARCVIA_BAKE_LAYOUT — a JSON
+// array of {x, y, side} unit-square rects. The layout is better: it verifies
+// against what was actually packed instead of a grid the packer no longer
+// uses.
+let layout = null
+if (objectsArg && !/^\d+$/.test(objectsArg)) {
+  layout = JSON.parse(readFileSync(objectsArg, 'utf8'))
+  if (!Array.isArray(layout) || layout.some((r) => !(r.side > 0))) {
+    throw new Error(`${objectsArg} is not a layout: expected [{x, y, side}, …]`)
+  }
+}
+const objects = objectsArg && !layout ? Number(objectsArg) : null
 const grid = objects ? Math.ceil(Math.sqrt(objects)) : null
 
 /** Mean brightness of a rectangle, 0-1, sampling on a stride for speed. */
@@ -149,9 +159,73 @@ function meanBrightness(x0, y0, x1, y1) {
 console.log(`atlas    : ${width}x${height}, ${depth}-bit, ${channels} channels`)
 console.log(`overall  : mean brightness ${meanBrightness(0, 0, width, height).toFixed(3)}`)
 
+// ---- Layout mode: verify against the packer's own rects --------------------
+if (layout) {
+  // Same threshold and reasoning as the grid mode below.
+  const LIT = 0.02
+  let lit = 0
+
+  for (const [index, rect] of layout.entries()) {
+    const x0 = Math.floor(rect.x * width)
+    // UV v runs bottom-up; PNG rows run top-down. Sampling without the flip
+    // reads every rect at its mirror position — the plants' light then shows
+    // up "outside every rect" while their own rect reads empty, which is
+    // exactly the false alarm this comment is here to prevent.
+    const y0 = Math.floor((1 - rect.y - rect.side) * height)
+    const sidePx = Math.floor(rect.side * Math.min(width, height))
+    const inset = Math.floor(sidePx * 0.15)
+    const mean = meanBrightness(x0 + inset, y0 + inset, x0 + sidePx - inset, y0 + sidePx - inset)
+    const isLit = mean > LIT
+    if (isLit) lit++
+    console.log(
+      `rect ${index}: ${(rect.side * 100).toFixed(1)}% side at ` +
+        `(${rect.x.toFixed(2)}, ${rect.y.toFixed(2)}) — mean ${mean.toFixed(3)} ${isLit ? '#' : '.'}`,
+    )
+  }
+
+  // Light OUTSIDE every rect is the failure this mode exists to catch: an
+  // island that escaped its square, or bake and browser disagreeing on the
+  // layout. Sampled on a coarse grid, skipping points inside any rect.
+  let escaped = 0
+  let samples = 0
+  const step = Math.max(8, Math.floor(width / 64))
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const u = x / width
+      const v = 1 - y / height // the same flip as above
+      const insideARect = layout.some(
+        (r) => u >= r.x && u < r.x + r.side && v >= r.y && v < r.y + r.side,
+      )
+      if (insideARect) continue
+      samples++
+      if (meanBrightness(x, y, Math.min(x + 2, width), Math.min(y + 2, height)) > LIT) escaped++
+    }
+  }
+
+  const share = samples ? escaped / samples : 0
+  console.log(`\nlit rects: ${lit} of ${layout.length}`)
+  console.log(`outside  : ${(share * 100).toFixed(1)}% of unpacked samples lit`)
+
+  // The margin dilates islands a few texels past their rects, so a small
+  // share is normal; whole escaped islands are not.
+  if (share > 0.1) {
+    console.log('\nFAIL  light far outside every packed rect — an island escaped, or the')
+    console.log('      atlas was baked with a different layout than this file describes.')
+    process.exit(1)
+  }
+  if (lit === 0) {
+    console.log('\nFAIL  no rect is lit — the bake wrote nothing where the packer packed.')
+    process.exit(1)
+  }
+  console.log('\nOK    every lit region is a packed rect.')
+  process.exit(0)
+}
+
 if (!grid) {
-  console.log('\nPass the object count to check cell occupancy:')
+  console.log('\nPass the object count (legacy grid bakes) or the ARCVIA_BAKE_LAYOUT')
+  console.log('JSON file to check cell occupancy:')
   console.log('  node check_atlas.mjs atlas.png 42')
+  console.log('  node check_atlas.mjs atlas.png layout.json')
   process.exit(0)
 }
 
