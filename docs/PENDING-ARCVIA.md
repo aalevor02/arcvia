@@ -258,6 +258,22 @@ renderer**, which is what the roadmap actually asked for.
 | surfaces | 8 keys, live in the editor (`e501c20`) |
 | environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
 
+**2026-08-24 (evening) — the first furnished render, and what it cost to
+get.** Scene `Furnished Villa (hybrid)`: villa DXF → CAD job → furnishFromCad
+→ hybrid compose → Cycles isometric via the API, with real catalogue models
+in the frame (potted plants visible on the terrace) and the validity gate
+stamping frame stats on the job (blown 0.24 / black 0.56 vs the default-sky
+background / 231 tones — no false suspect). `A:\tmp\furnished-villa-render.png`.
+Two operational lessons, both paid for: (1) NEVER run two API processes over
+one `.data/db.json` — the store serialises writes per-process only, and a
+second server (an 8791 verification instance, and separately a crash-looping
+leftover dev:api tree) caused tmp-rename races and double-spawned Blender for
+the same job against the same output file; one server, one db, kill strays by
+checking which PID owns the port. (2) In dev, `--watch` restarts on ANY
+services/api/src save ORPHAN the running Blender and requeue the job — the
+restart-reconciliation then double-works every bake a save interrupts. Batch
+api saves while a bake runs; prod has no watch and no such hazard.
+
 **2026-08-24 (later) — the fix-all pass.** Four more closed: the queue's
 single-image renders now carry a validity verdict (`ARCVIA_FRAME` +
 `ARCVIA_SUSPECT` on the job markers — the customer-charged path had no
