@@ -1,22 +1,19 @@
 import { useState } from 'react'
-import type { SceneViewer } from '@arcvia/viewer'
 
-import { readDocument, request, uploadFloorplan, type DocumentSheet } from '../lib/api'
-import {
-  applyDesignToModel,
-  hubQueriesForSpec,
-  type DesignSpec,
-} from '../plan/deckDesign'
-
-/** Read one render's design. `page` 0 means the stored file IS the image. */
-const readDesign = (url: string, page = 0, index = 0, room?: string | null) =>
-  request<DesignSpec>('/detect/document/design', {
-    method: 'POST',
-    body: { url, page, index, ...(room ? { room } : {}) },
-  })
+import { readDocument, readDesign, uploadFloorplan, type DocumentSheet } from '../lib/api'
+import { hubQueriesForSpec, type DesignSpec } from '../plan/deckDesign'
 
 interface Props {
-  viewer: SceneViewer | null
+  /** The design the scene currently wears, so the worn render can be marked. */
+  design: DesignSpec | null
+  /**
+   * The one path a design takes onto the scene. The editor owns application
+   * (its rebuild effect re-dresses on every rebuild) and persistence; the
+   * panel only chooses. The panel used to mutate the model directly, which
+   * dressed it beautifully until the next wall drag rebuilt it plain — and
+   * nothing ever reached the published page.
+   */
+  onApplyDesign(next: DesignSpec | null): void
   /** The stored deck, when the scene already remembers one. */
   deckUrl: string | null
   /** Persist a newly uploaded deck on the scene. */
@@ -28,7 +25,6 @@ interface RenderRow {
   spec: DesignSpec | null
   state: 'idle' | 'reading' | 'read' | 'failed'
   error?: string
-  applied?: string
 }
 
 /**
@@ -47,7 +43,7 @@ interface RenderRow {
  * at its doorway; the caption under the button says which render is worn.
  * Per-room application arrives with per-room floor meshes from the engine.
  */
-export default function DeckDesignPanel({ viewer, deckUrl, onDeckStored }: Props) {
+export default function DeckDesignPanel({ design, onApplyDesign, deckUrl, onDeckStored }: Props) {
   const [url, setUrl] = useState<string | null>(deckUrl)
   const [rows, setRows] = useState<RenderRow[]>([])
   const [busy, setBusy] = useState<'upload' | 'outline' | null>(null)
@@ -108,22 +104,18 @@ export default function DeckDesignPanel({ viewer, deckUrl, onDeckStored }: Props
   }
 
   const apply = (row: RenderRow) => {
-    const model = viewer?.modelRoot
-    if (!model || !row.spec) return
-    const applied = applyDesignToModel(model, row.spec)
-    viewer?.requestRender()
-    setRows((all) =>
-      all.map((r) =>
-        r.sheet === row.sheet
-          ? {
-              ...r,
-              applied: `${applied.floors} floor, ${applied.walls} wall and ` +
-                `${applied.ceilings} ceiling mesh(es) wear this render's finishes`,
-            }
-          : { ...r, applied: undefined },
-      ),
-    )
+    if (!row.spec) return
+    onApplyDesign({
+      ...row.spec,
+      source: { page: row.sheet.page, index: row.sheet.index, room: row.sheet.room },
+    })
   }
+
+  /** Whether this row's render is the one the scene currently wears. */
+  const worn = (row: RenderRow) =>
+    design?.source != null &&
+    design.source.page === row.sheet.page &&
+    design.source.index === row.sheet.index
 
   return (
     <section>
@@ -132,6 +124,17 @@ export default function DeckDesignPanel({ viewer, deckUrl, onDeckStored }: Props
         Read the materials and furnishing out of the deck&apos;s renders, and
         dress the model in the same finishes.
       </p>
+
+      {design && (
+        <p className="muted" style={{ fontSize: 11.5 }}>
+          Worn now: {design.source?.room ?? design.room ?? 'a deck render'}
+          {design.source?.auto ? ' — read automatically when the scene opened' : ''}
+          {' · '}
+          <button className="btn" onClick={() => onApplyDesign(null)}>
+            Clear the dressing
+          </button>
+        </p>
+      )}
 
       {!url && (
         <label className="btn" style={{ display: 'inline-block', marginTop: 6 }}>
@@ -191,10 +194,16 @@ export default function DeckDesignPanel({ viewer, deckUrl, onDeckStored }: Props
               <div className="muted">
                 {row.spec.furniture.map((f) => f.item).join(', ') || 'no furniture read'}
               </div>
-              <button className="btn btn-primary" style={{ marginTop: 4 }} onClick={() => apply(row)}>
-                Dress the model in these finishes
-              </button>
-              {row.applied && <p className="muted">{row.applied}</p>}
+              {worn(row) ? (
+                <p className="muted" style={{ marginTop: 4 }}>
+                  The model wears this render&apos;s finishes — saved with the
+                  scene, and published with it.
+                </p>
+              ) : (
+                <button className="btn btn-primary" style={{ marginTop: 4 }} onClick={() => apply(row)}>
+                  Dress the model in these finishes
+                </button>
+              )}
 
               {/* The hub queries: where to find the SAME materials as real,
                   licensed assets. Text for now — the hub browser panel takes

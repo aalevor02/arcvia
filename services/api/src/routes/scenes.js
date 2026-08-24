@@ -90,6 +90,14 @@ export async function registerSceneRoutes(app) {
       'lightsUrl',
       'hdriUrl',
       'floorPlanUrl',
+      // The design read out of the deck's renders (a DesignSpec: floor, walls,
+      // ceiling, style, measured colours). The studio re-applies it on every
+      // rebuild; the published page never reads it — the look reaches clients
+      // inside the exported model. Null is meaningful: "the user cleared the
+      // dressing", which stops the studio's read-on-open resurrecting it.
+      // Absent from this list, the whole feature was unreachable — the studio
+      // dressed the model on screen and this route refused the save.
+      'design',
       'bakedUrl',
       'plan',
       // What turns a model into a presentation. All three are authored in the

@@ -288,6 +288,33 @@ pairing (both are MISSING WALLS, not tolerances — no cheap fix exists),
 and the M5 review queue (`CadImport.tsx`), which is a full feature. The
 two `TODO(you)` business decisions were put to the owner directly.
 
+**2026-08-24 (evening) — the deck's design now REACHES the walkthrough**
+(aalev-88, after the owner said the walkthrough "looks really plain — no
+materials from the actual renders are being used", and was right). The design
+reader and the dressing both existed and were session-local: `applyDesignToModel`
+had one caller (the panel), nothing persisted the spec, the next wall-drag
+rebuild wiped it, and the published page — which loads `scene.modelUrl` and
+nothing else — could never see it. Trap-6 shape, sixth instance. Now:
+`design` on the scene (PATCH allow-listed, null = "user cleared it");
+SceneView re-dresses on every rebuild in all three branches; a scene with a
+deck and no design auto-reads ONE render on open (free, ~15 s, the panel
+refines); and **publish captures the editor's model** — export + upload +
+modelUrl — unless a bake exists (the atlas describes the bake-time export's
+UVs; replacing that model would light new geometry with the old atlas).
+Publish-capture also closes a second gap: an unbaked plan scene used to
+publish with NO model at all. Verified in Chrome end to end on the villa GLB +
+Avarana deck: auto-read → dressed both storeys → publish → the public page
+serves the dressed 1.96 MB export. Two traps for the next reader: (1) do NOT
+gate the dressing on `await upgradeSurfaces()` — eight fetches, and one cold
+stall leaves the model undressed forever; apply immediately, re-apply in
+`.then` (dressing is idempotent). (2) `Color.getHexString()` returns sRGB —
+comparing it against linear-space arithmetic "proves" the tint never applied
+when it is exactly right (#d0d6d3 IS white→#6f7f75 @0.65, in sRGB). Cost an
+hour of chasing a working feature. Still open, and it is the visible-quality
+ceiling: per-room finishes need per-room floor meshes from the engine; hub
+materials are ranked queries for a human, not auto-picked; and a bake made
+BEFORE a dressing publishes the undressed look — re-bake after dressing.
+
 **2026-08-24 — a CAD import furnishes itself.** The engine always knew where
 the furniture was (`kernel.furniture`: exact block positions, rotations, the
 four-signal classifier resolving to catalogue item ids); nothing carried it

@@ -3,6 +3,7 @@ import type { Credit } from '../catalogue/credits'
 import type { SceneOptions } from '../publish/options'
 import type { Project } from '@arcvia/publication'
 import type { SceneView, Hotspot, Branding } from '../plan/presentation'
+import type { DesignSpec } from '../plan/deckDesign'
 
 /**
  * Studio API client.
@@ -197,6 +198,17 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
    * is present; the measured centreline sum is labelled as a measurement.
    */
   sbua?: number | null
+  /**
+   * The design read out of the client deck's renders, worn by the model.
+   *
+   * Absent: no render has ever been read (the editor may read one
+   * automatically on open). Null: the user cleared the dressing, which the
+   * auto-read must respect — clearing that came back on the next visit would
+   * teach people the button lies. The look reaches the PUBLISHED page through
+   * the exported model, not through this field: the walkthrough loads only
+   * `modelUrl`, so this spec is the studio's record of what to re-apply.
+   */
+  design?: DesignSpec | null
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }
@@ -371,6 +383,21 @@ export interface DocumentOutline {
  */
 export const readDocument = (url: string) =>
   request<DocumentOutline>('/detect/document', { method: 'POST', body: { url } })
+
+/**
+ * Read one render's design out of a stored deck — a ~15 s vision round trip
+ * that returns a DesignSpec. `page` 0 means the stored file IS the image.
+ *
+ * Lives here rather than in `plan/deckDesign` for the reason recorded there:
+ * that module is imported by headless tests, and this one reads Vite env at
+ * module load. One definition, shared by the panel and the editor's
+ * read-on-open, so the two cannot drift apart on the endpoint or its body.
+ */
+export const readDesign = (url: string, page = 0, index = 0, room?: string | null) =>
+  request<DesignSpec>('/detect/document/design', {
+    method: 'POST',
+    body: { url, page, index, ...(room ? { room } : {}) },
+  })
 
 /**
  * Pull one image out of that PDF and store it as a drawing.

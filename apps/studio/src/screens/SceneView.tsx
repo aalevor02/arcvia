@@ -18,7 +18,10 @@ import {
   getScene,
   uploadCapture,
   renderStyles,
+  readDocument,
+  readDesign,
 } from '../lib/api'
+import { applyDesignToModel, type DesignSpec } from '../plan/deckDesign'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { upgradeSurfaces } from '../catalogue/surfaceUpgrade'
 import { creditsFor } from '../catalogue/credits'
@@ -153,6 +156,26 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   const [floorIndex, setFloorIndex] = useState(0)
   /** The client deck this scene was built from — the design reader's source. */
   const [deckUrl, setDeckUrl] = useState<string | null>(null)
+  /**
+   * The design the model wears, from the deck's renders.
+   *
+   * Three states, and the difference carries meaning: `undefined` means no
+   * render has ever been read, so the editor may read one automatically on
+   * open; `null` means the user cleared the dressing, which the auto-read
+   * must respect; a spec is re-applied by the rebuild effect on every
+   * rebuild — state the rebuild reads, never a one-shot mutation, because a
+   * one-shot is wiped by the next wall drag. That was the shipped behaviour
+   * this replaced: dress, nudge a chair, plain again.
+   */
+  const [design, setDesign] = useState<DesignSpec | null | undefined>(undefined)
+  /**
+   * The scene's recorded bake atlas, as distinct from the view-local `baked`
+   * flag (which is only ever true between a finished bake and the next
+   * edit). Publish needs the record: a bake's atlas describes the UV layout
+   * of the bake-time export, so while one exists, publish must not replace
+   * `modelUrl` with a fresh export the atlas no longer describes.
+   */
+  const [sceneBakedUrl, setSceneBakedUrl] = useState<string | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -192,6 +215,10 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setStoredModel(scene.modelUrl ?? null)
         setCadSource(scene.cadModelUrl ?? null)
         setDeckUrl(scene.floorPlanUrl ?? null)
+        // Absent stays `undefined` and cleared stays `null` — the auto-read
+        // below tells them apart.
+        setDesign(scene.design)
+        setSceneBakedUrl(scene.bakedUrl ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -225,6 +252,62 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       setStatus('That change could not be saved. Check your connection.'),
     )
   }
+
+  /**
+   * The one path a design takes onto the scene: state, then the record.
+   *
+   * The rebuild effect dresses the model whenever it runs and `design` is in
+   * its dependency list, so setting state IS applying — there is deliberately
+   * no direct mutation here. `null` is a real value: it clears the dressing
+   * and is persisted, so the auto-read does not resurrect a look the user
+   * removed.
+   */
+  function applyDesign(next: DesignSpec | null) {
+    setDesign(next)
+    void updateScene(sceneId, { design: next }).catch(() =>
+      setStatus('The design could not be saved. Check your connection.'),
+    )
+  }
+
+  /**
+   * A scene that carries a deck but has never been given a design reads one
+   * render on open.
+   *
+   * One vision round trip (~15 s), for the first render the deck offers. The
+   * product owned the client's renders and never looked at them unless a user
+   * found a collapsed panel and clicked — walkthroughs shipped plain while the
+   * intended look sat in the source document. One automatic read is the
+   * smallest honest fix: the panel remains the place to read further renders
+   * or pick a different one, and `design: null` (a cleared dressing) stops
+   * this firing ever again for the scene.
+   */
+  const autoReadFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!deckUrl || design !== undefined) return
+    if (autoReadFor.current === sceneId) return
+    autoReadFor.current = sceneId
+    void (async () => {
+      try {
+        setStatus('Reading the design out of the deck…')
+        const doc = await readDocument(deckUrl)
+        const renders = doc.sheets.filter((sheet) => sheet.kind === 'render')
+        if (renders.length === 0) return
+        const sheet = renders[0]
+        const spec = await readDesign(deckUrl, sheet.page, sheet.index, sheet.room)
+        spec.source = { page: sheet.page, index: sheet.index, room: sheet.room, auto: true }
+        applyDesign(spec)
+        setStatus(
+          `Dressed from the deck's ${sheet.room ?? sheet.caption ?? 'first render'} — ` +
+            'the Deck design panel has the other renders.',
+        )
+      } catch {
+        // A failed read leaves `design` undefined, so reopening the scene
+        // retries — right for a transient detector outage, and the panel's
+        // manual read is the recourse either way.
+        setStatus('The deck is stored, but its design could not be read just now.')
+      }
+    })()
+  }, [deckUrl, design, sceneId])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -301,6 +384,30 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
     const planHasObjects = plan.floors.some((floor) => Object.keys(floor.objects).length > 0)
 
+    /**
+     * Dress a root now, and again when the photographed surfaces land.
+     *
+     * Two applications on purpose. The dressing clones materials out of the
+     * surface cache, so a clone taken before `upgradeSurfaces` resolves keeps
+     * the procedural stand-in — but gating the whole dressing on that promise
+     * was tried first and is worse: it is eight network fetches, and on a
+     * cold cache a single stalled download left the model undressed for the
+     * whole session with nothing on screen saying why. Applying twice costs
+     * two material swaps; the first paints the measured colours immediately,
+     * the second upgrades the maps under them whenever they arrive.
+     */
+    const dress = (root: THREE.Object3D) => {
+      if (!design) return
+      applyDesignToModel(root, design)
+      viewer.requestRender()
+      void upgradeSurfaces(() => viewer.requestRender()).then(() => {
+        if (design) {
+          applyDesignToModel(root, design)
+          viewer.requestRender()
+        }
+      })
+    }
+
     if (!planHasWalls && storedModel && !planHasObjects) {
       setStatus('Loading the model…')
       void viewer
@@ -308,6 +415,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         .then(() => {
           viewer.setBakedLighting(false)
           setBaked(false)
+          if (viewer.modelRoot) dress(viewer.modelRoot)
           if (!walkingRef.current) viewer.frameModel()
           setStatus('Ready')
         })
@@ -354,6 +462,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
             }
           })
           void upgradeSurfaces(() => viewer.requestRender())
+          dress(composed)
         } catch {
           setStatus('The stored model could not be loaded.')
         }
@@ -381,11 +490,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
     // the plan is, and it resolves once for the session however often this
     // effect re-runs.
     void upgradeSurfaces(() => viewer.requestRender())
+    dress(group)
 
     // Framing the model fights the walk camera: it would yank the view back
     // outside the building on every edit.
     if (!walkingRef.current) viewer.frameModel()
-  }, [plan, ceilings, finish, storedModel, cadSource])
+  }, [plan, ceilings, finish, storedModel, cadSource, design])
 
   /**
    * Enter or leave first-person.
@@ -518,6 +628,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       // lighting — without it a client opens the flat, sourceless room the
       // bake exists to fix.
       await updateScene(sceneId, { bakedUrl: result.outputUrl })
+      setSceneBakedUrl(result.outputUrl)
 
       const applied = await loadAndApply(model, storedUrl(result.outputUrl))
       // The atlas already contains the sun, the sky, the bounce and the
@@ -595,6 +706,45 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   async function handlePublish() {
     setStatus('Publishing…')
     try {
+      // ── The model the walkthrough will actually show ─────────────────────
+      // The published page loads `scene.modelUrl` and nothing else — it
+      // cannot rebuild the plan, upgrade a surface, or apply a design. Until
+      // this step existed, only the bake flow ever wrote modelUrl: a scene
+      // published without a bake shipped either no model at all (plan-drawn)
+      // or the raw engine GLB (CAD) — undressed, unfurnished, nothing like
+      // the editor. Publish now captures the scene as the editor shows it.
+      //
+      // EXCEPT while a bake exists: bakedUrl's atlas describes the UV layout
+      // of the bake-time export, and replacing that model would light new
+      // geometry with the old atlas — worse than a flat model. A bake
+      // already carries the dressing worn when it was made; re-bake after
+      // changing the look.
+      const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
+      // Nothing worth capturing: a model-only scene whose viewer has not
+      // loaded yet must keep the modelUrl it has — a plan build of an empty
+      // plan would overwrite the building with an empty file.
+      const capturable = planHasWalls || Boolean(viewerRef.current?.modelRoot)
+      if (!sceneBakedUrl && capturable) {
+        const viewer = viewerRef.current
+        setStatus('Publishing — capturing the model…')
+        await modelsSettled()
+        const complete =
+          !planHasWalls && viewer?.modelRoot
+            ? viewer.modelRoot
+            : buildPlanGeometry(plan.floors, { ceilings: true, floorFinish: finish })
+        if (complete !== viewer?.modelRoot) {
+          // A fresh build starts undressed; the live modelRoot is already
+          // dressed and upgraded by the rebuild effect.
+          await upgradeModels(complete)
+          await upgradeSurfaces()
+          if (design) applyDesignToModel(complete, design)
+        }
+        const { blob } = await exportGlb(complete)
+        const stored = await uploadScene(blob)
+        await updateScene(sceneId, { modelUrl: stored.url })
+        setStoredModel(stored.url)
+      }
+
       // ── Attribution, written before the page becomes public ─────────────
       // The published viewer already renders a credit list from
       // `scene.credits` — a toggle, author links to source, licence per line.
@@ -913,7 +1063,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         />
 
         <DeckDesignPanel
-          viewer={viewerRef.current}
+          design={design ?? null}
+          onApplyDesign={applyDesign}
           deckUrl={deckUrl}
           onDeckStored={(next) => {
             setDeckUrl(next)

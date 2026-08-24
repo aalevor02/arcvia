@@ -40,6 +40,20 @@ export interface DesignFurniture {
   style?: string
 }
 
+/**
+ * Which of the deck's renders a spec was read from — page and index into the
+ * stored document, plus whether the read fired automatically on scene open.
+ * Provenance only: `applyDesignToModel` never looks at it. It exists so the
+ * panel can mark the render the model is wearing after a reload, and so an
+ * automatic read is distinguishable from a chosen one.
+ */
+export interface DesignSource {
+  page: number
+  index: number
+  room?: string | null
+  auto?: boolean
+}
+
 export interface DesignSpec {
   room: string
   floor?: DesignSurface
@@ -51,6 +65,7 @@ export interface DesignSpec {
   confidence?: number
   palette: string[]
   model?: string
+  source?: DesignSource
 }
 
 // The network half (readDesign) lives with the panel, not here: this module

@@ -160,6 +160,33 @@ ok('and the ordering is what matters, since a save is priced at 0 today',
   before === after && cost === 0,
   'refusal returns before spend() — see scenes.js')
 
+console.log('\n-- the deck design round-trips --')
+// The studio persists the design read out of a client deck's renders
+// (`scene.design`) and re-applies it on every rebuild; the published look
+// travels inside the exported model, not this field. PRESENCE is what this
+// asserts: the dressing was fully built client-side before this field was
+// writable, so it worked on screen and reached nothing — trap 6's shape, a
+// complete producer kept from its consumer by an allow-list.
+const spec = {
+  room: 'LIVING',
+  floor: { material: 'wood', colour: '#8a6a4f' },
+  walls: { finish: 'paint', colour: '#e8e2d8' },
+  furniture: [{ item: 'sofa', style: 'modern' }],
+  palette: ['#8a6a4f', '#e8e2d8'],
+  source: { page: 3, index: 0, room: 'LIVING', auto: true },
+}
+const dressed = await patch({ design: spec })
+ok('a design patch is accepted', dressed.status === 200, String(dressed.status))
+ok('and comes back whole on the next read',
+  JSON.stringify((await read()).design) === JSON.stringify(spec))
+// Null is a real value: it records "the user cleared the dressing", which
+// stops the editor's read-on-open resurrecting a look that was removed.
+const cleared = await patch({ design: null })
+ok('clearing the dressing is a value, not an error', cleared.status === 200,
+  String(cleared.status))
+ok('and reads back as null, distinct from never-dressed',
+  (await read()).design === null)
+
 console.log('\n-- an empty patch is not an error --')
 // The studio sends no empty patches today, but refusing one would be surprising:
 // nothing was dropped, so nothing needs reporting.
