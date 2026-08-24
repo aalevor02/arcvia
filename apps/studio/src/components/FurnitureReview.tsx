@@ -3,6 +3,12 @@ import { CATALOGUE } from '../catalogue/items'
 
 interface Props {
   furniture: Proposal[]
+  /**
+   * One line of context above the stats — a multi-storey CAD import reviews
+   * one storey at a time, and without this line the second batch looks like
+   * the first one reappearing.
+   */
+  heading?: string
   onAccept(): void
   onDiscard(): void
 }
@@ -24,7 +30,7 @@ const NAME = new Map(CATALOGUE.map((item) => [item.id, item.name]))
  * so in words. The user can accept the lot in one click; the point is that they
  * can see what they are accepting.
  */
-export function FurnitureReview({ furniture, onAccept, onDiscard }: Props) {
+export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Props) {
   const summary = summariseFurniture(furniture)
 
   const groups = [
@@ -50,6 +56,11 @@ export function FurnitureReview({ furniture, onAccept, onDiscard }: Props) {
 
   return (
     <>
+      {heading && (
+        <p className="alert" style={{ fontSize: 11.5, margin: '0 0 6px' }}>
+          {heading}
+        </p>
+      )}
       <div className="stat">
         <span className="muted">Furniture found</span>
         <span className="mono">{summary.total}</span>

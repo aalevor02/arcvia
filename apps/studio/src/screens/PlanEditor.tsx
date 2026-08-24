@@ -54,7 +54,7 @@ import {
   type UnitSystem,
 } from '../lib/format'
 import { cadModel, detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
-import { furnishFromCad } from '../plan/cadFurnish'
+import { cadStoreys, furnishFromCad, type CadModel } from '../plan/cadFurnish'
 import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
@@ -146,6 +146,14 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
    * once the plan itself looks right.
    */
   const [furniture, setFurniture] = useState<Proposal[] | null>(null)
+  /**
+   * A multi-storey CAD import reviews one storey's furniture at a time —
+   * accepting a batch places it on the ACTIVE plan floor, so the user must
+   * be able to switch (or create) the right floor between batches. This
+   * holds the fetched model and where the review has got to.
+   */
+  const cadFurnishRef = useRef<{ model: CadModel; storeys: number[]; at: number } | null>(null)
+  const [cadStoreyLabel, setCadStoreyLabel] = useState<string | null>(null)
 
   const [reading, setReading] = useState<{
     rooms: DetectedRoom[]
@@ -609,6 +617,28 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       ),
     )
     setFurniture(null)
+
+    // A multi-storey CAD import: the next storey's batch is offered as its
+    // own review rather than merged — each batch lands on whichever plan
+    // floor is active, and switching floors between batches is the user's
+    // step, not something to guess at.
+    const pending = cadFurnishRef.current
+    if (pending) {
+      for (let next = pending.at + 1; next < pending.storeys.length; next++) {
+        const pieces = furnishFromCad(pending.model, { storey: pending.storeys[next] })
+        if (pieces.length > 0) {
+          pending.at = next
+          setCadStoreyLabel(
+            `Storey ${next + 1} of ${pending.storeys.length} from the drawing — ` +
+              'switch to (or add) the floor it belongs on, then place.',
+          )
+          setFurniture(pieces)
+          return
+        }
+      }
+      cadFurnishRef.current = null
+      setCadStoreyLabel(null)
+    }
   }
 
   // ---- Derived -------------------------------------------------------------
@@ -769,8 +799,16 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             if (modelJsonUrl) {
               void cadModel(modelJsonUrl).then((model) => {
                 if (!model) return
-                const pieces = furnishFromCad(model)
-                if (pieces.length > 0) setFurniture(pieces)
+                const storeys = cadStoreys(model)
+                const pieces = furnishFromCad(model, { storey: storeys[0] ?? 0 })
+                if (pieces.length === 0) return
+                cadFurnishRef.current = { model, storeys, at: 0 }
+                setCadStoreyLabel(
+                  storeys.length > 1
+                    ? `Storey 1 of ${storeys.length} from the drawing — place onto the active floor, then the next storey is offered.`
+                    : null,
+                )
+                setFurniture(pieces)
               })
             }
 
@@ -915,8 +953,13 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
               <span className="eyebrow">Furniture in the drawing</span>
               <FurnitureReview
                 furniture={furniture}
+                heading={cadStoreyLabel ?? undefined}
                 onAccept={acceptFurniture}
-                onDiscard={() => setFurniture(null)}
+                onDiscard={() => {
+                  setFurniture(null)
+                  cadFurnishRef.current = null
+                  setCadStoreyLabel(null)
+                }}
               />
             </section>
           )}
