@@ -101,7 +101,7 @@ def _encode(image: np.ndarray) -> str | None:
     return None
 
 
-def _ask(image: np.ndarray, prompt: str) -> str | None:
+def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
     """One image, one question, the raw text answer — or None on any failure."""
     encoded = _encode(image)
     if not encoded:
@@ -116,7 +116,9 @@ def _ask(image: np.ndarray, prompt: str) -> str | None:
                  "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
             ],
         }],
-        "max_tokens": 300,
+        # 300 fits a verdict; a caller wanting a whole DesignSpec passes more —
+        # the first truncated spec parsed as "no answer" and read as a refusal.
+        "max_tokens": max_tokens,
         "temperature": 0.0,
     }).encode("utf-8")
 

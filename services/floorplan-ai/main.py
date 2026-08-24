@@ -37,6 +37,7 @@ import numpy as np
 
 import adjudicate as adjudicate_pass
 import deck
+import design
 import labels as text_labels
 import pdfbackend
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
@@ -177,6 +178,8 @@ def health() -> dict:
         # The vision model that second-guesses proposals, or null when none is
         # configured. Named so a bug report says which model judged the plan.
         "adjudicator": adjudicate_pass.name(),
+        # The same model reads deck renders into DesignSpecs (/design).
+        "reads_design": design.available(),
     }
 
 
@@ -305,6 +308,64 @@ async def document_page(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     return Response(content=image, media_type="image/png")
+
+
+@app.post("/design")
+async def design_endpoint(
+    file: UploadFile = File(...),
+    page: int = 0,
+    index: int = 0,
+    room: str | None = None,
+) -> dict:
+    """
+    Read the DESIGN out of a render: materials, colours, furnishing, style.
+
+    Two input shapes, one round trip each:
+      - an image upload (page=0): the file IS the render;
+      - a PDF upload with page/index: the render is extracted here, so the
+        caller that already stored the deck never re-uploads pixels.
+
+    The palette is MEASURED here (deck.py's k-means) and handed to the vision
+    model as ground truth to assign, not invent — see design.py. `room` is the
+    deck caption's hint, when the caller has one.
+    """
+    if not design.available():
+        raise HTTPException(
+            status_code=503,
+            detail="The design reader is not configured. Set NVIDIA_API_KEY "
+                   "(or FLOORPLAN_ADJUDICATOR_KEY) for services/floorplan-ai.",
+        )
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty upload.")
+
+    if page > 0:
+        if not deck.available():
+            raise HTTPException(status_code=503, detail="PDF reading is not installed.")
+        try:
+            raw = deck.extract(raw, page=page, index=index, long_edge=1600)
+        except IndexError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except Exception as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Could not read that image.")
+    if image.shape[0] * image.shape[1] > MAX_PIXELS:
+        raise HTTPException(status_code=413, detail="Image is too large.")
+
+    spec = design.read_design(image, deck.palette(image), room_hint=room)
+    if spec is None:
+        # Unanswered model and not-a-render land here together; both mean the
+        # caller has no spec to apply, and the message says what to try.
+        raise HTTPException(
+            status_code=422,
+            detail="No design could be read from that image — it may not be "
+                   "a render, or the vision model did not answer.",
+        )
+    return spec
 
 
 # --------------------------------------------------------------------------
