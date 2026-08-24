@@ -195,6 +195,37 @@ export async function registerDetectRoutes(app) {
     })
     return reply.status(201).send(stored)
   })
+
+  /**
+   * The DESIGN inside a render: materials, colours, furnishing, style.
+   *
+   * Takes a stored deck (page/index select the render, extracted service-side
+   * so pixels are never re-uploaded) or a stored image. Free, like /document:
+   * reading a spec is seconds of a hosted vision model, and charging to find
+   * out what the designer chose would price the question nobody skips.
+   */
+  app.post('/document/design', { preHandler: requireAuth }, async (request, reply) => {
+    const key = storageKey(request.body?.url ?? request.body?.key)
+    if (!key) {
+      return reply.status(400).send({ message: 'Provide the key of a stored deck or render.' })
+    }
+
+    const page = Number(request.body?.page ?? 0)
+    const index = Number(request.body?.index ?? 0)
+    if (!Number.isInteger(page) || page < 0 || !Number.isInteger(index) || index < 0) {
+      return reply.status(400).send({ message: 'Page and index must be whole numbers.' })
+    }
+
+    const file = await open(key)
+    if (!file) return reply.status(404).send({ message: 'That file is not stored here.' })
+
+    const query = new URLSearchParams({ page: String(page), index: String(index) })
+    const room = typeof request.body?.room === 'string' ? request.body.room.slice(0, 80) : ''
+    if (room) query.set('room', room)
+
+    await proxyDocument(request, reply, `/design?${query}`, file, {})
+    return reply
+  })
 }
 
 /**
@@ -233,17 +264,17 @@ async function proxyDocument(request, reply, path, file, { raw = false } = {}) {
   }
 
   if (response.status === 503) {
-    // The service is up but was installed without PDF support. Saying so is
-    // worth more than a generic failure, because the fix is one pip install and
-    // the user cannot be expected to guess that.
+    // The service is up but a capability is missing — PDF support, or the
+    // design reader's vision key. The service names which in its own detail;
+    // forward that, because a hardcoded "install PDF support" answer to a
+    // missing NVIDIA_API_KEY sends the operator to fix the wrong thing.
+    const body = await response.json().catch(() => ({}))
     reply.status(503).send({
-      // Names the libraries the documented install actually uses. This used to
-      // say "install PyMuPDF", which stopped being true when PyMuPDF was
-      // dropped for its AGPL terms — and an error message that sends someone to
-      // install the wrong library costs more than no message at all.
       message:
-        'This installation cannot read PDFs. Run `pip install -r requirements.txt` in services/floorplan-ai.',
-      code: 'PDF_UNSUPPORTED',
+        typeof body.detail === 'string'
+          ? body.detail
+          : 'This installation cannot read PDFs. Run `pip install -r requirements.txt` in services/floorplan-ai.',
+      code: 'CAPABILITY_MISSING',
     })
     return null
   }
