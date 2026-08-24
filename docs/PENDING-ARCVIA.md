@@ -258,6 +258,20 @@ renderer**, which is what the roadmap actually asked for.
 | surfaces | 8 keys, live in the editor (`e501c20`) |
 | environments | 12, live in the editor, render path proven end to end (`0da396e`, `0cc62a1`) |
 
+**2026-08-24 (later) — the fix-all pass.** Four more closed: the queue's
+single-image renders now carry a validity verdict (`ARCVIA_FRAME` +
+`ARCVIA_SUSPECT` on the job markers — the customer-charged path had no
+check of any colour; `205c820`); the lightmap atlas is area-weighted
+squares (walls 52% of the atlas where the grid gave 11%, layout emitted
+and verified by check_atlas's new layout mode incl. the UV-v/PNG-row flip;
+`99fc5bb`); multi-storey CAD furnishing reviews one storey per batch
+(`c38d830`); and the LATEST DRAWINGS frame bug was closed by frame
+ranking (`141fe0f`, aalev-c3). Still open and honestly research-grade,
+each worth its own session: the 6/18 unhosted villa doors and ~44%
+pairing (both are MISSING WALLS, not tolerances — no cheap fix exists),
+and the M5 review queue (`CadImport.tsx`), which is a full feature. The
+two `TODO(you)` business decisions were put to the owner directly.
+
 **2026-08-24 — a CAD import furnishes itself.** The engine always knew where
 the furniture was (`kernel.furniture`: exact block positions, rotations, the
 four-signal classifier resolving to catalogue item ids); nothing carried it
