@@ -70,6 +70,7 @@ import { CalibrateDialog } from '../components/CalibrateDialog'
 import { ProposalReview } from '../components/ProposalReview'
 import { FurnitureReview } from '../components/FurnitureReview'
 import { CataloguePanel } from '../components/CataloguePanel'
+import { HubBrowserPanel } from '../components/HubBrowserPanel'
 import { ObjectInspector } from '../components/ObjectInspector'
 import type { PlacedObject } from '../catalogue/types'
 
@@ -149,6 +150,8 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     rooms: DetectedRoom[]
     scale: DetectedScale | null
     scaleApplied: boolean
+    /** What the vision adjudicator did — "dropped 4 walls — bed (95%)". */
+    notes: string[]
   } | null>(null)
   const [detecting, setDetecting] = useState(false)
   /** Catalogue item armed for placing. */
@@ -521,6 +524,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         rooms: result.rooms ?? [],
         scale: printed ?? null,
         scaleApplied,
+        notes: result.notes ?? [],
       })
 
       // Furniture comes out of the same read. The detector had to decide which
@@ -857,6 +861,8 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             onPick={setPlacing}
           />
 
+          <HubBrowserPanel />
+
           <UnderlayPanel
             underlay={floor.underlay}
             units={units}
@@ -904,6 +910,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                 rooms={reading?.rooms ?? []}
                 scale={reading?.scale ?? null}
                 scaleApplied={reading?.scaleApplied ?? false}
+                notes={reading?.notes ?? []}
                 onDiscard={() => {
                   setProposal(null)
                   setReading(null)

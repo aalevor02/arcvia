@@ -86,6 +86,9 @@ export interface DetectionResult {
   rooms?: DetectedRoom[]
   scale?: DetectedScale | null
   low_confidence: boolean
+  /** The vision adjudicator's account of what it changed. Absent from
+   *  readers without one configured, so every use tolerates undefined. */
+  notes?: string[]
 }
 
 /** A wall ready to be drawn into the plan, in world metres. */

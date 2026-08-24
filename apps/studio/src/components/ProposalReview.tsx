@@ -15,6 +15,8 @@ interface Props {
   scale: DetectedScale | null
   /** Whether that scale was used, or the drawing was already calibrated. */
   scaleApplied: boolean
+  /** What the vision adjudicator changed or flagged, in its own words. */
+  notes?: string[]
   onAccept(): void
   onDiscard(): void
 }
@@ -38,6 +40,7 @@ export function ProposalReview({
   rooms,
   scale,
   scaleApplied,
+  notes = [],
   onAccept,
   onDiscard,
 }: Props) {
@@ -60,6 +63,18 @@ export function ProposalReview({
         <span className="muted">Rooms closed</span>
         <span className="mono">{rooms.length}</span>
       </div>
+      {/* The adjudicator's own account of what it changed — "dropped 4
+          proposed walls — bed (95%)". A proposal that quietly shrank between
+          reads would look like flakiness; the same proposal with its reasons
+          attached reads as review. Empty without a vision model configured. */}
+      {notes.length > 0 && (
+        <ul className="muted" style={{ fontSize: 11.5, lineHeight: 1.5, paddingLeft: 16, margin: '6px 0' }}>
+          {notes.map((note) => (
+            <li key={note}>{note.replace(/^adjudicator: /, '')}</li>
+          ))}
+        </ul>
+      )}
+
       <div className="stat">
         <span className="muted">Total run</span>
         <span className="mono">{formatLength(summary.totalLength, units)}</span>
