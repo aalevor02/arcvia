@@ -928,6 +928,15 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.9, height: 0.8 },
     shape: 'hedge',
     tone: 'plant',
+    model: {
+      url: '/models/shrub.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'Rico Cilliers',
+      source:
+        'https://polyhaven.com/a/shrub_03',
+      triangles: 2999,
+      yaw: 270,
+    },
   },
   {
     id: 'planter-outdoor',
@@ -937,6 +946,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.9, depth: 0.45, height: 1.1 },
     shape: 'planter',
     tone: 'stone',
+    model: {
+      url: '/models/planter-outdoor.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'The Base Mesh',
+      source:
+        'https://www.thebasemesh.com/asset/concrete-round-planter',
+      triangles: 2712,
+    },
   },
   {
     id: 'lounger',
@@ -946,6 +963,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.7, depth: 1.98, height: 0.62 },
     shape: 'lounger',
     tone: 'fabric',
+    model: {
+      url: '/models/lounger.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'The Base Mesh',
+      source:
+        'https://www.thebasemesh.com/asset/deck-chair',
+      triangles: 1978,
+    },
   },
   {
     id: 'parasol',
@@ -974,6 +999,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 3, depth: 0.1, height: 1.8 },
     shape: 'fence',
     tone: 'wood',
+    model: {
+      url: '/models/fence.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'The Base Mesh',
+      source:
+        'https://www.thebasemesh.com/asset/rounded-picket-fence',
+      triangles: 498,
+    },
   },
   {
     id: 'outdoor-table',
@@ -983,6 +1016,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 1.8, depth: 0.9, height: 0.75 },
     shape: 'table',
     tone: 'wood',
+    model: {
+      url: '/models/outdoor-table.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'The Base Mesh',
+      source:
+        'https://www.thebasemesh.com/asset/picnic-table-01',
+      triangles: 532,
+    },
   },
   {
     id: 'outdoor-chair',
@@ -992,6 +1033,14 @@ export const CATALOGUE: CatalogueItem[] = [
     size: { width: 0.55, depth: 0.56, height: 0.85 },
     shape: 'chair',
     tone: 'wood',
+    model: {
+      url: '/models/outdoor-chair.glb',
+      licence: 'CC0 1.0 Public Domain',
+      author: 'The Base Mesh',
+      source:
+        'https://www.thebasemesh.com/asset/folding-chair-01',
+      triangles: 2340,
+    },
   },
 ]
 const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
