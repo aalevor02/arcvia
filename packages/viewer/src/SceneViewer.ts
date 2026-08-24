@@ -8,6 +8,8 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { deriveFloors, isFloorNode } from './floors'
+import type { FloorBox, FloorLevel } from './floors'
 
 /**
  * How much environment survives once a lightmap is in charge.
@@ -1131,6 +1133,27 @@ export class SceneViewer {
   /** The camera, for controllers that drive it directly (e.g. walk mode). */
   get cameraObject(): THREE.PerspectiveCamera {
     return this.camera
+  }
+
+  /**
+   * The storeys this model contains, bottom-up — [] for a single-storey model.
+   *
+   * Derived from the geometry's own names (see floors.ts for the three naming
+   * conventions and why the scene record cannot answer this), so it works on
+   * the published page, which receives no plan, exactly as it does in the
+   * studio. `WalkController.setFloorLevel` existed for years with one caller;
+   * this is what lets the published walkthrough reach the other floors.
+   */
+  floorLevels(): FloorLevel[] {
+    if (!this.model) return []
+    const nodes: { name: string; box: FloorBox }[] = []
+    this.model.updateWorldMatrix(true, true)
+    this.model.traverse((object) => {
+      if (!object.name || !isFloorNode(object.name)) return
+      const box = new THREE.Box3().setFromObject(object)
+      if (!box.isEmpty()) nodes.push({ name: object.name, box })
+    })
+    return deriveFloors(nodes)
   }
 
   /**

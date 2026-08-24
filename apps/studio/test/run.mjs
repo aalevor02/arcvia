@@ -47,6 +47,7 @@ const targets = entries.length
       'test/detectionQuality.test.ts',
       'test/furnish.test.ts',
       'test/thumbnail.test.ts',
+      'test/floors.test.ts',
       'test/realtime-roster.test.ts',
     ]
 

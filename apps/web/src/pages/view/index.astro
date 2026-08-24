@@ -163,6 +163,12 @@ const title = 'Walkthrough'
 
     <div class="overlay" id="controls" hidden>
       <button id="walk" aria-pressed="false">Walk through it</button>
+      <!-- One button per storey, filled in from the model's own geometry and
+           shown only while walking a multi-storey scene. Movement is
+           deliberately horizontal and stairs are not modelled, so without
+           this the upper floors of a published walkthrough were visible and
+           unreachable. -->
+      <span id="floors" hidden></span>
       <button id="fit">Overview</button>
       <!-- Shown only when the device can actually present immersive VR — a flat
            browser must not offer a button that does nothing. -->
@@ -315,6 +321,7 @@ const title = 'Walkthrough'
         name: must('name'),
         controls: must('controls'),
         walk: must('walk'),
+        floors: must('floors'),
         fit: must('fit'),
         viewVr: must('viewVr'),
         credits: must('credits'),
@@ -537,6 +544,38 @@ const title = 'Walkthrough'
         })
 
         let walking = false
+
+        // ---- The floor switcher ---------------------------------------------
+        // Derived from the model's own geometry (publicPayload carries no
+        // plan), built once, shown only while walking a multi-storey scene.
+        // `standInside` always lands the visitor on the LOWEST floor, and
+        // movement is horizontal with no stairs modelled — so before this,
+        // the upper storeys of a published multi-storey walkthrough were
+        // visible and unreachable.
+        const floors = viewer.floorLevels()
+        const floorButtons: HTMLButtonElement[] = []
+        const markFloor = (active: number) => {
+          floorButtons.forEach((b, i) =>
+            b.setAttribute('aria-pressed', String(i === active)),
+          )
+        }
+        floors.forEach((floor: { label: string; level: number; centre: { x: number; z: number } }, i: number) => {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.textContent = floor.label
+          button.setAttribute('aria-pressed', 'false')
+          button.addEventListener('click', () => {
+            // Arrive at the storey's centre, not wherever the eye was on the
+            // previous floor — the same x/z on another storey is as likely to
+            // be inside a wall as inside a room.
+            viewer.cameraObject.position.set(floor.centre.x, floor.level + 1.6, floor.centre.z)
+            walk.setFloorLevel(floor.level)
+            markFloor(i)
+          })
+          els.floors.appendChild(button)
+          floorButtons.push(button)
+        })
+
         els.walk.addEventListener('click', () => {
           walking = !walking
           els.walk.setAttribute('aria-pressed', String(walking))
@@ -551,10 +590,16 @@ const title = 'Walkthrough'
             viewer.setFieldOfView(72)
             walk.setSpeed(4.5)
             walk.enable()
+            if (floors.length) {
+              // standInside stood the visitor on the lowest floor; say so.
+              markFloor(0)
+              els.floors.hidden = false
+            }
           } else {
             walk.disable()
             viewer.setFieldOfView(50)
             viewer.frameModel()
+            els.floors.hidden = true
           }
         })
 

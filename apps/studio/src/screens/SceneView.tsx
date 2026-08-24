@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { SceneViewer, WalkController } from '@arcvia/viewer'
+import type { FloorLevel } from '@arcvia/viewer'
 import { buildPlanGeometry } from '../plan/buildGeometry'
 import { suggestedCamera } from '../plan/buildGeometry'
 import { activeFloor } from '../plan/planStore'
@@ -136,6 +137,11 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * is ignored: see the geometry effect.
    */
   const [storedModel, setStoredModel] = useState<string | null>(null)
+  // The loaded model's storeys, for the walk-mode floor switcher. Read from
+  // the geometry (not the plan) so a CAD-imported two-storey building gets
+  // the same switcher a plan-drawn one does.
+  const [modelFloors, setModelFloors] = useState<FloorLevel[]>([])
+  const [floorIndex, setFloorIndex] = useState(0)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -349,13 +355,37 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
 
     const floor = activeFloor(plan)
     const start = suggestedCamera(floor)
-    if (!start) {
+    if (start) {
+      viewer.cameraObject.position.set(start.position.x, start.height, -start.position.y)
+      walk.setFloorLevel(floor.elevation)
+    } else if (viewer.standInside(1.6)) {
+      // A CAD or GLB scene: the plan is empty by design (the model IS the
+      // stored file), so it cannot suggest a camera — but the model can be
+      // stood inside directly. Before this branch, the walk button was
+      // enabled for these scenes and then refused with "draw a room first",
+      // which reads as a bug on a scene that was imported, not drawn.
+      walk.setFloorLevel(viewer.cameraObject.position.y - 1.6)
+    } else {
       setStatus('Draw a room first — there is nowhere to stand.')
       return
     }
 
-    viewer.cameraObject.position.set(start.position.x, start.height, -start.position.y)
-    walk.setFloorLevel(floor.elevation)
+    // The switcher shows only what the geometry declares: two or more named
+    // storeys. The pressed button is found by HEIGHT, not assumed — a plan
+    // scene starts walking on whichever floor was being edited, which is not
+    // necessarily the lowest.
+    const floors = viewer.floorLevels()
+    setModelFloors(floors)
+    const eyeY = viewer.cameraObject.position.y
+    setFloorIndex(
+      floors.reduce(
+        (best, f, i) =>
+          Math.abs(f.level + 1.6 - eyeY) < Math.abs(floors[best].level + 1.6 - eyeY)
+            ? i
+            : best,
+        0,
+      ),
+    )
     // Wider inside than out. At 50 degrees a small room fills the screen with
     // one wall and a doorway two metres away is off-frame, which is what makes
     // moving around feel cramped rather than slow.
@@ -683,6 +713,30 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
           >
             {walking ? 'Leave walkthrough' : 'Walk through it'}
           </button>
+          {walking && modelFloors.length > 1 &&
+            modelFloors.map((floor, i) => (
+              <button
+                key={floor.label}
+                className={i === floorIndex ? 'btn btn-primary' : 'btn'}
+                title={`Walk the ${floor.label.toLowerCase()}`}
+                onClick={() => {
+                  const viewer = viewerRef.current
+                  const walk = walkRef.current
+                  if (!viewer || !walk) return
+                  // Arrive at the storey's centre — the same x/z on another
+                  // storey is as likely to be inside a wall as inside a room.
+                  viewer.cameraObject.position.set(
+                    floor.centre.x,
+                    floor.level + 1.6,
+                    floor.centre.z,
+                  )
+                  walk.setFloorLevel(floor.level)
+                  setFloorIndex(i)
+                }}
+              >
+                {floor.label}
+              </button>
+            ))}
           <button
             className="btn"
             onClick={() => viewerRef.current?.frameModel()}
