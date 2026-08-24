@@ -467,9 +467,26 @@ room schedule read from the wall graph and printed on a client-facing page →
 publish → `/p/riverside-villas/`, serving that project with no trace of any
 other.
 
-**Still to build:** configurator, object and material switching (8–12 d) ·
+~~**Still to build:** configurator, object and material switching (8–12 d) ·
 client comments (5–7 d) · per-scene branding (2–3 d) · PDF summary of chosen
-options (3–4 d).
+options (3–4 d).~~ ✅ **ALL FOUR BUILT — verified in the tree and green in both
+suites 2026-08-24** (studio 667, API 433). Fifth instance of this doc
+describing unbuilt work that exists; cite-and-grep before scoping anything
+from here:
+
+| feature | producer | consumer | commits |
+|---|---|---|---|
+| configurator (finish + furniture switching) | `OptionsPanel.tsx`, `publish/options.ts` | `mountConfigurator` in `view/index.astro` | `7975af6`, `d6ffb17` |
+| client comments | `POST /public/:slug/comments` (capped, in-record) | studio `CommentsPanel.tsx`; owner-only read/delete | `77d52fc` |
+| per-scene branding (accent, logo, hide-credit) | `PresentationPanel.tsx`; `branding` PATCH-allow-listed | `view/index.astro:589-598` | `09d439a` |
+| PDF summary of chosen options | configurator's summary (`title`/`capture`/`credits`) | hand-written PDF, no library | `b19f5dc` |
+
+One flake worth knowing about, not fixed because it would not reproduce: on the
+day's FIRST full `npm test` chain, `queue-persistence.mjs` branch 2 (the
+remote-watchdog) missed its 15 s window — status still `rendering`, credits
+unreturned. Solo and on every subsequent chained run it passes 23/23. Cold-start
+contention (25 prior test files each booting servers) is the suspect; if it
+recurs, widen the `until(…, 15000)` before suspecting the watchdog itself.
 
 ⚠ **Two things the publisher surfaced. One is now fixed:**
 
