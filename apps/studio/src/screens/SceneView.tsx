@@ -26,6 +26,7 @@ import EnvironmentPanel from '../components/EnvironmentPanel'
 import OptionsPanel from '../components/OptionsPanel'
 import CommentsPanel from '../components/CommentsPanel'
 import SunPanel, { type Site } from '../components/SunPanel'
+import DeckDesignPanel from '../components/DeckDesignPanel'
 import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
@@ -142,6 +143,8 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   // the same switcher a plan-drawn one does.
   const [modelFloors, setModelFloors] = useState<FloorLevel[]>([])
   const [floorIndex, setFloorIndex] = useState(0)
+  /** The client deck this scene was built from — the design reader's source. */
+  const [deckUrl, setDeckUrl] = useState<string | null>(null)
   /** Walking pace, metres per second. */
   const [pace, setPace] = useState(4.5)
   /** Whether a code gates the published link, and the box for changing it. */
@@ -179,6 +182,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setSite(scene.site ?? null)
         setSbua(scene.sbua ?? null)
         setStoredModel(scene.modelUrl ?? null)
+        setDeckUrl(scene.floorPlanUrl ?? null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -841,6 +845,20 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
             setSite(next)
             void updateScene(sceneId, { site: next }).catch(() =>
               setStatus('That change could not be saved. Check your connection.'),
+            )
+          }}
+        />
+
+        <DeckDesignPanel
+          viewer={viewerRef.current}
+          deckUrl={deckUrl}
+          onDeckStored={(next) => {
+            setDeckUrl(next)
+            // floorPlanUrl is the scene's source-document field, and a deck
+            // IS the floor plan's source; persisting it here is what lets the
+            // panel skip the re-upload on every visit.
+            void updateScene(sceneId, { floorPlanUrl: next }).catch(() =>
+              setStatus('The deck could not be saved to the scene.'),
             )
           }}
         />
