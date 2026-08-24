@@ -88,9 +88,11 @@ export class InsufficientCredits extends Error {
  * @param {string} userId
  * @param {keyof typeof creditCost} action
  * @param {object} [meta] recorded on the ledger entry for later auditing
- * @returns {Promise<{ charged: number, remaining: number, degraded?: boolean }>}
+ * @param {{ holdable?: boolean }} [options] queueable work may be HELD instead
+ *   of refused when credits run out — see the policy note below
+ * @returns {Promise<{ charged: number, remaining: number, held?: boolean, cost?: number }>}
  */
-export async function spend(userId, action, meta = {}) {
+export async function spend(userId, action, meta = {}, options = {}) {
   const cost = creditCost[action]
   if (cost === undefined) throw new Error(`Unknown metered action: ${action}`)
 
@@ -106,14 +108,22 @@ export async function spend(userId, action, meta = {}) {
     return { charged: 0, remaining: available }
   }
 
-  // TODO(you): choose and implement the enforcement policy.
-  //
-  // The block below is option 1 — a hard block — because it is the only one
-  // that is obviously correct without knowing your users. Replace it with
-  // whichever of the four above you want. Whatever you pick, keep writing to
-  // the ledger, and keep returning `remaining` so the UI can warn people before
-  // they hit the wall rather than at it.
+  // DECIDED (owner, 2026-08-24): option 4 — QUEUE UNTIL CREDITS ARRIVE — for
+  // work that goes through the render queue, and a hard block for everything
+  // else. A held job is only meaningful for work the user is not sitting and
+  // waiting on; a synchronous detect that "queues until tomorrow" is just a
+  // hang with a good excuse. Callers whose work is queueable pass
+  // `holdable: true` and must treat a `held` result by inserting the job in
+  // a 'held' state WITHOUT enqueueing it; renderQueue.releaseHeldJobs() then
+  // charges and starts held jobs whenever credits arrive (a grant or a
+  // refund — with billing off there is no monthly cron, so inflows are the
+  // only "tomorrow" there is, and the ledger line below is what makes a held
+  // job explicable a month later).
   if (available < cost) {
+    if (options.holdable) {
+      await recordLedger(userId, 0, `held:${action}`, { ...meta, cost, available })
+      return { charged: 0, remaining: available, held: true, cost }
+    }
     throw new InsufficientCredits(cost, available)
   }
 
@@ -138,6 +148,24 @@ export async function refund(userId, action, meta = {}, { amount } = {}) {
 
   await db.update('users', userId, { credits: (user.credits ?? 0) + cost })
   await recordLedger(userId, cost, `refund:${action}`, meta)
+  await creditsArrived(userId)
+}
+
+/**
+ * Credits just landed for `userId` — wake any jobs held for lack of them.
+ *
+ * A dynamic import, deliberately: renderQueue imports refunds, which imports
+ * this module, so a static edge back to renderQueue would close a cycle.
+ * Best-effort — a release failure must never turn a successful grant or
+ * refund into an error, and the held job stays held for the next inflow.
+ */
+async function creditsArrived(userId) {
+  try {
+    const { releaseHeldJobs } = await import('./renderQueue.js')
+    await releaseHeldJobs(userId)
+  } catch (error) {
+    console.warn(`[credits] held-job release failed: ${error.message}`)
+  }
 }
 
 /**
@@ -151,4 +179,5 @@ export async function grantMonthly(userId) {
   const grant = planFor(user.planId).creditsPerSeat
   await db.update('users', userId, { credits: (user.credits ?? 0) + grant })
   await recordLedger(userId, grant, 'monthly-grant', { billingEnabled })
+  await creditsArrived(userId)
 }

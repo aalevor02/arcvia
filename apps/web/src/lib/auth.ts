@@ -5,6 +5,8 @@ import {
   getUser,
   getToken,
   getIssuedAt,
+  getLastSeen,
+  touchSession,
   type StoredUser,
 } from './api'
 
@@ -170,7 +172,16 @@ export async function resetPassword(
  * Site offices and shared workstations are common in this industry, which
  * pushes toward shorter. Long modelling sessions push toward sliding.
  */
-export const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 12 // 12 hours
+// DECIDED (owner, 2026-08-24): the HYBRID. An architect's long modelling
+// session never idles out under them (activity keeps the sliding half fresh),
+// a forgotten login on a site-office machine dies within a working day of
+// being left alone, and even a tab that somehow keeps touching itself dies at
+// the absolute ceiling.
+export const SESSION_IDLE_MS = 1000 * 60 * 60 * 12 // 12 hours without activity
+export const SESSION_ABSOLUTE_MS = 1000 * 60 * 60 * 24 * 30 // 30 days, full stop
+
+/** @deprecated the hybrid policy replaced the single knob; kept for callers. */
+export const SESSION_MAX_AGE_MS = SESSION_ABSOLUTE_MS
 
 export function isAuthenticated(): boolean {
   const token = getToken()
@@ -180,19 +191,23 @@ export function isAuthenticated(): boolean {
   const issuedAt = getIssuedAt()
   if (issuedAt === null) return false
 
-  // TODO(you): implement the expiry policy described above.
-  //
-  // Right now this is a plain hard expiry against SESSION_MAX_AGE_MS — the
-  // simplest correct thing, but not necessarily the right thing for your users.
-  // Replace the body below with whichever policy you want, and expire the
-  // session (call clearSession()) when it fails so a stale token is not left
-  // sitting in storage.
-  const age = Date.now() - issuedAt
-  if (age > SESSION_MAX_AGE_MS) {
+  // Absolute first: no amount of activity extends a session past the ceiling.
+  if (Date.now() - issuedAt > SESSION_ABSOLUTE_MS) {
     clearSession()
     return false
   }
 
+  // Then idle: "activity" is a successful authenticated API call or an auth
+  // check like this one — api.ts touches the timestamp on the first, and the
+  // touch below covers someone who reopens the site within the idle window
+  // without yet calling anything.
+  const lastSeen = getLastSeen() ?? issuedAt
+  if (Date.now() - lastSeen > SESSION_IDLE_MS) {
+    clearSession()
+    return false
+  }
+
+  touchSession()
   return true
 }
 

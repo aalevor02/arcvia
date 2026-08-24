@@ -179,6 +179,52 @@ export async function enqueue(job) {
   drain()
 }
 
+/**
+ * Charge and start jobs that were HELD for lack of credits.
+ *
+ * The out-of-credits policy (owner decision, 2026-08-24) is queue-until-
+ * credits-arrive: a submission the user could not afford is inserted with
+ * status 'held' and no charge, and this is the other half — called from
+ * credits.js whenever credits land (a grant or a refund), and from restart
+ * reconciliation, because credits may have arrived while the process was
+ * down.
+ *
+ * Oldest first, and a user's queue stops at the first job they still cannot
+ * afford: releasing a cheap new job past an expensive old one would let a
+ * stream of small submissions starve the big bake the user asked for first.
+ */
+export async function releaseHeldJobs(userId = null) {
+  const { spend, InsufficientCredits } = await import('./credits.js')
+
+  const held = (await db.find('renderJobs', (j) => j.status === 'held'))
+    .filter((j) => !userId || j.ownerId === userId)
+    .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+
+  const blocked = new Set()
+  let released = 0
+
+  for (const job of held) {
+    if (blocked.has(job.ownerId)) continue
+    let charge
+    try {
+      charge = await spend(job.ownerId, job.action, { jobId: job.id, release: true })
+    } catch (error) {
+      if (error instanceof InsufficientCredits) {
+        blocked.add(job.ownerId)
+        continue
+      }
+      throw error
+    }
+    const updated = await db.update('renderJobs', job.id, {
+      status: 'queued',
+      creditsCharged: charge.charged,
+    })
+    await enqueue(updated ?? { ...job, status: 'queued', creditsCharged: charge.charged })
+    released++
+  }
+  return released
+}
+
 export async function cancelJob(jobId) {
   for (const lane of Object.keys(pending)) {
     const index = pending[lane].findIndex((j) => j.id === jobId)

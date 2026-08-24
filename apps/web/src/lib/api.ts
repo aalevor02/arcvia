@@ -95,7 +95,10 @@ export async function api<T = unknown>(
     )
   }
 
-  if (response.status === 204) return undefined as T
+  if (response.status === 204) {
+    if (auth) touchSession()
+    return undefined as T
+  }
 
   const payload = await response.json().catch(() => ({}) as Record<string, unknown>)
 
@@ -107,6 +110,9 @@ export async function api<T = unknown>(
     )
   }
 
+  // A successful authenticated call is what "activity" means for the sliding
+  // half of the session policy — see auth.ts's isAuthenticated.
+  if (auth) touchSession()
   return payload as T
 }
 
@@ -116,6 +122,7 @@ export async function api<T = unknown>(
 const TOKEN_KEY = 'arcvia.token'
 const USER_KEY = 'arcvia.user'
 const ISSUED_KEY = 'arcvia.issued_at'
+const LAST_SEEN_KEY = 'arcvia.last_seen'
 
 export interface StoredUser {
   uid: string
@@ -152,10 +159,30 @@ export function saveSession(token: string, user: StoredUser): void {
   localStorage.setItem(TOKEN_KEY, token)
   localStorage.setItem(USER_KEY, JSON.stringify(user))
   localStorage.setItem(ISSUED_KEY, String(Date.now()))
+  localStorage.setItem(LAST_SEEN_KEY, String(Date.now()))
 }
 
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
   localStorage.removeItem(ISSUED_KEY)
+  localStorage.removeItem(LAST_SEEN_KEY)
+}
+
+/** When the session last did something. Falls back to issue time. */
+export function getLastSeen(): number | null {
+  const raw = localStorage.getItem(LAST_SEEN_KEY)
+  const parsed = raw === null ? NaN : Number(raw)
+  return Number.isFinite(parsed) ? parsed : getIssuedAt()
+}
+
+/** Record activity for the sliding half of the session policy. */
+export function touchSession(): void {
+  try {
+    if (localStorage.getItem(TOKEN_KEY)) {
+      localStorage.setItem(LAST_SEEN_KEY, String(Date.now()))
+    }
+  } catch {
+    /* storage unavailable — the auth check will fall back to issue time */
+  }
 }

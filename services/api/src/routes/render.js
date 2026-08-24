@@ -1,6 +1,6 @@
 import { db } from '../store.js'
 import { requireAuth } from '../lib/auth.js'
-import { spend, balanceFor, InsufficientCredits } from '../lib/credits.js'
+import { spend, balanceFor } from '../lib/credits.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
 import {
   enqueue,
@@ -183,6 +183,12 @@ export async function reconcileRenderJobs() {
     outcome.requeued += 1
   }
 
+  // Jobs held for lack of credits are NOT requeued — they were never charged
+  // — but credits may have arrived while the process was down, so give them
+  // the release check the inflow would have given them.
+  const { releaseHeldJobs } = await import('../lib/renderQueue.js')
+  outcome.releasedHeld = await releaseHeldJobs()
+
   return outcome
 }
 
@@ -355,20 +361,17 @@ export async function registerRenderRoutes(app) {
 
     // Charge before queueing. Charging on completion sounds fairer but lets a
     // user with zero credits fill the queue and consume GPU time anyway.
-    let charge
-    try {
-      charge = await spend(request.auth.userId, config.action, { sceneId, preset })
-    } catch (err) {
-      if (err instanceof InsufficientCredits) {
-        return reply.status(402).send({
-          message: err.message,
-          code: 'INSUFFICIENT_CREDITS',
-          required: err.required,
-          available: err.available,
-        })
-      }
-      throw err
-    }
+    //
+    // `holdable`: render work is queueable, so running out of credits HOLDS
+    // the job instead of refusing it (owner's policy — see credits.js). The
+    // insert below writes status 'held' and skips the enqueue; the queue's
+    // releaseHeldJobs charges and starts it when credits arrive.
+    const charge = await spend(
+      request.auth.userId,
+      config.action,
+      { sceneId, preset },
+      { holdable: true },
+    )
 
     const job = await db.insert('renderJobs', {
       sceneId,
@@ -381,7 +384,7 @@ export async function registerRenderRoutes(app) {
       // Recorded so a refund prices itself from what this job actually was,
       // not from whatever `PRESETS` happens to hold when it fails.
       action: config.action,
-      status: 'queued',
+      status: charge.held ? 'held' : 'queued',
       progress: 0,
       creditsCharged: charge.charged,
       // Axis convention is fixed here, once, rather than at each call site.
@@ -419,6 +422,19 @@ export async function registerRenderRoutes(app) {
       outputUrl: null,
       error: null,
     })
+
+    if (charge.held) {
+      return reply.status(202).send({
+        jobId: job.id,
+        status: 'held',
+        creditsCharged: 0,
+        creditsNeeded: charge.cost,
+        creditsRemaining: charge.remaining,
+        message:
+          `Held: this needs ${charge.cost} credits and you have ${charge.remaining}. ` +
+          'It will run automatically when credits arrive; cancelling it costs nothing.',
+      })
+    }
 
     await enqueue(job)
 
@@ -468,6 +484,13 @@ export async function registerRenderRoutes(app) {
 
     await cancelJob(job.id)
     await db.update('renderJobs', job.id, { status: 'cancelled' })
+
+    // A HELD job was never charged, so there is nothing to refund or decline
+    // — recording either would invent a settlement for money that never
+    // moved, and the refund audit reads settlements as facts.
+    if (job.status === 'held') {
+      return { jobId: job.id, status: 'cancelled', refunded: false }
+    }
 
     // Refund only if no GPU time was consumed. A job already rendering has
     // cost real money whether or not the user still wants the result.

@@ -217,21 +217,14 @@ export async function registerCadRoutes(app) {
       })
     }
 
-    let charge
-    try {
-      charge = await spend(request.auth.userId, 'cadReconstruct', {
-        key: request.body.key, deck: true, page, index,
-      })
-    } catch (error) {
-      if (error instanceof InsufficientCredits) {
-        return reply.status(402).send({
-          message: 'Not enough credits.',
-          needed: error.needed,
-          available: error.available,
-        })
-      }
-      throw error
-    }
+    // Holdable: reconstruction is queued work, so an empty balance HOLDS the
+    // job until credits arrive instead of refusing it — see credits.js.
+    const charge = await spend(
+      request.auth.userId,
+      'cadReconstruct',
+      { key: request.body.key, deck: true, page, index },
+      { holdable: true },
+    )
 
     // A fresh directory per job: the sheet's stem is derived from its caption
     // engine-side, so "the one model in this directory" is only deterministic
@@ -245,7 +238,7 @@ export async function registerCadRoutes(app) {
       ownerId: request.auth.userId,
       preset: 'cad',
       action: 'cadReconstruct',
-      status: 'queued',
+      status: charge.held ? 'held' : 'queued',
       progress: 0,
       creditsCharged: charge.charged,
       ...idempotency,
@@ -261,6 +254,19 @@ export async function registerCadRoutes(app) {
       outputUrl: null,
       error: null,
     })
+
+    if (charge.held) {
+      return reply.status(202).send({
+        jobId: job.id,
+        status: 'held',
+        creditsCharged: 0,
+        creditsNeeded: charge.cost,
+        creditsRemaining: charge.remaining,
+        message:
+          `Held: this needs ${charge.cost} credits and you have ${charge.remaining}. ` +
+          'It will run automatically when credits arrive; cancelling it costs nothing.',
+      })
+    }
 
     await enqueue(job)
 
@@ -323,26 +329,21 @@ export async function registerCadRoutes(app) {
       })
     }
 
-    let charge
-    try {
-      charge = await spend(request.auth.userId, 'cadReconstruct', { key: request.body.key })
-    } catch (error) {
-      if (error instanceof InsufficientCredits) {
-        return reply.status(402).send({
-          message: 'Not enough credits.',
-          needed: error.needed,
-          available: error.available,
-        })
-      }
-      throw error
-    }
+    // Holdable, exactly as /deck/jobs above: queued work is held when the
+    // balance is short, never refused.
+    const charge = await spend(
+      request.auth.userId,
+      'cadReconstruct',
+      { key: request.body.key },
+      { holdable: true },
+    )
 
     const job = await db.insert('renderJobs', {
       sceneId: request.body?.sceneId ?? null,
       ownerId: request.auth.userId,
       preset: 'cad',
       action: 'cadReconstruct',
-      status: 'queued',
+      status: charge.held ? 'held' : 'queued',
       progress: 0,
       creditsCharged: charge.charged,
       // Persisted with the job so the guard survives a restart — which is when
@@ -364,6 +365,19 @@ export async function registerCadRoutes(app) {
       outputUrl: null,
       error: null,
     })
+
+    if (charge.held) {
+      return reply.status(202).send({
+        jobId: job.id,
+        status: 'held',
+        creditsCharged: 0,
+        creditsNeeded: charge.cost,
+        creditsRemaining: charge.remaining,
+        message:
+          `Held: this needs ${charge.cost} credits and you have ${charge.remaining}. ` +
+          'It will run automatically when credits arrive; cancelling it costs nothing.',
+      })
+    }
 
     await enqueue(job)
 
@@ -421,6 +435,12 @@ export async function registerCadRoutes(app) {
     // queue's finish() now refuses to move a row already marked 'cancelled'.
     await cancelJob(job.id)
     await db.update('renderJobs', job.id, { status: 'cancelled' })
+
+    // A HELD job was never charged: nothing to refund, nothing to decline —
+    // either settlement would be a record of money that never moved.
+    if (job.status === 'held') {
+      return { jobId: job.id, status: 'cancelled', refunded: 0 }
+    }
 
     // A reconstruction cancelled before it started refunds; one cancelled while
     // running has already spent the CPU, so the charge stands and the refund is
