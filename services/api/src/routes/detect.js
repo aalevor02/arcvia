@@ -144,7 +144,12 @@ export async function registerDetectRoutes(app) {
     const file = await open(key)
     if (!file) return reply.status(404).send({ message: 'That file is not stored here.' })
 
-    return proxyDocument(request, reply, '/document', file, {})
+    // proxyDocument answers the request itself on every path and returns null;
+    // returning that null hands Fastify a second payload for an already-sent
+    // reply (FST_ERR_REP_ALREADY_SENT — seen live on the detector-down path).
+    // `return reply` is the sibling route's guard, and now this one's.
+    await proxyDocument(request, reply, '/document', file, {})
+    return reply
   })
 
   /**

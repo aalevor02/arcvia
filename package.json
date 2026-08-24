@@ -19,6 +19,7 @@
     "dev:plan": "npm run dev --workspace=apps/planviewer",
     "dev:vis": "npm run dev --workspace=apps/visualisation",
     "dev:api": "npm run dev --workspace=services/api",
+    "dev:detect": "services/floorplan-ai/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8090 --app-dir services/floorplan-ai",
     "build": "npm run build --workspaces --if-present"
   },
   "engines": {
