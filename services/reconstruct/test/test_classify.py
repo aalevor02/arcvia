@@ -23,6 +23,7 @@ from classify.elements import (  # noqa: E402
     classify_room,
 )
 from vendor.cad_kernel import guess_item  # noqa: E402
+from ingest.blocks import RoomLabel, usable_room_labels  # noqa: E402
 
 passed = 0
 failed = 0
@@ -41,6 +42,16 @@ def ok(label: str, cond: bool, extra: str = "") -> None:
 def classify(**kw):
     kw.setdefault("guess_item", guess_item)
     return classify_footprint(**kw)
+
+
+labels = [
+    RoomLabel(0, 0, "MEDIA ROOM"),
+    RoomLabel(1, 1, "PUJA"),
+    RoomLabel(2, 2, "Ground Floor Plan"),
+    RoomLabel(3, 3, "3.40 x 4.20"),
+]
+kept = usable_room_labels(labels)
+ok("unknown custom room labels are retained", [x.text for x in kept] == ["MEDIA ROOM", "PUJA"])
 
 
 # ---- Room names, as drawings actually write them --------------------------

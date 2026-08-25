@@ -89,6 +89,7 @@ const clientShapes = [
   ['model url', { modelUrl: '/uploads/scenes/x/model.glb' }],
   ['duplicate-scene', {
     plan: null, modelUrl: null, lightsUrl: null, hdriUrl: null, floorPlanUrl: null,
+    design: null, cadModelJsonUrl: null, designFurnitureReviewed: [],
   }],
 ]
 for (const [label, body] of clientShapes) {
@@ -161,7 +162,7 @@ ok('and the ordering is what matters, since a save is priced at 0 today',
   'refusal returns before spend() — see scenes.js')
 
 console.log('\n-- the deck design round-trips --')
-// The studio persists the design read out of a client deck's renders
+// The studio persists the room designs read out of a client deck's renders
 // (`scene.design`) and re-applies it on every rebuild; the published look
 // travels inside the exported model, not this field. PRESENCE is what this
 // asserts: the dressing was fully built client-side before this field was
@@ -176,9 +177,34 @@ const spec = {
   source: { page: 3, index: 0, room: 'LIVING', auto: true },
 }
 const dressed = await patch({ design: spec })
-ok('a design patch is accepted', dressed.status === 200, String(dressed.status))
-ok('and comes back whole on the next read',
+ok('a legacy single-design patch is still accepted', dressed.status === 200, String(dressed.status))
+ok('and the legacy object comes back whole on the next read',
   JSON.stringify((await read()).design) === JSON.stringify(spec))
+
+const kitchen = {
+  room: 'KITCHEN',
+  floor: { material: 'tile', colour: '#d8d2c7' },
+  walls: { finish: 'paint', colour: '#f4f1eb' },
+  furniture: [{ item: 'kitchen island', style: 'modern' }],
+  palette: ['#d8d2c7', '#f4f1eb'],
+  source: { page: 4, index: 0, room: 'KITCHEN' },
+}
+const roomDesigns = [spec, kitchen]
+const multi = await patch({ design: roomDesigns })
+ok('a multi-room design patch is accepted', multi.status === 200, String(multi.status))
+ok('and every room design comes back whole on the next read',
+  JSON.stringify((await read()).design) === JSON.stringify(roomDesigns))
+const sourceRecord = {
+  cadModelJsonUrl: '/uploads/cad/x/building.json',
+  designFurnitureReviewed: ['room:living|3:0|sofa'],
+}
+const sourceSaved = await patch(sourceRecord)
+ok('reconstruction rooms and furniture review decisions are accepted',
+  sourceSaved.status === 200, String(sourceSaved.status))
+const sourceRead = await read()
+ok('and both furniture source fields survive the next read',
+  sourceRead.cadModelJsonUrl === sourceRecord.cadModelJsonUrl &&
+  JSON.stringify(sourceRead.designFurnitureReviewed) === JSON.stringify(sourceRecord.designFurnitureReviewed))
 // Null is a real value: it records "the user cleared the dressing", which
 // stops the editor's read-on-open resurrecting a look that was removed.
 const cleared = await patch({ design: null })

@@ -35,6 +35,8 @@ const box = (minY: number, maxY: number, minX = 0, maxX = 10) => ({
 
 console.log('-- which names count --')
 check('CAD storey meshes count', isFloorNode('storey0_walls') && isFloorNode('storey1_fixtures'))
+check('CAD per-room floor meshes stay in their storey',
+  isFloorNode('storey0_floor_room3_master-bedroom'))
 check('plan floor groups count', isFloorNode('floor:f-abc'))
 check('villa slug objects count', isFloorNode('floor_lower-ground'))
 check('ordinary meshes do not', !isFloorNode('wall:w1') && !isFloorNode('slab:r2') && !isFloorNode('roof'))

@@ -101,11 +101,7 @@ def survey(input_path: str, work_dir: str, unit: str | None = None) -> dict:
     # *text* to a sofa is very often a dimension or a note, and letting those
     # win means the sofa is contextualised by the string "3.40" — which is
     # worse than having no context at all, because it silently reads as one.
-    labels = [
-        label
-        for label in blk.room_labels(doc, scale, origin)
-        if classify_room(label.text) != "unknown"
-    ]
+    labels = blk.usable_room_labels(blk.room_labels(doc, scale, origin))
 
     # Wall linework only — this is what "against a wall" is measured against,
     # and running it over every segment in the drawing would measure distance
@@ -211,7 +207,9 @@ def reconstruct(
     3D asset closes without a human in the middle.
     """
     from build.glb import MeshBuilder, write_glb
-    from build.solidify import build_fixtures, build_slabs, build_walls
+    from build.solidify import (
+        build_fixtures, build_room_finishes, build_room_slabs, build_walls,
+    )
     from classify.catalogue_dims import CATALOGUE_DIMS
     from hypothesise import openings as op
     from hypothesise.pair import Face, join_corners, pair_faces, summarise
@@ -340,14 +338,37 @@ def reconstruct(
     # below asks about every frame on the sheet — 40 of them on a real drawing.
     # One query, filtered per ask. classify_room is pure, so this is the same
     # list the per-call version produced, forty times cheaper.
-    _sheet_labels = [
-        lb for lb in blk.room_labels(doc, scale, (ox, oy))
-        if classify_room(lb.text) != "unknown"
-    ]
+    _sheet_text = blk.room_labels(doc, scale, (ox, oy))
+    _sheet_labels = blk.usable_room_labels(_sheet_text)
+    _sheet_opening_labels = blk.opening_labels(_sheet_text)
+
+    # Compact residential drawings sometimes omit formal plan titles and label
+    # only the stair: UP on the lower plan, DOWN on the upper. That is textual
+    # relative-level evidence, not a positional guess.
+    stair_markers = blk.stair_level_markers(doc, scale, (ox, oy))
+    for frame in frames:
+        if frame.title:
+            continue
+        fx0, fy0, fx1, fy1 = frame.bbox
+        within = [
+            marker for marker in stair_markers
+            if fx0 <= marker.x <= fx1 and fy0 <= marker.y <= fy1
+        ]
+        # More than one direction on a frame is a multi-flight stair and does
+        # not establish that frame's relative storey.
+        if len(within) == 1:
+            frame.level_hint = within[0].level
+            frame.level_label = within[0].label
 
     def _labels_in(a, b, c, d):
         return [
             lb for lb in _sheet_labels
+            if a - 2 <= lb.x <= c + 2 and b - 2 <= lb.y <= d + 2
+        ]
+
+    def _opening_labels_in(a, b, c, d):
+        return [
+            lb for lb in _sheet_opening_labels
             if a - 2 <= lb.x <= c + 2 and b - 2 <= lb.y <= d + 2
         ]
 
@@ -360,7 +381,7 @@ def reconstruct(
             and b - 1 <= q["position"]["y"] <= d + 1
         ]
 
-    def _choose_frame_layers(a, b, c, d, labels, in_frame):
+    def _choose_frame_layers(a, b, c, d, labels, in_frame, text_openings):
         """
         Choose the wall layers for one frame and pair its pool.
 
@@ -383,8 +404,20 @@ def reconstruct(
                 within.setdefault(seg.layer, []).append(face)
 
         shortlist = layerscan.recommended(layerscan.scan(within)) | (set(chosen) & set(within))
+        # A partitions layer may carry centrelines rather than paired wall
+        # faces. Scored alone it has no wall thickness and never reaches the
+        # shortlist, even though adding it to the exterior wall layer is what
+        # closes the drawing's named rooms. Inside one already-isolated frame,
+        # let the label/door fit test judge every non-annotation layer with
+        # enough real linework to matter.
+        shortlist.update(
+            name for name, layer_faces in within.items()
+            if len(layer_faces) >= 4 and kernel.classify(name) != "ignore"
+        )
         selected, trace = layerscan.select_within_frame(
             within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
+            seed=set(chosen) & set(within),
+            opening_labels=text_openings,
         )
         if not selected:
             return None
@@ -468,9 +501,12 @@ def reconstruct(
         for frame in shortlist:
             fa, fb, fc, fd = frame.bbox
             labs = _labels_in(fa, fb, fc, fd)
+            opening_labs = _opening_labels_in(fa, fb, fc, fd)
             blocks = _blocks_in(fa, fb, fc, fd)
             try:
-                scanned = _choose_frame_layers(fa, fb, fc, fd, labs, blocks)
+                scanned = _choose_frame_layers(
+                    fa, fb, fc, fd, labs, blocks, opening_labs,
+                )
                 frame_walls = (
                     scanned[0] if scanned
                     else [all_walls[i] for i in frame.wall_indices]
@@ -601,6 +637,7 @@ def reconstruct(
         chosen_here = set(chosen)
 
         labels = _labels_in(x0, y0, x1, y1)
+        text_openings = _opening_labels_in(x0, y0, x1, y1)
         in_frame = _blocks_in(x0, y0, x1, y1)
 
         # ---- Second pass: choose the layers for THIS frame ---------------------
@@ -613,7 +650,9 @@ def reconstruct(
         # is reconstructed by the same decision that graded it.
         layer_choice = None
         if auto_layers and not layers:
-            scanned = _choose_frame_layers(x0, y0, x1, y1, labels, in_frame)
+            scanned = _choose_frame_layers(
+                x0, y0, x1, y1, labels, in_frame, text_openings,
+            )
             if scanned:
                 walls, selected, trace = scanned
                 chosen_here = selected
@@ -636,14 +675,22 @@ def reconstruct(
             wy1 = max(max(w.ay, w.by) for w in walls)
             x0, y0, x1, y1 = wx0, wy0, wx1, wy1
             labels = _labels_in(x0, y0, x1, y1)
+            text_openings = _opening_labels_in(x0, y0, x1, y1)
             in_frame = _blocks_in(x0, y0, x1, y1)
 
         # ---- The envelope ------------------------------------------------------
         # A partitions-only plan encloses almost nothing, because the largest space
         # in a modern house is open plan and bounded by the building rather than by
         # interior walls. See hypothesise/perimeter.py.
+        walls, labelled_holes, labelled_unhosted = op.from_text_labels(
+            text_openings, walls,
+        )
         if with_perimeter:
             walls = add_perimeter(walls)
+            # Derived rings and labelled gap bridges are added after the first
+            # pairing pass. Snap their endpoints too, or a 75 mm drafting
+            # offset leaves a visually closed facade topologically open.
+            walls = join_corners(walls)
 
         wall_stats = summarise(walls)
         wall_stats["perimeter"] = perimeter_summary(walls)
@@ -692,8 +739,11 @@ def reconstruct(
             "roomsOutdoor": sum(1 for r in rooms if _is_outdoor(r.as_dict())),
         }
 
-        holes, unhosted = op.from_sized_blocks(in_frame, walls, kernel.guess_item)
-        holes = op.dedupe(holes)
+        block_holes, block_unhosted = op.from_sized_blocks(
+            in_frame, walls, kernel.guess_item,
+        )
+        holes = op.dedupe(labelled_holes + block_holes)
+        unhosted = labelled_unhosted + block_unhosted
         opening_stats = op.summarise(holes, unhosted)
 
         fixtures: list[dict] = []
@@ -746,28 +796,40 @@ def reconstruct(
         # GLB can paint them green and brown instead of the beige every other
         # surface wears. build_fixtures routes plants into them; furniture still
         # goes into fixture_mesh as a box. See build/glb.py's material palette.
-        wall_mesh, floor_mesh, fixture_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
-        plant_mesh, trunk_mesh, lawn_mesh = MeshBuilder(), MeshBuilder(), MeshBuilder()
+        wall_mesh, fixture_mesh = MeshBuilder(), MeshBuilder()
+        plant_mesh, trunk_mesh = MeshBuilder(), MeshBuilder()
         # `base_z` MUST reach every builder. It arrived in this signature with
         # the storey work and was forwarded to none of them, so a two-storey
         # build put both floors at z=0 — the report said "storey0 z -3.0",
         # the geometry interpenetrated, and only measuring the GLB's actual
         # mesh heights caught it. The builders all supported it already.
         wall_build = build_walls(wall_mesh, walls, holes, height, base_z=base_z)
-        slab_build = build_slabs(floor_mesh, rooms, base_z=base_z, lawn=lawn_mesh)
+        room_meshes, slab_build = build_room_slabs(rooms, base_z=base_z)
+        finish_meshes, finish_build = build_room_finishes(
+            rooms, walls, holes, height, base_z=base_z,
+        )
         fixture_build = build_fixtures(
             fixture_mesh, fixtures, CATALOGUE_DIMS, base_z=base_z,
             plants=plant_mesh, trunks=trunk_mesh,
         )
 
+        meshes = {"walls": wall_mesh, **room_meshes, **finish_meshes}
+        if fixture_build["fixtures"]:
+            meshes["fixtures"] = fixture_mesh
+        if plant_mesh.indices:
+            meshes["plants"] = plant_mesh
+        if trunk_mesh.indices:
+            meshes["trunks"] = trunk_mesh
+
         return {
             "walls": walls, "rooms": rooms, "holes": holes,
+            "labels": labels,
             "unhosted": unhosted, "fixtures": fixtures,
             "chosen": chosen_here, "layerChoice": layer_choice,
             "wallStats": wall_stats, "roomStats": room_stats,
             "openingStats": opening_stats,
-            "meshes": (wall_mesh, floor_mesh, fixture_mesh, plant_mesh, trunk_mesh, lawn_mesh),
-            "builds": (wall_build, slab_build, fixture_build),
+            "meshes": meshes,
+            "builds": (wall_build, slab_build, finish_build, fixture_build),
         }
 
     # ---- One storey, or all of them ----------------------------------------
@@ -798,7 +860,7 @@ def reconstruct(
             frame_walls = [all_walls[i] for i in frame.wall_indices]
             result = _solve_frame(frame_walls, frame.bbox, base_z=level.base_z)
             shift = (datum[0] - frame.bbox[0], datum[1] - frame.bbox[1])
-            for mesh in result["meshes"]:
+            for mesh in result["meshes"].values():
                 mesh.translate_plan(*shift)
             solved.append((level, result, shift))
 
@@ -819,24 +881,15 @@ def reconstruct(
     wall_stats = storey["wallStats"]
     room_stats = storey["roomStats"]
     opening_stats = storey["openingStats"]
-    wall_mesh, floor_mesh, fixture_mesh, plant_mesh, trunk_mesh, lawn_mesh = storey["meshes"]
-    wall_build, slab_build, fixture_build = storey["builds"]
+    wall_build, slab_build, finish_build, fixture_build = storey["builds"]
 
 
     # three.js sanitises node names, so `storey0/walls` loads as `storey0walls`.
     # The underscore is load-bearing.
-    meshes = {"storey0_walls": wall_mesh, "storey0_floors": floor_mesh}
-    if fixture_build["fixtures"]:
-        meshes["storey0_fixtures"] = fixture_mesh
+    meshes = {f"storey0_{name}": mesh for name, mesh in storey["meshes"].items()}
     # `_plants` / `_trunks` in the name is what glb.py keys the green and bark
     # materials on — see build/glb.py. Only added when non-empty so an
     # indoor-only building carries no empty vegetation node.
-    if plant_mesh.indices:
-        meshes["storey0_plants"] = plant_mesh
-    if trunk_mesh.indices:
-        meshes["storey0_trunks"] = trunk_mesh
-    if lawn_mesh.indices:
-        meshes["storey0_lawn"] = lawn_mesh
 
     storey_report: list[dict] = []
     # ── Furniture belongs to the building, not to the primary storey ─────────
@@ -873,18 +926,8 @@ def reconstruct(
         for n, (level, result, shift) in enumerate(
             sorted(solved, key=lambda item: item[0].level)
         ):
-            w_mesh, f_mesh, x_mesh, p_mesh, t_mesh, l_mesh = result["meshes"]
-            w_build, s_build, x_build = result["builds"]
-            meshes[f"storey{n}_walls"] = w_mesh
-            meshes[f"storey{n}_floors"] = f_mesh
-            if x_build["fixtures"]:
-                meshes[f"storey{n}_fixtures"] = x_mesh
-            if p_mesh.indices:
-                meshes[f"storey{n}_plants"] = p_mesh
-            if t_mesh.indices:
-                meshes[f"storey{n}_trunks"] = t_mesh
-            if l_mesh.indices:
-                meshes[f"storey{n}_lawn"] = l_mesh
+            for name, mesh in result["meshes"].items():
+                meshes[f"storey{n}_{name}"] = mesh
             all_fixtures.extend({**f, "storey": n} for f in result["fixtures"])
             if result is storey:
                 primary_storey = n
@@ -931,6 +974,31 @@ def reconstruct(
         walls_before_framing=len(all_walls),
     )
 
+    # Verify every storey against the annotations inside its own frame. The
+    # generic geometry gate cannot know that zero rooms is impossible when the
+    # drawing itself says KITCHEN, LIVING and BEDROOM. Multi-storey builds used
+    # to verify only the primary floor, allowing another floor to be empty.
+    quality_storeys = solved or [(None, storey, (0.0, 0.0))]
+    for level, result, _shift in quality_storeys:
+        label_count = len(result["labels"])
+        title = level.title if level is not None else "the selected plan"
+        if label_count and not result["rooms"]:
+            verdict.checks.append(vf.Check(
+                "rooms-from-labels",
+                "blocking",
+                f"{title} contains {label_count} room labels but the reconstructed "
+                "walls enclose zero rooms. Review the wall layers before building 3D.",
+                0,
+            ))
+        if len(result["rooms"]) >= 2 and not result["holes"]:
+            verdict.checks.append(vf.Check(
+                "openings-present",
+                "blocking",
+                f"{title} contains {len(result['rooms'])} rooms but no hosted doors "
+                "or windows. The reconstruction is incomplete.",
+                0,
+            ))
+
     manifest = write_glb(meshes, out / f"{source.stem}.glb")
 
     model = {
@@ -975,7 +1043,7 @@ def reconstruct(
         "walls": wall_stats,
         "rooms": room_stats,
         "openings": opening_stats,
-        "build": {**wall_build, **slab_build, **fixture_build},
+        "build": {**wall_build, **slab_build, **finish_build, **fixture_build},
         "verify": verdict.as_dict(),
         "glb": manifest,
         "elements": {

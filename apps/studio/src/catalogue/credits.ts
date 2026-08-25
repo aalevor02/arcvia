@@ -66,12 +66,23 @@ export function creditsFor(objects: PlacedObject[], assets: SceneAssets = {}): C
   const byUrl = new Map<string, Credit>()
 
   for (const object of objects) {
+    // A manual per-placement URL is the final visual source and supersedes any
+    // Hub record the placement previously carried. It has no trusted licence.
+    if (object.customUrl) continue
+    if (object.customModel) {
+      const existing = byUrl.get(object.customModel.url)
+      if (existing) existing.uses += 1
+      else byUrl.set(object.customModel.url, {
+        ...object.customModel,
+        uses: 1,
+        kind: 'model',
+      })
+      continue
+    }
     // A per-placement override has no catalogue entry behind it and therefore
     // no licence on record. It is deliberately *not* silently credited to the
     // catalogue item it replaced — that would attach one author's name to
     // another author's work, which is worse than omitting it.
-    if (object.customUrl) continue
-
     const model = itemById(object.item)?.model
     if (!model) continue
 

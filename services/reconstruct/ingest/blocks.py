@@ -47,12 +47,63 @@ MAX_LABEL_DISTANCE_M = 9.0
 #: scale, or the whole drawing wrapped in a block. Not furniture.
 MAX_FOOTPRINT_M = 12.0
 
+# Words that identify a drawing annotation rather than a room. Unknown room
+# names are intentionally retained; these are the safer, small exclusion list
+# that prevents a title block from becoming a room label.
+_ANNOTATION_WORDS = {
+    "plan", "plans", "elevation", "section", "detail", "drawing", "schedule",
+    "legend", "north", "south", "east", "west", "scale", "typical",
+    "existing", "proposed", "revision", "copyright", "notes", "note",
+}
+_DIMENSION_TEXT = re.compile(r"^[\s\d.,'\"\\/×x-]+$")
+
+
+_OPENING_TEXT = re.compile(r'\b(?:sliding\s+)?(?:door|window|puerta|ventana)\b', re.I)
+
 
 @dataclass
 class RoomLabel:
     x: float
     y: float
     text: str
+
+
+@dataclass(frozen=True)
+class StairLevelMarker:
+    """Relative storey evidence printed beside a stair."""
+
+    x: float
+    y: float
+    level: float
+    label: str
+
+
+def usable_room_labels(labels: list[RoomLabel]) -> list[RoomLabel]:
+    """Keep plausible custom room names while rejecting sheet annotations.
+
+    `classify_room` is a kind taxonomy, not a validity test: "Media Room" and
+    "Puja" are valid rooms even when they have no known kind. Geometry still
+    decides whether a label lies inside a space; this function only prevents
+    obvious title/dimension text from becoming context.
+    """
+    out: list[RoomLabel] = []
+    for label in labels:
+        words = re.findall(r"[A-Za-z]+", label.text.lower())
+        if not words or _DIMENSION_TEXT.fullmatch(label.text):
+            continue
+        if _OPENING_TEXT.search(label.text):
+            continue
+        if any(word in _ANNOTATION_WORDS for word in words):
+            continue
+        if len(words) > 5:
+            continue
+        out.append(label)
+    return out
+
+
+def opening_labels(labels: list[RoomLabel]) -> list[RoomLabel]:
+    '''Text that explicitly identifies a door or window on the plan.'''
+    return [label for label in labels if _OPENING_TEXT.search(label.text)]
 
 
 def block_footprints(doc, scale: float) -> dict[str, tuple[float, float]]:
@@ -124,6 +175,44 @@ def room_labels(doc, scale: float, origin: tuple[float, float]) -> list[RoomLabe
             RoomLabel(x=(point.x - ox) * scale, y=(point.y - oy) * scale, text=text)
         )
 
+    return out
+
+
+def stair_level_markers(
+    doc, scale: float, origin: tuple[float, float],
+) -> list[StairLevelMarker]:
+    """
+    Exact UP/DOWN labels that order an otherwise untitled two-level drawing.
+
+    These are deliberately separate from room labels. The room-label reader
+    rejects two-letter text such as UP, correctly for room naming, while
+    storey registration needs precisely that short annotation. The marker
+    supplies relative order only: UP is the lower of a pair, DOWN the upper.
+    """
+    ox, oy = origin
+    out: list[StairLevelMarker] = []
+    for entity in doc.modelspace().query("TEXT MTEXT"):
+        try:
+            raw = entity.plain_text() if entity.dxftype() == "MTEXT" else entity.dxf.text
+            text = " ".join((raw or "").upper().split())
+            point = entity.dxf.insert
+        except (AttributeError, ValueError):
+            continue
+
+        if text == "UP":
+            out.append(StairLevelMarker(
+                x=(point.x - ox) * scale,
+                y=(point.y - oy) * scale,
+                level=0.0,
+                label="Lower level (stair UP)",
+            ))
+        elif text in {"DOWN", "DN"}:
+            out.append(StairLevelMarker(
+                x=(point.x - ox) * scale,
+                y=(point.y - oy) * scale,
+                level=1.0,
+                label="Upper level (stair DOWN)",
+            ))
     return out
 
 
@@ -308,6 +397,7 @@ __all__ = [
     "RoomLabel",
     "block_footprints",
     "nearest_room",
+    "opening_labels",
     "open_dxf",
     "room_labels",
     "wall_gap",

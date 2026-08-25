@@ -154,7 +154,10 @@ def _scale_from_extent(extent: float) -> tuple[float, str]:
 # ---- Layer classification ----------------------------------------------------
 
 _WALL_HINT = re.compile(r"\bwall|\bwal\b|^a-?wall|masonry|brick|partition", re.I)
-_OPENING_HINT = re.compile(r"door|window|win\b|opening|glaz", re.I)
+_OPENING_HINT = re.compile(
+    r"door|window|win\b|opening|glaz|puerta|ventana|pueryventa",
+    re.I,
+)
 _IGNORE_HINT = re.compile(
     r"dim|text|title|hatch|furn|grid|axis|centre|center|survey|contour|"
     r"north|scale|legend|annot|leader|defpoints",
@@ -390,6 +393,11 @@ def walls_from(reading: dict, chosen: list[str], min_length: float = 0.3) -> lis
 #: 28 sofas, 88 doors — so recognising one name places dozens of objects, and
 #: the names it cannot read become a short list somebody maps once.
 _BLOCK_HINTS = [
+    # Common Spanish drawing vocabulary. The supplied two-storey house uses
+    # PUERTA blocks on a PUERYVENTA layer; treating them as furniture produced
+    # showers and dropped every door from the building.
+    (("puerta",), "door"),
+    (("ventana",), "window"),
     # Longest and most specific first: "3 ST SOFA" must not be caught by "sofa"
     # before it has a chance to match the three-seater.
     (("3 st sofa", "3st sofa", "3 seat", "sofa 3"), "sofa-3"),

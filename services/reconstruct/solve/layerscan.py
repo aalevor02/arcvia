@@ -180,7 +180,7 @@ class Fit:
 
 
 def fit_of(faces, labels, placements, classify_room, guess_item,
-           perimeter: bool = True) -> Fit:
+           perimeter: bool = True, opening_labels=None) -> Fit:
     """
     Grade a layer set against what the architect actually annotated.
 
@@ -234,8 +234,12 @@ def fit_of(faces, labels, placements, classify_room, guess_item,
     # level up: two measurements of the same quantity must share a basis, not
     # merely a band. `perimeter=False` is kept so the difference stays
     # measurable rather than becoming folklore.
+    walls, _labelled, _labelled_unhosted = op.from_text_labels(
+        opening_labels or [], walls,
+    )
     if perimeter:
         walls = add_perimeter(walls)
+        walls = join_corners(walls)
 
     lo, hi = ROOM_AREA
     spaces = [
@@ -261,6 +265,8 @@ def select_within_frame(
     classify_room,
     guess_item,
     max_layers: int = 6,
+    seed: set[str] | None = None,
+    opening_labels=None,
 ) -> tuple[set[str], list[dict]]:
     """
     Choose the wall layers for ONE frame, scored on named rooms.
@@ -285,11 +291,26 @@ def select_within_frame(
     place even when it misses most of the walls. Frames first, layers second,
     geometry last.
     """
-    candidates = [n for n in shortlist if n in faces_by_layer]
-    chosen: set[str] = set()
-    pool: list = []
-    best = Fit(0, 0, 0, 0, len(placements))
+    candidates = sorted(n for n in shortlist if n in faces_by_layer)
+    chosen: set[str] = set(seed or ()) & set(candidates)
+    pool: list = [
+        face for name in sorted(chosen) for face in faces_by_layer[name]
+    ]
+    best = (
+        fit_of(
+            pool, labels, placements, classify_room, guess_item,
+            opening_labels=opening_labels,
+        )
+        if pool
+        else Fit(
+            0, 0, 0, 0,
+            sum(1 for placement in placements
+                if guess_item(placement.get("block", "")) in ("door", "window")),
+        )
+    )
     trace: list[dict] = []
+    if chosen:
+        trace.append({"seeded": sorted(chosen), **best.as_dict()})
 
     for _ in range(min(max_layers, len(candidates))):
         winner, winner_fit, winner_pool = None, best, None
@@ -298,7 +319,10 @@ def select_within_frame(
             if name in chosen:
                 continue
             trial = pool + faces_by_layer[name]
-            fit = fit_of(trial, labels, placements, classify_room, guess_item)
+            fit = fit_of(
+                trial, labels, placements, classify_room, guess_item,
+                opening_labels=opening_labels,
+            )
             if fit.score > winner_fit.score:
                 winner, winner_fit, winner_pool = name, fit, trial
 

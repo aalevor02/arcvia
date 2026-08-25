@@ -87,17 +87,26 @@ export async function registerSceneRoutes(app) {
       // combined export — without this field, baking a furnished
       // reconstruction would destroy the only reference to the building.
       'cadModelUrl',
+      // The measured rooms and classified fixtures behind the reconstruction.
+      // Render-derived furniture needs these polygons after reload; the GLB
+      // alone carries shapes and names, not the source room record.
+      'cadModelJsonUrl',
       'lightsUrl',
       'hdriUrl',
       'floorPlanUrl',
-      // The design read out of the deck's renders (a DesignSpec: floor, walls,
-      // ceiling, style, measured colours). The studio re-applies it on every
+      // Designs read out of the deck's renders (DesignSpecs: floor, walls,
+      // ceiling, furniture, style, measured colours). The studio re-applies
+      // them on every
       // rebuild; the published page never reads it — the look reaches clients
       // inside the exported model. Null is meaningful: "the user cleared the
       // dressing", which stops the studio's read-on-open resurrecting it.
       // Absent from this list, the whole feature was unreachable — the studio
       // dressed the model on screen and this route refused the save.
       'design',
+      // Room-design keys the user already accepted or discarded for furniture.
+      // Without this, declining an inferred arrangement would make it return
+      // on every reload until the user gave in.
+      'designFurnitureReviewed',
       'bakedUrl',
       'plan',
       // What turns a model into a presentation. All three are authored in the

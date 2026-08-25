@@ -107,6 +107,7 @@ class RasterReading:
     faces: list[Face] = field(default_factory=list)
     walls: list[Wall] = field(default_factory=list)
     rooms: list[dict] = field(default_factory=list)
+    openings: list[dict] = field(default_factory=list)
     metres_per_unit: float = 0.0
     scale_samples: int = 0
     scale_spread: float | None = None
@@ -128,6 +129,7 @@ class RasterReading:
             "faces": len(self.faces),
             "prePaired": len(self.walls),
             "rooms": len(self.rooms),
+            "openings": len(self.openings),
             "named": sum(1 for r in self.rooms if r.get("name")),
             "metresPerUnit": round(self.metres_per_unit, 5),
             "scaleSamples": self.scale_samples,
@@ -243,10 +245,32 @@ def read(image_path: str, url: str | None = DETECTOR,
             "area": room.get("area"),
         })
 
+    openings = []
+    for detected in result.get("objects", []):
+        if detected.get("attaches_to") != "wall":
+            continue
+        label = str(detected.get("label") or "").lower()
+        if label not in {"door", "window", "opening"}:
+            continue
+        bbox = detected.get("bbox") or []
+        if len(bbox) != 4:
+            continue
+        x, y, width, height = (float(value) for value in bbox)
+        px, py = to_world({"x": x + width / 2, "y": y + height / 2})
+        openings.append({
+            "kind": label,
+            "x": px,
+            "y": py,
+            # The long side of the detected box runs along the host wall.
+            "width": max(width * mpu, height * aspect * mpu),
+            "confidence": float(detected.get("confidence", 0.5)),
+        })
+
     return RasterReading(
         faces=faces,
         walls=walls,
         rooms=rooms,
+        openings=openings,
         metres_per_unit=mpu,
         scale_samples=int(raw.get("samples") or 0),
         scale_spread=raw.get("spread"),

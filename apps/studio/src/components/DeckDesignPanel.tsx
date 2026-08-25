@@ -4,8 +4,8 @@ import { readDocument, readDesign, uploadFloorplan, type DocumentSheet } from '.
 import { hubQueriesForSpec, type DesignSpec } from '../plan/deckDesign'
 
 interface Props {
-  /** The design the scene currently wears, so the worn render can be marked. */
-  design: DesignSpec | null
+  /** All room designs the scene currently wears, so each render can be marked. */
+  designs: DesignSpec[]
   /**
    * The one path a design takes onto the scene. The editor owns application
    * (its rebuild effect re-dresses on every rebuild) and persistence; the
@@ -37,13 +37,12 @@ interface RenderRow {
  * and lists what COULD be read; the user reads the renders that matter.
  *
  * ── What Apply honestly does ────────────────────────────────────────────────
- * The whole model's floors, walls and ceilings take this render's finishes —
- * surface maps of the right kind, tinted toward the render's own measured
- * colours. A CAD storey is one floors mesh, so one room's carpet cannot stop
- * at its doorway; the caption under the button says which render is worn.
- * Per-room application arrives with per-room floor meshes from the engine.
+ * The first render supplies the whole-model fallback, including the aggregate
+ * walls and ceilings. Further renders override the matching named room-floor
+ * meshes, so bedroom timber and living-room tile can coexist at their doorway.
+ * Per-room wall paint waits on the engine emitting per-room wall meshes.
  */
-export default function DeckDesignPanel({ design, onApplyDesign, deckUrl, onDeckStored }: Props) {
+export default function DeckDesignPanel({ designs, onApplyDesign, deckUrl, onDeckStored }: Props) {
   const [url, setUrl] = useState<string | null>(deckUrl)
   const [rows, setRows] = useState<RenderRow[]>([])
   const [busy, setBusy] = useState<'upload' | 'outline' | null>(null)
@@ -113,25 +112,29 @@ export default function DeckDesignPanel({ design, onApplyDesign, deckUrl, onDeck
 
   /** Whether this row's render is the one the scene currently wears. */
   const worn = (row: RenderRow) =>
-    design?.source != null &&
-    design.source.page === row.sheet.page &&
-    design.source.index === row.sheet.index
+    designs.some((design) =>
+      design.source?.page === row.sheet.page && design.source.index === row.sheet.index,
+    )
+
+  const wornRooms = Array.from(
+    new Set(designs.map((design) => design.source?.room ?? design.room).filter(Boolean)),
+  )
 
   return (
     <section>
       <span className="eyebrow">Deck design</span>
       <p className="note">
-        Read the materials and furnishing out of the deck&apos;s renders, and
-        dress the model in the same finishes.
+        Read materials and furniture out of the deck&apos;s renders. Apply its
+        finishes, then review any observed furniture arranged in that room.
       </p>
 
-      {design && (
+      {designs.length > 0 && (
         <p className="muted" style={{ fontSize: 11.5 }}>
-          Worn now: {design.source?.room ?? design.room ?? 'a deck render'}
-          {design.source?.auto ? ' — read automatically when the scene opened' : ''}
+          Worn rooms: {wornRooms.join(', ') || 'a deck render'}
+          {designs[0]?.source?.auto ? ' — the fallback was read automatically' : ''}
           {' · '}
           <button className="btn" onClick={() => onApplyDesign(null)}>
-            Clear the dressing
+            Clear all dressing
           </button>
         </p>
       )}
@@ -196,12 +199,12 @@ export default function DeckDesignPanel({ design, onApplyDesign, deckUrl, onDeck
               </div>
               {worn(row) ? (
                 <p className="muted" style={{ marginTop: 4 }}>
-                  The model wears this render&apos;s finishes — saved with the
-                  scene, and published with it.
+                  This room wears the render&apos;s floor finish. Its recognised
+                  furniture was offered in the shared furniture review.
                 </p>
               ) : (
                 <button className="btn btn-primary" style={{ marginTop: 4 }} onClick={() => apply(row)}>
-                  Dress the model in these finishes
+                  Apply this room design
                 </button>
               )}
 

@@ -45,6 +45,10 @@ const check = (label: string, condition: boolean, extra = '') => {
   check('a label reports itself as evidence', fromLabel('DRESSER')?.evidence === 'labelled')
   check('and says what it read', (fromLabel('DRESSER')?.because ?? '').includes('DRESSER'))
   check('an unknown word identifies nothing', fromLabel('XYZZY') === null)
+  check('a hyphenated wall light resolves to its attachment asset',
+    fromLabel('wall-light')?.item.id === 'wall-light')
+  check('a pendant resolves to the ceiling attachment asset',
+    fromLabel('pendant')?.item.id === 'pendant')
 
   // A room name is not a fixture. TOILET is both, which is the trap.
   check('TOILET as a room label is not a WC',
@@ -203,7 +207,7 @@ const result = (rooms: DetectedRoom[]): DetectionResult => ({
     { item: 'wardrobe', position: { x: 0, y: 0 }, rotation: 0, room: 'Bedroom', evidence: 'typical', confidence: 0.4, because: '' },
   ])
   check('the summary separates drawn from assumed',
-    summary.drawn === 1 && summary.assumed === 1, JSON.stringify(summary))
+    summary.drawn === 1 && summary.rendered === 0 && summary.assumed === 1, JSON.stringify(summary))
   check('and counts rooms', summary.rooms === 1)
 }
 

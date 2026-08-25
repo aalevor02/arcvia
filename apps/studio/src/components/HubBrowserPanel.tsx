@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../lib/api'
+import { CATALOGUE } from '../catalogue/items'
+import type { AssetModel, CatalogueItem } from '../catalogue/types'
+import type { Proposal } from '../plan/furnish'
+import { measuredPlacementChoices } from '../plan/designFurnish'
 import {
   conditionHubModel,
   hubPreviewUrl,
@@ -13,10 +17,9 @@ import {
  * ── What this is next to the catalogue ──────────────────────────────────────
  * The catalogue above is the storefront: forty-odd conditioned, sized,
  * credit-tracked objects you can place. This is the warehouse behind it —
- * thousands of licence-clean assets — and it is browse-only on purpose.
- * Placing a raw hub model would put a 300k-triangle scan with 4K textures
- * into a scene every visitor downloads; the way an asset earns placement is
- * through the ingest pipeline, which sizes and decimates it first.
+ * thousands of licence-clean assets. A raw hub model never enters a scene:
+ * reviewed render items can choose one only after conditioning and after a
+ * catalogue template supplies real dimensions, placement, and a fallback.
  *
  * What you CAN take away is a conditioned GLB: "Get GLB" asks the API to run
  * the same conditioner the catalogue uses, capped to web budgets, cached
@@ -29,8 +32,39 @@ import {
 
 const KINDS = ['model', 'material', 'texture', 'hdri', 'audio'] as const
 const PAGE = 30
+type PlaceablePlacement = Exclude<CatalogueItem['placement'], 'in-wall'>
+type PlaceableTemplate = CatalogueItem & { placement: PlaceablePlacement }
 
-export function HubBrowserPanel() {
+function isPlaceableTemplate(item: CatalogueItem): item is PlaceableTemplate {
+  return item.placement !== 'in-wall'
+}
+
+const PLACEABLE_TEMPLATES = CATALOGUE
+  .filter(isPlaceableTemplate)
+  .sort((a, b) =>
+    a.placement.localeCompare(b.placement) || a.name.localeCompare(b.name),
+  )
+const PLACEMENT_NAME = {
+  floor: 'Floor',
+  wall: 'Wall',
+  ceiling: 'Ceiling',
+} as const
+
+export interface HubUse {
+  target: Proposal
+  template: CatalogueItem
+  asset: HubAsset
+  model: AssetModel
+  attachmentIndex?: number
+}
+
+interface Props {
+  target?: Proposal | null
+  onUse?(selection: HubUse): void
+  onCancelTarget?(): void
+}
+
+export function HubBrowserPanel({ target = null, onUse, onCancelTarget }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<string>('model')
@@ -38,6 +72,26 @@ export function HubBrowserPanel() {
   const [page, setPage] = useState<{ total: number; assets: HubAsset[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [templateId, setTemplateId] = useState('')
+  const [attachmentId, setAttachmentId] = useState('')
+  const template = PLACEABLE_TEMPLATES.find((item) => item.id === templateId) ?? null
+  const attachmentChoices = template && target?.placementContext
+    ? measuredPlacementChoices(template, target.placementContext)
+    : []
+  const needsAttachment = template?.placement === 'wall' || template?.placement === 'ceiling'
+  const attachmentIndex = attachmentId === '' ? undefined : Number(attachmentId)
+
+  useEffect(() => {
+    if (!target) return
+    setOpen(true)
+    setKind('model')
+    setQuery(target.hubQuery || target.observedItem || '')
+    setTemplateId('')
+    setAttachmentId('')
+    requestAnimationFrame(() =>
+      document.getElementById('asset-hub-panel')?.scrollIntoView({ behavior: 'smooth' }),
+    )
+  }, [target?.item, target?.room, target?.designKey])
 
   // Debounced: the hub answers from a cached manifest, but a keystroke per
   // request is still a request per keystroke.
@@ -89,7 +143,7 @@ export function HubBrowserPanel() {
   }
 
   return (
-    <section>
+    <section id="asset-hub-panel">
       <details open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
         <summary style={{ cursor: 'pointer' }}>
           <span className="eyebrow">Asset hub</span>
@@ -101,6 +155,63 @@ export function HubBrowserPanel() {
         </summary>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {target && (
+            <div className="alert" style={{ fontSize: 11.5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <strong>Choose a model for {target.observedItem || 'this render item'}</strong>
+                <button className="btn" style={{ fontSize: 10, padding: '1px 5px' }} onClick={onCancelTarget}>
+                  Cancel
+                </button>
+              </div>
+              <label style={{ display: 'block', marginTop: 6 }}>
+                <span className="muted">Use catalogue size and attachment type</span>
+                <select
+                  value={templateId}
+                  onChange={(e) => {
+                    setTemplateId(e.target.value)
+                    setAttachmentId('')
+                  }}
+                  aria-label="Catalogue size and placement template"
+                  style={{ display: 'block', width: '100%', marginTop: 3 }}
+                >
+                  <option value="">Choose the matching object type...</option>
+                  {PLACEABLE_TEMPLATES.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {PLACEMENT_NAME[item.placement]} - {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {needsAttachment && (
+                <label style={{ display: 'block', marginTop: 6 }}>
+                  <span className="muted">
+                    Choose measured {template?.placement === 'wall' ? 'wall face' : 'ceiling point'}
+                  </span>
+                  <select
+                    value={attachmentId}
+                    onChange={(e) => setAttachmentId(e.target.value)}
+                    aria-label="Measured attachment target"
+                    style={{ display: 'block', width: '100%', marginTop: 3 }}
+                  >
+                    <option value="">Choose the exact target...</option>
+                    {attachmentChoices.map((choice) => (
+                      <option key={choice.index} value={choice.index}>{choice.label}</option>
+                    ))}
+                  </select>
+                  {attachmentChoices.length === 0 && (
+                    <span className="muted" style={{ display: 'block', marginTop: 3 }}>
+                      No measured target in this room can fit that template.
+                    </span>
+                  )}
+                </label>
+              )}
+              <span className="muted" style={{ display: 'block', marginTop: 4 }}>
+                The template supplies real dimensions and a measured floor,
+                wall, or ceiling placement; the Hub model supplies appearance
+                and licence provenance.
+              </span>
+            </div>
+          )}
           <input
             type="search"
             value={query}
@@ -137,7 +248,17 @@ export function HubBrowserPanel() {
           <div
             style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 320, overflowY: 'auto' }}
           >
-            {page?.assets.map((asset) => <HubRow key={asset.ref} asset={asset} />)}
+            {page?.assets.map((asset) => (
+              <HubRow
+                key={asset.ref}
+                asset={asset}
+                target={target}
+                template={template}
+                attachmentIndex={attachmentIndex}
+                needsAttachment={needsAttachment}
+                onUse={onUse}
+              />
+            ))}
             {page && page.assets.length === 0 && !loading && (
               <p className="muted" style={{ fontSize: 12 }}>
                 Nothing in the hub matches that.
@@ -153,9 +274,9 @@ export function HubBrowserPanel() {
           )}
 
           <p className="muted" style={{ fontSize: 11 }}>
-            The warehouse behind the catalogue — browse and take a conditioned
-            GLB. Placing in scenes stays catalogue-only, where sizes and
-            credits are guaranteed.
+            Browse or download a conditioned GLB. A render-review choice can
+            also use one here after you supply a known catalogue footprint;
+            dimensions and credits remain explicit.
           </p>
         </div>
       </details>
@@ -163,7 +284,21 @@ export function HubBrowserPanel() {
   )
 }
 
-function HubRow({ asset }: { asset: HubAsset }) {
+function HubRow({
+  asset,
+  target,
+  template,
+  attachmentIndex,
+  needsAttachment,
+  onUse,
+}: {
+  asset: HubAsset
+  target: Proposal | null
+  template: CatalogueItem | null
+  attachmentIndex?: number
+  needsAttachment: boolean
+  onUse?: (selection: HubUse) => void
+}) {
   const [state, setState] = useState<'idle' | 'working' | 'failed'>('idle')
   const [note, setNote] = useState<string | null>(null)
   // Written once on failure and left: a preview that 404s once will 404 again.
@@ -177,6 +312,10 @@ function HubRow({ asset }: { asset: HubAsset }) {
       const result = await conditionHubModel(asset.ref)
       setState('idle')
       setNote(`${(result.bytes / 1024).toFixed(0)} KB${result.cached ? ' (cached)' : ''}`)
+      if (target && template && onUse) {
+        onUse({ target, template, asset, model: result.model, attachmentIndex })
+        return
+      }
       // A plain navigation, not an anchor download attribute: the URL is
       // cross-origin (the API), and `download` is ignored cross-origin anyway.
       window.open(result.url, '_blank')
@@ -240,11 +379,19 @@ function HubRow({ asset }: { asset: HubAsset }) {
           <button
             className="btn"
             style={{ fontSize: 10.5, padding: '2px 7px' }}
-            disabled={state === 'working'}
+            disabled={state === 'working' || Boolean(
+              target && (!template || (needsAttachment && attachmentIndex === undefined)),
+            )}
             onClick={() => void getGlb()}
-            title="Condition to web budget and download"
+            title={target && (!template || (needsAttachment && attachmentIndex === undefined))
+              ? needsAttachment && template
+                ? 'Choose the measured attachment target first'
+                : 'Choose the matching catalogue object type first'
+              : target
+                ? `Condition and use for ${target.observedItem || 'the reviewed item'}`
+                : 'Condition to web budget and download'}
           >
-            {state === 'working' ? 'Conditioning…' : 'Get GLB'}
+            {state === 'working' ? 'Conditioning...' : target ? 'Use this' : 'Get GLB'}
           </button>
         )}
         <a

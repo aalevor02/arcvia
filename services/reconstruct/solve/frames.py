@@ -161,6 +161,20 @@ class Frame:
     #: one is underneath.
     title: str | None = None
 
+    #: Relative level evidence read from the drawing when no formal plan title
+    #: exists. A two-storey sheet often labels the stair only: UP on the lower
+    #: plan and DOWN on the upper plan. Geometry still only proposes a group;
+    #: these words are the textual evidence that orders it.
+    level_hint: float | None = None
+    level_label: str | None = None
+
+    #: Relative level evidence read from the drawing when no formal plan title
+    #: exists. A two-storey sheet often labels the stair only: UP on the lower
+    #: plan and DOWN on the upper plan. Geometry still only proposes a group;
+    #: these words are the textual evidence that orders it.
+    level_hint: float | None = None
+    level_label: str | None = None
+
     @property
     def origin(self) -> str:
         """
@@ -199,6 +213,10 @@ class Frame:
             "span": round(self.span, 2),
             "origin": self.origin,
             "title": self.title,
+            "levelHint": self.level_hint,
+            "levelLabel": self.level_label,
+            "levelHint": self.level_hint,
+            "levelLabel": self.level_label,
             # The machine-readable form of the same thing. `origin` is for a
             # person reading a log; this is for the storey-registration step,
             # which needs to know that two frames share a cut and which side of

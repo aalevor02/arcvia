@@ -51,6 +51,8 @@ class FakeFrame:
     bbox: tuple[float, float, float, float]
     title: str | None = None
     cuts: list = field(default_factory=list)
+    level_hint: float | None = None
+    level_label: str | None = None
 
 
 print("-- what a title says the level is --")
@@ -75,6 +77,21 @@ ok("a roof is above everything", classify_level("Roof Plan") > 10)
 ok("'typical' is not a level", classify_level("TYPICAL FLOOR PLAN") is None)
 ok("a site plan is not a level", classify_level("Site Plan") is None)
 ok("and neither is nothing", classify_level(None) is None)
+
+
+print("\n-- stair directions can order an untitled two-storey house --")
+stairs = [
+    FakeFrame(0, (0, 0, 10, 8), level_hint=0, level_label="Lower level (stair UP)"),
+    FakeFrame(1, (15, 0, 25, 8), level_hint=1, level_label="Upper level (stair DOWN)"),
+]
+stair_result = register_storeys(stairs)
+ok("UP and DOWN provide two relative levels",
+   stair_result.as_dict()["storeys"] == 2, str(stair_result.as_dict()))
+ok("the UP plan is below the DOWN plan",
+   [s.frame_index for s in stair_result.stacks[0]] == [0, 1])
+ok("relative labels remain visible in the model",
+   [s.title for s in stair_result.stacks[0]]
+   == ["Lower level (stair UP)", "Upper level (stair DOWN)"])
 
 
 print("\n-- the villa: two storeys, one building --")

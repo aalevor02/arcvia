@@ -242,6 +242,29 @@ class MeshBuilder:
             self.add_tri_facing(v(x0, y0, bottom), v(x1, y1, bottom), v(x2, y2, bottom),
                                 up=False)
 
+    def add_polygon_face(
+        self, loop: list[tuple[float, float]], z: float, up: bool = True
+    ) -> None:
+        """One triangulated polygon face, with an explicit facing direction."""
+        from shapely.geometry import Polygon
+        from shapely.ops import triangulate
+
+        if len(loop) < 3:
+            return
+        poly = Polygon(loop)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty or poly.geom_type != "Polygon":
+            return
+
+        for tri in triangulate(poly):
+            if not poly.contains(tri.centroid):
+                continue
+            (x0, y0), (x1, y1), (x2, y2) = list(tri.exterior.coords)[:3]
+            self.add_tri_facing(
+                (x0, z, -y0), (x1, z, -y1), (x2, z, -y2), up=up,
+            )
+
     @property
     def triangles(self) -> int:
         return len(self.indices) // 3
@@ -293,22 +316,43 @@ _MATERIALS = [
             "roughnessFactor": 1.0,
         },
     },
+    {
+        "name": "water",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.12, 0.40, 0.52, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.18,
+        },
+    },
+    {
+        "name": "paving",
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.57, 0.54, 0.49, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.92,
+        },
+    },
 ]
 
-#: Which material a mesh gets, by a substring of its name. First match wins, so
-#: the specific names come before the generic fall-through to poché (0).
+#: Which material a mesh gets, by an underscore-delimited kind in its name.
+#: First match wins; anything else falls through to poché (0).
 _MATERIAL_BY_NAME = (
     ("plants", 1),
     ("foliage", 1),
     ("trunks", 2),
     ("lawn", 3),
+    ("water", 4),
+    ("paving", 5),
 )
 
 
 def _material_for(name: str) -> int:
     lowered = name.lower()
     for token, index in _MATERIAL_BY_NAME:
-        if token in lowered:
+        # Mesh KIND is an underscore-delimited token. A substring check paints
+        # an indoor `floor_room4_water-closet` as pool water merely because
+        # its architectural label contains the word.
+        if f"_{token}_" in f"_{lowered}_":
             return index
     return 0
 

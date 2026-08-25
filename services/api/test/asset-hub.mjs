@@ -18,6 +18,7 @@ import { join } from 'node:path'
 
 import {
   NotConditionable,
+  conditionedAssetModel,
   conditionModel,
   hubPathOf,
   manifest,
@@ -38,6 +39,23 @@ const ok = (label, condition, extra = '') => {
 }
 
 // ---- Containment ------------------------------------------------------------
+
+{
+  const model = conditionedAssetModel({
+    licence: 'cc-by-4.0',
+    licenceName: 'CC Attribution 4.0',
+    authors: ['Hub Artist'],
+    source: 'polyhaven',
+    sourceUrl: 'https://example.com/asset',
+  }, {
+    triangles: 4800,
+    report: { facing: { yaw: 90 }, decimate: { after: 4800 } },
+  }, '/hub/conditioned/example--5000.glb')
+  ok('conditioned metadata carries server-authored attribution',
+    model.author === 'Hub Artist' && model.licence === 'CC Attribution 4.0')
+  ok('conditioned metadata carries the facing and web triangle count',
+    model.yaw === 90 && model.triangles === 4800 && model.upAxis === 'y')
+}
 
 ok('a hub path resolves inside the hub', hubPathOf('models/anything') !== null)
 ok('traversal out of the hub is refused', hubPathOf('../secret') === null)

@@ -118,6 +118,26 @@ const withModel = CATALOGUE.find((item) => item.model)?.id
     'objects without a custom model are not flagged',
     uncredited(objects).every((o) => o.id === 'o1'),
   )
+
+  const hub: PlacedObject = {
+    ...place('hub-1', withoutModel!),
+    customModel: {
+      url: '/hub/conditioned/chair--5000.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Hub Artist',
+      source: 'https://example.com/hub-chair',
+      triangles: 4990,
+      yaw: 90,
+      upAxis: 'y',
+    },
+  }
+  const hubCredits = creditsFor([hub])
+  check('a conditioned Hub placement credits its recorded author',
+    hubCredits.length === 1 && hubCredits[0]?.author === 'Hub Artist')
+  check('a licensed Hub placement is not reported as anonymous', uncredited([hub]).length === 0)
+  const manuallyReplaced = { ...hub, customUrl: 'https://example.com/replacement.glb' }
+  check('a later manual URL supersedes the old Hub credit', creditsFor([manuallyReplaced]).length === 0)
+  check('that manual replacement is reported as uncredited', uncredited([manuallyReplaced]).length === 1)
 }
 
 // ---- Assets that are not placed objects -------------------------------------

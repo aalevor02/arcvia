@@ -11,6 +11,7 @@ interface Props {
   heading?: string
   onAccept(): void
   onDiscard(): void
+  onFindAsset?(piece: Proposal): void
 }
 
 const NAME = new Map(CATALOGUE.map((item) => [item.id, item.name]))
@@ -30,7 +31,7 @@ const NAME = new Map(CATALOGUE.map((item) => [item.id, item.name]))
  * so in words. The user can accept the lot in one click; the point is that they
  * can see what they are accepting.
  */
-export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Props) {
+export function FurnitureReview({ furniture, heading, onAccept, onDiscard, onFindAsset }: Props) {
   const summary = summariseFurniture(furniture)
 
   const groups = [
@@ -47,9 +48,21 @@ export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Pro
       tone: 'var(--accent, var(--signal))',
     },
     {
+      key: 'rendered' as const,
+      title: 'Seen in the render',
+      note: 'The item is visible; its proposed position is arranged inside the measured room.',
+      tone: 'var(--accent, var(--signal))',
+    },
+    {
       key: 'typical' as const,
       title: 'Assumed from the room',
       note: 'Nothing was drawn here — these are a starting point, not a reading.',
+      tone: 'var(--warn)',
+    },
+    {
+      key: 'unresolved' as const,
+      title: 'Needs an asset or placement decision',
+      note: 'Seen in the render, but no safe catalogue model or attachment target exists yet.',
       tone: 'var(--warn)',
     },
   ]
@@ -98,8 +111,30 @@ export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Pro
               {[...counted.values()].map(({ count, piece }) => (
                 <li key={`${piece.item}-${piece.room}`} style={{ margin: '2px 0' }}>
                   {count > 1 && <span className="mono">{count} × </span>}
-                  {NAME.get(piece.item) ?? piece.item}
+                  {piece.observedItem ?? NAME.get(piece.item) ?? piece.item}
                   {piece.room && <span className="muted"> — {piece.room}</span>}
+                  {piece.reviewOnly && piece.hubQuery && (
+                    <>
+                      {onFindAsset && (
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: 10, padding: '1px 5px', marginLeft: 5 }}
+                          title="Search, condition, size, and credit an Asset Hub model"
+                          onClick={() => onFindAsset(piece)}
+                        >
+                          Find asset
+                        </button>
+                      )}
+                      <button
+                        className="btn"
+                        style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}
+                        title="Copy this phrase into the Asset Hub search"
+                        onClick={() => void navigator.clipboard?.writeText(piece.hubQuery!)}
+                      >
+                        Copy search
+                      </button>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
@@ -109,7 +144,7 @@ export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Pro
 
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <button className="btn btn-primary" style={{ flex: 1 }} onClick={onAccept}>
-          Place these
+          {furniture.some((piece) => !piece.reviewOnly) ? 'Place these' : 'Mark reviewed'}
         </button>
         <button className="btn" onClick={onDiscard}>
           Discard
@@ -117,8 +152,9 @@ export function FurnitureReview({ furniture, heading, onAccept, onDiscard }: Pro
       </div>
 
       <p className="muted" style={{ fontSize: 11.5 }}>
-        Everything lands as a normal object — drag, rotate, resize or delete any
-        of it afterwards, and one undo reverses the whole placement.
+        Render-only observations stay out of the model until an asset and
+        attachment decision exists. Accepted catalogue items land as normal
+        objects, and one undo reverses the whole placement.
       </p>
     </>
   )

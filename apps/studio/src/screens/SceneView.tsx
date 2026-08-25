@@ -21,11 +21,17 @@ import {
   readDocument,
   readDesign,
 } from '../lib/api'
-import { applyDesignToModel, type DesignSpec } from '../plan/deckDesign'
+import {
+  applyDesignsToModel,
+  designsOf,
+  upsertDesign,
+  type DesignSpec,
+} from '../plan/deckDesign'
 import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { upgradeSurfaces } from '../catalogue/surfaceUpgrade'
 import { creditsFor } from '../catalogue/credits'
 import { exportGlb, downloadBlob, filenameFor } from '../plan/exportGlb'
+import { modelCaptureSource, needsModelCapture } from '../plan/modelCapture'
 import PresentationPanel, { hotspotAt } from '../components/PresentationPanel'
 import EnvironmentPanel from '../components/EnvironmentPanel'
 import OptionsPanel from '../components/OptionsPanel'
@@ -43,6 +49,8 @@ interface Props {
   /** Used to name an exported file. Optional so the 3D view still renders
    *  while the scene record is still loading. */
   sceneName?: string
+  /** Offer furniture observed by newly read renders through the editor review. */
+  onDesignsChanged?(designs: DesignSpec[]): void
 }
 
 const PRESETS: { id: RenderPreset; label: string; credits: number; note: string }[] = [
@@ -74,7 +82,7 @@ function elapsed(ms: number): string {
  * it: the 3D view cannot fall out of sync with the drawing, because it *is* the
  * drawing, rebuilt.
  */
-export default function SceneView({ plan, sceneId, sceneName }: Props) {
+export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewerRef = useRef<SceneViewer | null>(null)
   const walkRef = useRef<WalkController | null>(null)
@@ -162,12 +170,13 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * Three states, and the difference carries meaning: `undefined` means no
    * render has ever been read, so the editor may read one automatically on
    * open; `null` means the user cleared the dressing, which the auto-read
-   * must respect; a spec is re-applied by the rebuild effect on every
-   * rebuild — state the rebuild reads, never a one-shot mutation, because a
+   * must respect; a list of room specs is re-applied by the rebuild effect on
+   * every rebuild — state the rebuild reads, never a one-shot mutation,
+   * because a
    * one-shot is wiped by the next wall drag. That was the shipped behaviour
    * this replaced: dress, nudge a chair, plain again.
    */
-  const [design, setDesign] = useState<DesignSpec | null | undefined>(undefined)
+  const [design, setDesign] = useState<DesignSpec[] | null | undefined>(undefined)
   /**
    * The scene's recorded bake atlas, as distinct from the view-local `baked`
    * flag (which is only ever true between a finished bake and the next
@@ -217,7 +226,13 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         setDeckUrl(scene.floorPlanUrl ?? null)
         // Absent stays `undefined` and cleared stays `null` — the auto-read
         // below tells them apart.
-        setDesign(scene.design)
+        setDesign(
+          scene.design === undefined
+            ? undefined
+            : scene.design === null
+              ? null
+              : designsOf(scene.design),
+        )
         setSceneBakedUrl(scene.bakedUrl ?? null)
       })
       .catch(() => {
@@ -263,8 +278,10 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
    * removed.
    */
   function applyDesign(next: DesignSpec | null) {
-    setDesign(next)
-    void updateScene(sceneId, { design: next }).catch(() =>
+    const stored = next === null ? null : upsertDesign(design, next)
+    setDesign(stored)
+    onDesignsChanged?.(stored ?? [])
+    void updateScene(sceneId, { design: stored }).catch(() =>
       setStatus('The design could not be saved. Check your connection.'),
     )
   }
@@ -397,12 +414,12 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
      * the second upgrades the maps under them whenever they arrive.
      */
     const dress = (root: THREE.Object3D) => {
-      if (!design) return
-      applyDesignToModel(root, design)
+      if (!design?.length) return
+      applyDesignsToModel(root, design)
       viewer.requestRender()
       void upgradeSurfaces(() => viewer.requestRender()).then(() => {
-        if (design) {
-          applyDesignToModel(root, design)
+        if (design?.length) {
+          applyDesignsToModel(root, design)
           viewer.requestRender()
         }
       })
@@ -696,6 +713,48 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
   }
 
   /**
+   * Persist the complete model that downstream viewers and render workers
+   * actually load. Both publishing and still rendering use this path so one
+   * cannot silently lag behind the other.
+   *
+   * Returns false when there was no safe capture to make. That is intentional:
+   * an unloaded model-only scene must retain its stored building, and a baked
+   * scene must retain the geometry whose UVs match its atlas.
+   */
+  async function captureCurrentModel(statusLabel: string): Promise<boolean> {
+    const viewer = viewerRef.current
+    const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
+    const source = modelCaptureSource({
+      hasBakedAtlas: Boolean(sceneBakedUrl),
+      planHasWalls,
+      hasViewerModel: Boolean(viewer?.modelRoot),
+    })
+    if (!needsModelCapture(source)) return false
+
+    setStatus(`${statusLabel} — capturing the current model…`)
+    await modelsSettled()
+
+    const complete =
+      source === 'capture-viewer'
+        ? viewer!.modelRoot!
+        : buildPlanGeometry(plan.floors, { ceilings: true, floorFinish: finish })
+
+    if (source === 'capture-plan') {
+      // A fresh build starts undressed; the viewer model is already dressed
+      // and upgraded by the rebuild effect.
+      await upgradeModels(complete)
+      await upgradeSurfaces()
+      if (design?.length) applyDesignsToModel(complete, design)
+    }
+
+    const { blob } = await exportGlb(complete)
+    const stored = await uploadScene(blob)
+    await updateScene(sceneId, { modelUrl: stored.url })
+    setStoredModel(stored.url)
+    return true
+  }
+
+  /**
    * Publish the scene and show the link.
    *
    * Publishing an unbaked scene is allowed, and deliberately so — a client
@@ -719,31 +778,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
       // geometry with the old atlas — worse than a flat model. A bake
       // already carries the dressing worn when it was made; re-bake after
       // changing the look.
-      const planHasWalls = plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
-      // Nothing worth capturing: a model-only scene whose viewer has not
-      // loaded yet must keep the modelUrl it has — a plan build of an empty
-      // plan would overwrite the building with an empty file.
-      const capturable = planHasWalls || Boolean(viewerRef.current?.modelRoot)
-      if (!sceneBakedUrl && capturable) {
-        const viewer = viewerRef.current
-        setStatus('Publishing — capturing the model…')
-        await modelsSettled()
-        const complete =
-          !planHasWalls && viewer?.modelRoot
-            ? viewer.modelRoot
-            : buildPlanGeometry(plan.floors, { ceilings: true, floorFinish: finish })
-        if (complete !== viewer?.modelRoot) {
-          // A fresh build starts undressed; the live modelRoot is already
-          // dressed and upgraded by the rebuild effect.
-          await upgradeModels(complete)
-          await upgradeSurfaces()
-          if (design) applyDesignToModel(complete, design)
-        }
-        const { blob } = await exportGlb(complete)
-        const stored = await uploadScene(blob)
-        await updateScene(sceneId, { modelUrl: stored.url })
-        setStoredModel(stored.url)
-      }
+      await captureCurrentModel('Publishing')
 
       // ── Attribution, written before the page becomes public ─────────────
       // The published viewer already renders a credit list from
@@ -875,6 +910,10 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
 
     setStatus(`Submitting ${preset}…`)
     try {
+      // The worker resolves `scene.modelUrl`; it cannot see the editor's live
+      // plan, placed furniture, upgraded models, finishes or design treatment.
+      // Persist that exact state immediately before queueing the render.
+      await captureCurrentModel(`Preparing ${preset}`)
       const { jobId } = await submitRender({
         sceneId,
         preset,
@@ -1063,7 +1102,7 @@ export default function SceneView({ plan, sceneId, sceneName }: Props) {
         />
 
         <DeckDesignPanel
-          design={design ?? null}
+          designs={design ?? []}
           onApplyDesign={applyDesign}
           deckUrl={deckUrl}
           onDeckStored={(next) => {

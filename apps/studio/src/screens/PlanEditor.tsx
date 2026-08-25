@@ -55,6 +55,14 @@ import {
 } from '../lib/format'
 import { cadModel, detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
 import { cadStoreys, furnishFromCad, type CadModel } from '../plan/cadFurnish'
+import { planFromCad } from '../plan/cadPlan'
+import { furnishFromDesign } from '../plan/designFurnish'
+import { placeFurniture } from '../plan/placeFurniture'
+import {
+  designFurnitureKey,
+  designsOf,
+  type DesignSpec,
+} from '../plan/deckDesign'
 import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
@@ -71,9 +79,10 @@ import { CalibrateDialog } from '../components/CalibrateDialog'
 import { ProposalReview } from '../components/ProposalReview'
 import { FurnitureReview } from '../components/FurnitureReview'
 import { CataloguePanel } from '../components/CataloguePanel'
-import { HubBrowserPanel } from '../components/HubBrowserPanel'
+import { HubBrowserPanel, type HubUse } from '../components/HubBrowserPanel'
 import { ObjectInspector } from '../components/ObjectInspector'
 import type { PlacedObject } from '../catalogue/types'
+import { resolveHubFurniture } from '../plan/hubFurniture'
 
 interface Props {
   sceneId: string
@@ -146,14 +155,22 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
    * once the plan itself looks right.
    */
   const [furniture, setFurniture] = useState<Proposal[] | null>(null)
+  const furnitureRef = useRef<Proposal[] | null>(null)
+  const [hubTarget, setHubTarget] = useState<Proposal | null>(null)
+  const latestDesignsRef = useRef<DesignSpec[]>([])
+  const reviewedDesignKeysRef = useRef<string[]>([])
+  const designReviewKeysRef = useRef<string[] | null>(null)
+  const cadModelCacheRef = useRef<{ url: string; model: CadModel } | null>(null)
+  /** Cancels an older async offer when another render is applied meanwhile. */
+  const designOfferRunRef = useRef(0)
   /**
    * A multi-storey CAD import reviews one storey's furniture at a time —
-   * accepting a batch places it on the ACTIVE plan floor, so the user must
-   * be able to switch (or create) the right floor between batches. This
-   * holds the fetched model and where the review has got to.
+   * each batch carries its source storey and acceptance creates/targets that
+   * floor automatically. This holds the fetched model and where review has
+   * got to, so the next non-empty storey is offered after each decision.
    */
   const cadFurnishRef = useRef<{ model: CadModel; storeys: number[]; at: number } | null>(null)
-  const [cadStoreyLabel, setCadStoreyLabel] = useState<string | null>(null)
+  const [furnitureHeading, setFurnitureHeading] = useState<string | null>(null)
 
   const [reading, setReading] = useState<{
     rooms: DetectedRoom[]
@@ -191,17 +208,118 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const pendingRemoteRef = useRef<Plan | null>(null)
   const [peers, setPeers] = useState<Peer[]>([])
 
+  function showFurniture(next: Proposal[] | null, heading: string | null = null) {
+    furnitureRef.current = next
+    setFurniture(next)
+    setFurnitureHeading(heading)
+    if (!next) setHubTarget(null)
+  }
+
+  function markDesignFurnitureReviewed(keys: string[]) {
+    if (keys.length === 0) return
+    const reviewed = [...new Set([...reviewedDesignKeysRef.current, ...keys])]
+    reviewedDesignKeysRef.current = reviewed
+    designReviewKeysRef.current = null
+    setScene((current) => current ? { ...current, designFurnitureReviewed: reviewed } : current)
+    void updateScene(sceneId, { designFurnitureReviewed: reviewed }).catch(() =>
+      setError('The furniture review decision could not be saved.'),
+    )
+  }
+
+  function useHubAsset({ target, template, asset, model, attachmentIndex }: HubUse) {
+    const current = furnitureRef.current
+    if (!current) return
+    const next = current.map((piece) => {
+      const sameReviewRow = piece.reviewOnly &&
+        piece.item === target.item &&
+        piece.room === target.room &&
+        piece.designKey === target.designKey
+      if (!sameReviewRow) return piece
+      return resolveHubFurniture(piece, template, model, asset.name, attachmentIndex) ?? piece
+    })
+    showFurniture(next, furnitureHeading)
+    setHubTarget(null)
+  }
+
+  async function offerDesignFurniture(
+    designs: DesignSpec[],
+    sourcePlan: Plan = planRef.current,
+    sourceScene: Scene | null = scene,
+  ) {
+    latestDesignsRef.current = designs
+    const run = ++designOfferRunRef.current
+    const url = sourceScene?.cadModelJsonUrl
+    if (!url || furnitureRef.current) return
+
+    const pending = designs.filter(
+      (design) => !reviewedDesignKeysRef.current.includes(designFurnitureKey(design)),
+    )
+    if (pending.length === 0) return
+
+    let model = cadModelCacheRef.current?.url === url
+      ? cadModelCacheRef.current.model
+      : null
+    if (!model) {
+      model = await cadModel(url)
+      if (!model) return
+      cadModelCacheRef.current = { url, model }
+    }
+    if (run !== designOfferRunRef.current || furnitureRef.current) return
+
+    const pieces = furnishFromDesign(model, pending, sourcePlan)
+    const keys = [...new Set(pieces.map((piece) => piece.designKey).filter(Boolean) as string[])]
+    if (pieces.length === 0) {
+      // Nothing actionable: rooms were already furnished, no matching room
+      // polygon existed, or the observed item has no safe floor asset.
+      markDesignFurnitureReviewed(pending.map(designFurnitureKey))
+      return
+    }
+    designReviewKeysRef.current = keys
+    showFurniture(
+      pieces,
+      'Seen in the deck renders. Items are real observations; positions are arranged inside measured room boundaries.',
+    )
+    setImportSummary(
+      `${pieces.length} furniture item${pieces.length === 1 ? '' : 's'} seen in the deck renders — ` +
+        'switch to 2D to review and place them.',
+    )
+  }
+
   // ---- Load ----------------------------------------------------------------
   useEffect(() => {
     let cancelled = false
     getScene(sceneId)
-      .then((loaded) => {
+      .then(async (loaded) => {
         if (cancelled) return
         setScene(loaded)
         sceneIdRef.current = loaded.id
-        const initial = loadPlan(loaded.plan)
+        let initial = loadPlan(loaded.plan)
+
+        // Older CAD imports saved only a GLB and building.json, leaving the
+        // editor's plan empty. Hydrate those scenes on open as well as new
+        // imports, so returning from 3D never loses the drawing.
+        if (loaded.cadModelJsonUrl && !planHasWalls(initial)) {
+          const model = await cadModel(loaded.cadModelJsonUrl)
+          if (cancelled) return
+          const hydrated = model ? planFromCad(model) : null
+          if (model) {
+            cadModelCacheRef.current = { url: loaded.cadModelJsonUrl, model }
+          }
+          if (hydrated) {
+            initial = hydrated
+            void updateScene(sceneId, { plan: hydrated }).catch(() =>
+              setError('The reconstructed 2D plan could not be saved.'),
+            )
+          }
+        }
         lastSavedRef.current = initial
         setHistory(initialHistory(initial))
+        const designs = designsOf(loaded.design)
+        latestDesignsRef.current = designs
+        reviewedDesignKeysRef.current = loaded.designFurnitureReviewed ?? []
+        if (loaded.cadModelJsonUrl && designs.length > 0) {
+          void offerDesignFurniture(designs, initial, loaded)
+        }
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Could not open this project.'),
@@ -541,7 +659,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // work is already done — making the user run a second pass for it would
       // be charging twice for one answer.
       const pieces = proposeFurniture(result, traced)
-      setFurniture(pieces.length > 0 ? pieces : null)
+      showFurniture(pieces.length > 0 ? pieces : null)
 
       // Judge the result before offering it.
       //
@@ -604,41 +722,39 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   /** Place the furniture the drawing showed, as one undoable step. */
   function acceptFurniture() {
     if (!furniture) return
-    apply((current) =>
-      furniture.reduce(
-        (next, piece) =>
-          addObject(next, {
-            item: piece.item,
-            position: piece.position,
-            rotation: piece.rotation,
-            size: piece.size,
-          }),
-        current,
-      ),
-    )
-    setFurniture(null)
+    const designKeys = designReviewKeysRef.current
+    const actionable = furniture.filter((piece) => !piece.reviewOnly)
+    if (actionable.length > 0) apply((current) => placeFurniture(current, actionable))
+    showFurniture(null)
+    if (designKeys) markDesignFurnitureReviewed(designKeys)
 
     // A multi-storey CAD import: the next storey's batch is offered as its
-    // own review rather than merged — each batch lands on whichever plan
-    // floor is active, and switching floors between batches is the user's
-    // step, not something to guess at.
+    // own review rather than merged — each batch lands on its recorded plan
+    // floor, and the helper creates that floor when it does not exist yet.
     const pending = cadFurnishRef.current
     if (pending) {
       for (let next = pending.at + 1; next < pending.storeys.length; next++) {
         const pieces = furnishFromCad(pending.model, { storey: pending.storeys[next] })
         if (pieces.length > 0) {
           pending.at = next
-          setCadStoreyLabel(
+          const heading =
             `Storey ${next + 1} of ${pending.storeys.length} from the drawing — ` +
-              'switch to (or add) the floor it belongs on, then place.',
-          )
-          setFurniture(pieces)
+              'it will be placed on its source floor.'
+          showFurniture(pieces, heading)
           return
         }
       }
       cadFurnishRef.current = null
-      setCadStoreyLabel(null)
+      setFurnitureHeading(null)
+      void offerDesignFurniture(latestDesignsRef.current)
     }
+  }
+
+  function discardFurniture() {
+    const designKeys = designReviewKeysRef.current
+    showFurniture(null)
+    cadFurnishRef.current = null
+    if (designKeys) markDesignFurnitureReviewed(designKeys)
   }
 
   // ---- Derived -------------------------------------------------------------
@@ -787,13 +903,59 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         <ImportPanel
           kind={start}
           onDismiss={() => setNotice(false)}
-          onLanded={(modelUrl, summary: CadSummary | null, modelJsonUrl?: string | null) => {
+          onLanded={async (
+            modelUrl,
+            summary: CadSummary | null,
+            modelJsonUrl?: string | null,
+            sourceDocumentUrl?: string | null,
+          ) => {
             setNotice(false)
+            let reconstructedModel: CadModel | null = null
+            let importedPlan: Plan | null = null
+
+            if (start === 'cad') {
+              if (!modelJsonUrl) {
+                setError(
+                  'The reconstruction produced no editable plan data. Nothing was opened in 3D.',
+                )
+                return
+              }
+              reconstructedModel = await cadModel(modelJsonUrl)
+              importedPlan = reconstructedModel ? planFromCad(reconstructedModel) : null
+              if (!reconstructedModel || !importedPlan) {
+                setError(
+                  'The reconstruction could not produce verified 2D walls. Nothing was opened in 3D.',
+                )
+                return
+              }
+            }
+
             // cadModelUrl as well as modelUrl, and only for the CAD door: the
             // bake flow overwrites modelUrl with its combined export, and the
             // 3D view needs the pristine reconstruction to compose furniture
             // over. A plain GLB import sets it too — same hybrid semantics.
-            void updateScene(sceneId, { modelUrl, cadModelUrl: modelUrl }).catch(() => {})
+            const stored = {
+              modelUrl,
+              cadModelUrl: modelUrl,
+              cadModelJsonUrl: modelJsonUrl ?? null,
+              ...(importedPlan ? { plan: importedPlan } : {}),
+              ...(sourceDocumentUrl ? { floorPlanUrl: sourceDocumentUrl } : {}),
+            }
+            try {
+              await updateScene(sceneId, stored)
+            } catch {
+              setError('The reconstructed model finished, but could not be saved to this scene.')
+              return
+            }
+            const landedScene = scene ? { ...scene, ...stored } : null
+            setScene(landedScene)
+
+            if (importedPlan) {
+              lastSavedRef.current = importedPlan
+              setHistory(initialHistory(importedPlan))
+              setSave('saved')
+              setSelection(null)
+            }
 
             // The drawing's own furniture, through the same review the raster
             // path uses. The engine classified every block to a catalogue item
@@ -801,18 +963,25 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             // and a reconstruction whose JSON is missing simply proposes
             // nothing, exactly like a drawing with no blocks.
             if (modelJsonUrl) {
-              void cadModel(modelJsonUrl).then((model) => {
+              const offerCadFurniture = (model: CadModel) => {
                 if (!model) return
+                cadModelCacheRef.current = { url: modelJsonUrl, model }
                 const storeys = cadStoreys(model)
                 const pieces = furnishFromCad(model, { storey: storeys[0] ?? 0 })
-                if (pieces.length === 0) return
+                if (pieces.length === 0) {
+                  void offerDesignFurniture(latestDesignsRef.current, planRef.current, landedScene)
+                  return
+                }
                 cadFurnishRef.current = { model, storeys, at: 0 }
-                setCadStoreyLabel(
+                const heading =
                   storeys.length > 1
-                    ? `Storey 1 of ${storeys.length} from the drawing — place onto the active floor, then the next storey is offered.`
-                    : null,
-                )
-                setFurniture(pieces)
+                    ? `Storey 1 of ${storeys.length} from the drawing — it will be placed on its source floor.`
+                    : null
+                showFurniture(pieces, heading)
+              }
+              if (reconstructedModel) offerCadFurniture(reconstructedModel)
+              else void cadModel(modelJsonUrl).then((model) => {
+                if (model) offerCadFurniture(model)
               })
             }
 
@@ -820,13 +989,13 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
               // A two-storey villa reported with one storey's room count reads
               // as half the building going missing.
               setImportSummary(
-                `Reconstructed ${summary.storeys} storeys` +
+                `Loaded ${summary.storeys} storeys into 2D for review` +
                   (summary.storeyNames?.length ? ` (${summary.storeyNames.join(', ')})` : '') +
                   `: ${summary.roomsAllStoreys ?? 0} rooms, ${summary.wallsAllStoreys ?? 0} walls in all.`,
               )
             } else if (summary) {
               setImportSummary(
-                `Reconstructed: ${summary.rooms ?? 0} rooms (${summary.named ?? 0} named), ` +
+                `Loaded into 2D for review: ${summary.rooms ?? 0} rooms (${summary.named ?? 0} named), ` +
                   `${summary.walls ?? 0} walls, ${summary.openings ?? 0} openings` +
                   (summary.unit ? ` — unit: ${summary.unit}` : '') + '.' +
                   // The review itself lives in the 2D sidebar, and the import
@@ -837,7 +1006,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                     : ''),
               )
             }
-            setMode('3d')
+            // A CAD/PDF reconstruction is evidence to review, not permission
+            // to jump into 3D. The 3D tab is an explicit user decision after
+            // walls, rooms and openings are visible in 2D. Plain GLB imports
+            // still open in 3D because they have no 2D plan by definition.
+            setMode(importedPlan ? '2d' : '3d')
           }}
         />
       )}
@@ -852,7 +1025,12 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       )}
 
       {mode === '3d' ? (
-        <SceneView plan={plan} sceneId={sceneId} sceneName={scene?.name} />
+        <SceneView
+          plan={plan}
+          sceneId={sceneId}
+          sceneName={scene?.name}
+          onDesignsChanged={(designs) => void offerDesignFurniture(designs)}
+        />
       ) : (
       <div className="editor-body">
         {/* ---- Tools ---------------------------------------------------- */}
@@ -924,7 +1102,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             onPick={setPlacing}
           />
 
-          <HubBrowserPanel />
+          <HubBrowserPanel
+            target={hubTarget}
+            onUse={useHubAsset}
+            onCancelTarget={() => setHubTarget(null)}
+          />
 
           <UnderlayPanel
             underlay={floor.underlay}
@@ -954,16 +1136,13 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 
           {furniture && (
             <section>
-              <span className="eyebrow">Furniture in the drawing</span>
+              <span className="eyebrow">Furniture review</span>
               <FurnitureReview
                 furniture={furniture}
-                heading={cadStoreyLabel ?? undefined}
+                heading={furnitureHeading ?? undefined}
                 onAccept={acceptFurniture}
-                onDiscard={() => {
-                  setFurniture(null)
-                  cadFurnishRef.current = null
-                  setCadStoreyLabel(null)
-                }}
+                onDiscard={discardFurniture}
+                onFindAsset={setHubTarget}
               />
             </section>
           )}
@@ -1233,6 +1412,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 }
 
 /** Local helper so the import list does not grow a near-duplicate name. */
+function planHasWalls(plan: Plan): boolean {
+  return plan.floors.some((floor) => Object.keys(floor.walls).length > 0)
+}
+
 function updateWallIn(
   plan: Plan,
   wallId: string,

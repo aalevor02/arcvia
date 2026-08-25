@@ -519,23 +519,25 @@ export function buildObject(
   //
   // A per-placement `customUrl` wins over the catalogue's own model, which is
   // what makes "use this exact sofa here" possible without a catalogue entry.
-  const modelUrl = object.customUrl ?? item.model?.url
+  // A later manual upload still wins over a reviewed Hub choice. Keeping that
+  // precedence means replacing the model in ObjectInspector does what it says
+  // and does not leave the earlier Hub author attached to somebody else's GLB.
+  const model = object.customUrl ? undefined : (object.customModel ?? item.model)
+  const modelUrl = object.customUrl ?? model?.url
   if (modelUrl) {
     group.userData.modelUrl = modelUrl
     group.userData.modelSize = size
     // Only meaningful for a catalogue model. A per-placement `customUrl` is
     // somebody else's file and the catalogue has no idea which way it faces.
-    group.userData.modelYaw = object.customUrl ? 0 : (item.model?.yaw ?? 0)
+    group.userData.modelYaw = model?.yaw ?? 0
     // An uploaded model gets the glTF default. The catalogue records the truth
     // per asset, because a great many exports are Z-up and nothing in the file
     // says which.
-    group.userData.modelUpAxis = object.customUrl ? 'y' : (item.model?.upAxis ?? 'y')
+    group.userData.modelUpAxis = model?.upAxis ?? 'y'
     // Per-axis footprint fill, only where the catalogue asserts its dims are
     // real measurements (see AssetModel.fitFootprint). Never for uploads: a
     // stranger's file makes no such claim.
-    group.userData.modelFitFootprint = object.customUrl
-      ? false
-      : Boolean(item.model?.fitFootprint)
+    group.userData.modelFitFootprint = Boolean(model?.fitFootprint)
   }
 
   /**

@@ -187,6 +187,12 @@ export interface PlacedObject {
   wallId?: string
   /** Replaces the parametric shape with an uploaded model. */
   customUrl?: string
+  /**
+   * A conditioned per-placement model whose licence and orientation travelled
+   * with it from the Asset Hub. Unlike `customUrl`, this is publishable without
+   * becoming an anonymous/uncredited asset.
+   */
+  customModel?: AssetModel
   /** User-facing name, if renamed. */
   label?: string
 }

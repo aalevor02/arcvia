@@ -18,10 +18,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from build.glb import MeshBuilder, write_glb  # noqa: E402
-from ingest.blocks import AGAINST_WALL_M, wall_gap  # noqa: E402
-from build.solidify import build_slabs, build_walls  # noqa: E402
+from ingest.blocks import AGAINST_WALL_M, RoomLabel, wall_gap  # noqa: E402
+from build.solidify import (  # noqa: E402
+    build_room_finishes, build_room_slabs, build_slabs, build_walls,
+)
 from hypothesise import openings as op  # noqa: E402
-from hypothesise.pair import Face, join_corners, pair_faces  # noqa: E402
+from hypothesise.pair import Face, Wall, join_corners, pair_faces  # noqa: E402
+from hypothesise.perimeter import add_perimeter  # noqa: E402
 from solve import spaces as sp  # noqa: E402
 from solve import verify as vf  # noqa: E402
 from solve.frames import MIN_CHANNEL, segment_frames  # noqa: E402
@@ -437,6 +440,30 @@ ok("two emitters on one door cut one hole", len(op.dedupe(twin)) == 1)
 ok("and the more confident emitter wins",
    op.dedupe(twin)[0].source == "blockSized")
 
+labelled_runs = [
+    Wall(0, 0, 4, 0, T, True, 1.0),
+    Wall(0, 0, 0, 3, T, True, 1.0),
+    Wall(4, 3, 4, 0, T, True, 1.0),
+    Wall(0, 3, 1.5, 3, T, True, 1.0),
+    Wall(2.5, 3, 4, 3, T, True, 1.0),
+]
+labelled_runs, labelled_holes, labelled_unhosted = op.from_text_labels(
+    [RoomLabel(2, 3, 'SLIDING DOOR')], labelled_runs,
+)
+ok('a labelled gap closes the wall run',
+   len(sp.detect_spaces(join_corners(labelled_runs))) == 1)
+ok('and remains a hosted opening',
+   len(labelled_holes) == 1 and labelled_unhosted == 0)
+
+u_run = [
+    Wall(0, 0, 0, 4, T, True, 1.0),
+    Wall(0, 4, 6, 4, T, True, 1.0),
+    Wall(6, 4, 6, 0, T, True, 1.0),
+]
+completed = join_corners(add_perimeter(u_run))
+ok('one missing facade is conservatively completed',
+   len(completed) == 4 and len(sp.detect_spaces(completed)) == 1)
+
 
 print("\n-- wall splitting --")
 mesh = MeshBuilder()
@@ -456,6 +483,39 @@ window = op.Opening("window", walls.index(south), south.length / 2, 1.2, 1.2, 0.
 wmesh = MeshBuilder()
 wstats = build_walls(wmesh, walls, [window], height=2.7)
 ok("a window gains an apron below it", wstats["aprons"] == 1, str(wstats["aprons"]))
+
+
+print("\n-- room finish surfaces --")
+finish_meshes, finish_stats = build_room_finishes(
+    spaces, walls, [door], height=2.7, base_z=3.0,
+)
+room_slug = f"room{spaces[0].index}_unknown"
+wall_finish = finish_meshes[f"wall_{room_slug}"]
+ceiling_finish = finish_meshes[f"ceiling_{room_slug}"]
+ok("an indoor room gets independently addressable wall and ceiling meshes",
+   set(finish_meshes) == {f"wall_{room_slug}", f"ceiling_{room_slug}"},
+   str(sorted(finish_meshes)))
+ok("the wall finish splits around the same door as the masonry",
+   finish_stats["finishWallFaces"] == 6,
+   str(finish_stats["finishWallFaces"]))
+ok("each finish piece is a face, not a second structural wall",
+   wall_finish.triangles == finish_stats["finishWallFaces"] * 2,
+   f"{wall_finish.triangles} triangles")
+ok("finish geometry keeps its storey base",
+   abs(min(p[1] for p in wall_finish.positions) - 3.0) < 1e-9)
+ok("the ceiling underside is at room height above that base",
+   abs(min(p[1] for p in ceiling_finish.positions) - 5.7) < 1e-9,
+   f"{min(p[1] for p in ceiling_finish.positions):.3f}")
+ok("the ceiling is underside-only so roofless isometrics still see the room",
+   all(n[1] < -0.999 for n in ceiling_finish.normals))
+garden_finish, garden_finish_stats = build_room_finishes(
+    [sp.Space(index=9, loop=spaces[0].loop, area=spaces[0].area,
+              gross_area=spaces[0].gross_area, perimeter=spaces[0].perimeter,
+              name="Garden", kind="outdoor", bounded_by=spaces[0].bounded_by)],
+    walls, [], height=2.7,
+)
+ok("an outdoor region does not grow an indoor ceiling or painted wall skin",
+   garden_finish == {} and garden_finish_stats["ceilingMeshes"] == 0)
 
 # ── A storey has to be able to sit somewhere other than zero ────────────────
 # `storey0` is hardcoded through the engine and a house has floors. This is the
@@ -816,14 +876,52 @@ _garden = sp.Space(index=0, loop=[(0, 0), (4, 0), (4, 4), (0, 4)],
                    area=16, gross_area=16, perimeter=16, name="Garden", kind="outdoor")
 _living = sp.Space(index=1, loop=[(4, 0), (8, 0), (8, 4), (4, 4)],
                    area=16, gross_area=16, perimeter=16, name="Living", kind="living")
+_pool = sp.Space(index=2, loop=[(0, 4), (4, 4), (4, 8), (0, 8)],
+                 area=16, gross_area=16, perimeter=16, name="Swimming Pool", kind="outdoor")
+_deck = sp.Space(index=3, loop=[(4, 4), (8, 4), (8, 8), (4, 8)],
+                 area=16, gross_area=16, perimeter=16, name="Pool Deck", kind="outdoor")
+_wc = sp.Space(index=4, loop=[(8, 0), (10, 0), (10, 2), (8, 2)],
+               area=4, gross_area=4, perimeter=8, name="Water Closet", kind="toilet")
 _slabs = build_slabs(_floor, [_garden, _living], lawn=_lawn)
 ok("the outdoor room's slab went to the lawn mesh", _lawn.indices != [] and _slabs["lawn"] == 1)
 ok("the indoor room's slab stayed on the floor mesh", _floor.indices != [])
+
+# The reconstruction output is more precise than the aggregate primitive:
+# every room is an addressable GLB mesh, with a readable label in its name.
+_room_meshes, _room_slabs = build_room_slabs(
+    [_garden, _living, _pool, _deck, _wc], base_z=3.0
+)
+ok("room slabs are split into one mesh per room",
+   set(_room_meshes) == {
+       "lawn_room0_garden",
+       "floor_room1_living",
+       "water_room2_swimming-pool",
+       "paving_room3_pool-deck",
+       "floor_room4_water-closet",
+   },
+   str(sorted(_room_meshes)))
+ok("the room-slab manifest says how many addressable meshes exist",
+   _room_slabs["roomMeshes"] == 5 and _room_slabs["slabs"] == 5
+   and _room_slabs["lawn"] == 1 and _room_slabs["water"] == 1
+   and _room_slabs["paving"] == 1)
+ok("every split room mesh carries geometry",
+   all(mesh.indices for mesh in _room_meshes.values()))
+ok("split room slabs keep their storey base",
+   all(abs(max(p[1] for p in mesh.positions) - 3.0) < 1e-9
+       for mesh in _room_meshes.values()))
 
 # glb.py picks the material from the mesh name.
 ok("a *_plants mesh is painted foliage (material 1)", _material_for("storey0_plants") == 1)
 ok("a *_trunks mesh is painted bark (material 2)", _material_for("storey0_trunks") == 2)
 ok("a *_lawn mesh is painted lawn (material 3)", _material_for("storey1_lawn") == 3)
+ok("a per-room lawn mesh stays lawn",
+   _material_for("storey0_lawn_room0_garden") == 3)
+ok("a per-room pool mesh is water",
+   _material_for("storey0_water_room2_swimming-pool") == 4)
+ok("a per-room deck mesh is paving",
+   _material_for("storey0_paving_room3_deck") == 5)
+ok("a Water Closet floor is not pool water",
+   _material_for("storey0_floor_room4_water-closet") == 0)
 ok("walls and floors keep the poche material (0)",
    _material_for("storey0_walls") == 0 and _material_for("storey0_floors") == 0)
 

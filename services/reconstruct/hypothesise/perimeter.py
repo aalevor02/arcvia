@@ -65,6 +65,79 @@ MIN_ENVELOPE_AREA = 8.0
 DEFAULT_EXTERNAL_THICKNESS = 0.23
 
 
+def _side_coverage(walls, horizontal, coordinate, low, high) -> float:
+    '''Fraction of one bounding-box side already supported by wall runs.'''
+    tolerance = 0.25
+    intervals = []
+    for wall in walls:
+        if wall.length <= 1e-6:
+            continue
+        if horizontal:
+            if abs(wall.by - wall.ay) > tolerance:
+                continue
+            if abs((wall.ay + wall.by) / 2 - coordinate) > tolerance:
+                continue
+            start, end = sorted((wall.ax, wall.bx))
+        else:
+            if abs(wall.bx - wall.ax) > tolerance:
+                continue
+            if abs((wall.ax + wall.bx) / 2 - coordinate) > tolerance:
+                continue
+            start, end = sorted((wall.ay, wall.by))
+        start, end = max(start, low), min(end, high)
+        if end > start:
+            intervals.append((start, end))
+
+    covered = 0.0
+    cursor = low
+    for start, end in sorted(intervals):
+        if end <= cursor:
+            continue
+        covered += end - max(start, cursor)
+        cursor = max(cursor, end)
+    return covered / max(high - low, 1e-9)
+
+
+def _complete_one_rectangular_side(walls: list[Wall]) -> list[Wall]:
+    '''Complete one absent facade when the other three sides prove the box.'''
+    points = [
+        point for wall in walls
+        for point in ((wall.ax, wall.ay), (wall.bx, wall.by))
+    ]
+    if not points:
+        return list(walls)
+    x0, x1 = min(p[0] for p in points), max(p[0] for p in points)
+    y0, y1 = min(p[1] for p in points), max(p[1] for p in points)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return list(walls)
+
+    coverage = {
+        'bottom': _side_coverage(walls, True, y0, x0, x1),
+        'top': _side_coverage(walls, True, y1, x0, x1),
+        'left': _side_coverage(walls, False, x0, y0, y1),
+        'right': _side_coverage(walls, False, x1, y0, y1),
+    }
+    missing = [side for side, value in coverage.items() if value < 0.15]
+    if len(missing) != 1 or any(
+        value < 0.65 for side, value in coverage.items() if side != missing[0]
+    ):
+        return list(walls)
+
+    paired = [wall.thickness for wall in walls if wall.paired]
+    thickness = sorted(paired)[len(paired) // 2] if paired else DEFAULT_EXTERNAL_THICKNESS
+    endpoints = {
+        'bottom': (x0, y0, x1, y0),
+        'top': (x0, y1, x1, y1),
+        'left': (x0, y0, x0, y1),
+        'right': (x1, y0, x1, y1),
+    }[missing[0]]
+    return [*walls, Wall(
+        ax=endpoints[0], ay=endpoints[1], bx=endpoints[2], by=endpoints[3],
+        thickness=thickness, paired=True, confidence=0.45,
+        layer='<derived:perimeter>', duplicate=0.0,
+    )]
+
+
 def _reconnect(coords: list) -> list:
     """
     Push a gap piece back over the walls at either end.
@@ -125,7 +198,7 @@ def add_perimeter(
     blob = unary_union([ln.buffer(radius, join_style=2) for ln in lines])
     blob = blob.buffer(-radius, join_style=2)
     if blob.is_empty:
-        return list(walls)
+        return _complete_one_rectangular_side(walls)
 
     if blob.geom_type == "MultiPolygon":
         # A sheet can leave more than one footprint even inside one frame.
@@ -135,7 +208,7 @@ def add_perimeter(
         parts = [blob] if blob.area >= MIN_ENVELOPE_AREA else []
 
     if not parts:
-        return list(walls)
+        return _complete_one_rectangular_side(walls)
 
     if thickness is None:
         paired = [w.thickness for w in walls if w.paired]

@@ -25,7 +25,7 @@ import type { CatalogueItem } from './types'
  * are being shown.
  */
 
-export type Evidence = 'labelled' | 'measured' | 'typical'
+export type Evidence = 'labelled' | 'measured' | 'rendered' | 'typical' | 'unresolved'
 
 export interface Identification {
   item: CatalogueItem
@@ -87,6 +87,12 @@ export const ITEM_FOR_WORD: Record<string, string> = {
   plant: 'plant', planter: 'plant', pot: 'plant', greens: 'plant',
   mirror: 'mirror', painting: 'painting', art: 'painting',
   artwork: 'painting', piece: 'painting', frame: 'painting',
+  pendant: 'pendant', sconce: 'wall-light',
+}
+
+const ITEM_FOR_PHRASE: Record<string, string> = {
+  'wall light': 'wall-light',
+  'ceiling light': 'ceiling-light',
 }
 
 /**
@@ -113,6 +119,17 @@ const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
  */
 export function fromLabel(text: string, { isRoomLabel = false } = {}): Identification | null {
   const words = text.toLowerCase().match(/[a-z]+/g) ?? []
+
+  const phraseId = ITEM_FOR_PHRASE[words.join(' ')]
+  const phraseItem = phraseId ? BY_ID.get(phraseId) : undefined
+  if (phraseItem) {
+    return {
+      item: phraseItem,
+      evidence: 'labelled',
+      confidence: 0.9,
+      because: `the drawing says "${text.trim()}"`,
+    }
+  }
 
   for (const word of words) {
     if (isRoomLabel && ROOM_ONLY.has(word)) continue

@@ -178,6 +178,8 @@ def health() -> dict:
         # The vision model that second-guesses proposals, or null when none is
         # configured. Named so a bug report says which model judged the plan.
         "adjudicator": adjudicate_pass.name(),
+        # Counts and token totals only. Never expose the credential itself.
+        "vision_usage": adjudicate_pass.usage(),
         # The same model reads deck renders into DesignSpecs (/design).
         "reads_design": design.available(),
     }
@@ -332,8 +334,8 @@ async def design_endpoint(
     if not design.available():
         raise HTTPException(
             status_code=503,
-            detail="The design reader is not configured. Set NVIDIA_API_KEY "
-                   "(or FLOORPLAN_ADJUDICATOR_KEY) for services/floorplan-ai.",
+            detail="The design reader is not configured. Set OPENAI_API_KEY "
+                   "(or NVIDIA_API_KEY/FLOORPLAN_ADJUDICATOR_KEY) for services/floorplan-ai.",
         )
 
     raw = await file.read()

@@ -58,6 +58,10 @@ def _prompt(palette: list[str], room_hint: str | None) -> str:
         ". Wherever one of those measured colours is the true colour of a "
         "surface, use it VERBATIM; invent a hex only for something small the "
         "palette missed.\n"
+        "Classify the floor from visible construction cues, not from colour: "
+        "carpet is continuous soft pile without board joints; wood requires "
+        "visible plank seams or grain; tile/stone requires hard slab or grout "
+        "joints. If those cues are not visible, use other rather than guessing.\n"
         "Answer ONLY a JSON object:\n"
         "{\n"
         '  "room": "what room this shows, lowercase, e.g. bedroom",\n'
@@ -66,13 +70,16 @@ def _prompt(palette: list[str], room_hint: str | None) -> str:
         f'  "walls": {{"finish": "one of: {_WALL_KINDS}", "colour": "#hex",\n'
         '            "accent": "#hex of an accent wall, or null"},\n'
         f'  "ceiling": {{"kind": "one of: {_CEILING_KINDS}", "colour": "#hex"}},\n'
-        '  "furniture": [{"item": "bed|sofa|wardrobe|table|chair|desk|rug|lamp|'
-        'plant|tv-unit|other", "colour": "#hex", "style": "a few words"}],\n'
+        '  "furniture": [{"item": "bed|sofa|wardrobe|table|chair|desk|rug|'
+        'plant|tv-unit|painting|mirror|ceiling-light|pendant|wall-light|other", '
+        '"colour": "#hex", "style": "a few words"}],\n'
         '  "lighting": "warm|neutral|cool",\n'
         f'  "style": "the overall interior style, one of: {_STYLES}",\n'
         '  "confidence": 0..1\n'
         "}\n"
-        "List at most 8 furniture items, the ones that define the room. If "
+        "List at most 8 visible items, including defining furniture and visible "
+        "wall or ceiling decor. Use pendant only for a hanging ceiling lamp, "
+        "wall-light only for a sconce, and ceiling-light only for a flush light. If "
         "this image is not actually a render of a space (a logo page, a map, "
         'text), answer {"room": null}.'
     )

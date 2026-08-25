@@ -1,4 +1,5 @@
 import { apiBase, request } from './api'
+import type { AssetModel } from '../catalogue/types'
 
 /**
  * The asset hub, from the editor's side of the glass.
@@ -58,6 +59,8 @@ export interface Conditioned {
   triangles: number | null
   bytes: number
   cached: boolean
+  /** Licence-bearing record saved with any reviewed placement. */
+  model: AssetModel
 }
 
 /**
@@ -72,5 +75,6 @@ export async function conditionHubModel(ref: string, budget?: number): Promise<C
     method: 'POST',
     body: { ref, budget },
   })
-  return { ...result, url: `${apiBase}${result.url}` }
+  const url = `${apiBase}${result.url}`
+  return { ...result, url, model: { ...result.model, url } }
 }

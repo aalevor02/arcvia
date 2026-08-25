@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -227,6 +227,27 @@ export class NotConditionable extends Error {
 }
 
 /**
+ * The licence-bearing model record persisted on a plan placement.
+ *
+ * Kept server-side because the browser must not be allowed to replace a Hub
+ * author's identity or licence while asking for conditioning. Blender's GLB is
+ * Y-up on export; its facing report supplies the one orientation fact glTF
+ * cannot express.
+ */
+export function conditionedAssetModel(asset, result, url) {
+  const triangles = result.triangles ?? result.report?.decimate?.after
+  return {
+    url,
+    licence: asset.licenceName || String(asset.licence || '').toUpperCase(),
+    author: (asset.authors ?? []).filter(Boolean).join(', ') || asset.source,
+    source: asset.sourceUrl,
+    ...(Number.isFinite(triangles) ? { triangles } : {}),
+    yaw: result.report?.facing?.yaw ?? 0,
+    upAxis: 'y',
+  }
+}
+
+/**
  * Condition one hub model to a web budget, cached.
  *
  * Returns { file, name, triangles, bytes, cached }. The output name is derived
@@ -258,10 +279,22 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
   const name = `${ref.replace(/[^a-z0-9]+/gi, '-')}--${capped}.glb`
   await mkdir(CONDITIONED_DIR, { recursive: true })
   const output = join(CONDITIONED_DIR, name)
+  const metadata = `${output}.json`
 
   const existing = await stat(output).catch(() => null)
   if (existing && existing.size > 0) {
-    return { file: output, name, triangles: null, bytes: existing.size, cached: true }
+    const report = await readFile(metadata, 'utf8')
+      .then((text) => JSON.parse(text))
+      .catch(() => null)
+    return {
+      file: output,
+      name,
+      triangles: report?.decimate?.after ?? null,
+      bytes: existing.size,
+      cached: true,
+      report,
+      asset,
+    }
   }
 
   const script =
@@ -282,6 +315,9 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
 
   const written = await stat(output).catch(() => null)
   if (!written) throw new NotConditionable('Conditioning wrote no file.', 500)
+  // The sidecar makes cache hits carry the same facing and triangle metadata as
+  // the first run. It is not served; only the authenticated route reads it.
+  await writeFile(metadata, JSON.stringify(conditioned, null, 2), 'utf8')
 
   return {
     file: output,
@@ -289,5 +325,7 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
     triangles: conditioned.decimate?.after ?? null,
     bytes: written.size,
     cached: false,
+    report: conditioned,
+    asset,
   }
 }

@@ -165,6 +165,8 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
    * combined export; this field is what the hybrid view composes from.
    */
   cadModelUrl?: string | null
+  /** Reconstruction building.json: measured rooms and source CAD fixtures. */
+  cadModelJsonUrl?: string | null
   /** The baked lightmap atlas, once a bake has completed. */
   bakedUrl: string | null
   hdriUrl: string | null
@@ -199,16 +201,19 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
    */
   sbua?: number | null
   /**
-   * The design read out of the client deck's renders, worn by the model.
+   * The designs read out of the client deck's renders, worn by the model.
    *
    * Absent: no render has ever been read (the editor may read one
    * automatically on open). Null: the user cleared the dressing, which the
    * auto-read must respect — clearing that came back on the next visit would
    * teach people the button lies. The look reaches the PUBLISHED page through
    * the exported model, not through this field: the walkthrough loads only
-   * `modelUrl`, so this spec is the studio's record of what to re-apply.
+   * `modelUrl`, so these specs are the studio's record of what to re-apply.
+   * A single object remains accepted for scenes saved before room arrays.
    */
-  design?: DesignSpec | null
+  design?: DesignSpec | DesignSpec[] | null
+  /** Design room keys already accepted or dismissed for inferred furniture. */
+  designFurnitureReviewed?: string[]
   /** True when an access code is set. The code itself never leaves the server. */
   protected?: boolean
 }
@@ -271,6 +276,9 @@ export async function duplicateScene(
     lightsUrl: full.lightsUrl,
     hdriUrl: full.hdriUrl,
     floorPlanUrl: full.floorPlanUrl,
+    design: full.design,
+    cadModelJsonUrl: full.cadModelJsonUrl,
+    designFurnitureReviewed: full.designFurnitureReviewed,
   })
 }
 

@@ -310,10 +310,41 @@ stall leaves the model undressed forever; apply immediately, re-apply in
 `.then` (dressing is idempotent). (2) `Color.getHexString()` returns sRGB —
 comparing it against linear-space arithmetic "proves" the tint never applied
 when it is exactly right (#d0d6d3 IS white→#6f7f75 @0.65, in sRGB). Cost an
-hour of chasing a working feature. Still open, and it is the visible-quality
-ceiling: per-room finishes need per-room floor meshes from the engine; hub
-materials are ranked queries for a human, not auto-picked; and a bake made
+hour of chasing a working feature. The engine-side part of the visible-quality
+ceiling is now closed: new CAD and raster reconstructions emit one named floor
+mesh per room (with lawn, paving and pool water separate), so a finish has an
+exact doorway boundary. The corresponding studio seam is now closed too: `design` accepts
+the legacy single object and stores new choices as a room-keyed array; adding
+a render replaces only that normalised room, survives reload/duplication, and
+the same resolver dresses live rebuilds and fresh publish exports. The first
+render remains the fallback for old/aggregate meshes; later renders override
+matching `floor_roomN_<slug>` meshes without touching lawn, paving or water.
+Still open: walls are aggregate storey meshes, so room-specific wall colours
+cannot stop at a doorway until reconstruction emits addressable room-wall
+meshes; hub materials are ranked queries for a human, not auto-picked; and a
+bake made
 BEFORE a dressing publishes the undressed look — re-bake after dressing.
+
+**2026-08-24 — furniture seen in deck renders now reaches the model.** A PDF
+reconstruction now retains both the original deck (`floorPlanUrl`, so renders
+remain readable) and its `building.json` (`cadModelJsonUrl`, so measured room
+polygons survive reload). `designFurnish.ts` maps the render's observed
+furniture words to real catalogue assets, matches the render room to the
+engine's named room, and arranges the items inside that exact polygon with the
+recorded storey shift. The result enters the existing FurnitureReview as a new
+honest evidence class: **seen in render** means the inventory was observed but
+the proposed position was arranged. Accepting creates missing source storeys,
+persists normal editable plan objects, and therefore reaches reload, bake and
+publish through the existing hybrid composition. A usable CAD fixture or an
+already accepted object suppresses the whole room fallback, so it cannot add a
+second sofa over an architect's sofa. Accept/discard decisions are versioned by
+room + render + inventory and persist; replacing the render reopens review,
+reloading does not nag. 17 focused assertions plus the full studio suite. Still
+open by design: a perspective render cannot prove plan positions, and only
+recognised floor-standing catalogue items are placed. Generic lamps, wall art,
+ceiling fittings and unknown bespoke pieces remain review/search work until the
+reader can state an attachment surface and the engine exposes addressable room
+walls/ceilings.
 
 **2026-08-24 — a CAD import furnishes itself.** The engine always knew where
 the furniture was (`kernel.furniture`: exact block positions, rotations, the
@@ -328,8 +359,9 @@ frame, already origin-shifted; verified walls 90.6–119.2 vs fixtures
 windows) are filtered: the villa proposed eight door leaves standing in
 rooms before that filter existed. Live E2E: villa DXF → job →
 modelJsonUrl → 55 fixtures, 42 classified; studio proposes 18 floor pieces
-in 4 rooms. 22 assertions in `test/cadFurnish.test.ts`. Storey 0 only for
-now (`furnishFromCad({storey})` exists; multi-floor plan wiring is open).
+in 4 rooms. 25 assertions in `test/cadFurnish.test.ts`. Proposals now carry
+their source storey, and the shared accept path creates/targets that floor and
+restores the floor the user was editing afterwards.
 
 **2026-08-24 — every outdoor slot that can be filled, is; the tree verdict
 is a measured negative worth keeping.** Hub photogrammetry trees are
@@ -680,9 +712,23 @@ freed-slot-serves-its-own-lane against a held stub worker.
 ### Two `TODO(you)` markers that are business decisions, not work
 
 `apps/web/src/lib/auth.ts:183` (session expiry) and
-`services/api/src/lib/credits.js:109` (credit enforcement). The user has said
-they will decide these last. **Do not implement them on your own judgement** —
-they are policy, and one of them decides when a site office gets logged out.
+`services/api/src/lib/credits.js:109` (credit enforcement) were previously
+waiting on an owner decision. **Decided 2026-08-24:** hybrid sessions (12-hour
+idle timeout, 30-day absolute maximum), and queueable work holds credits until
+completion while non-queueable work hard-blocks without credits. The code and
+tests now implement those choices; this entry is retained as historical context.
+
+### 2026-08-25 — OpenAI-compatible vision provider
+
+The existing render/design reader already had the correct structured contract
+and fail-open behavior. `services/floorplan-ai/adjudicate.py` now supports an
+OpenAI-compatible vision endpoint as well as NVIDIA: set `FLOORPLAN_AI_PROVIDER=openai`
+and `OPENAI_API_KEY` on the server, or leave the provider on `auto` to select
+OpenAI when no NVIDIA key is present. The browser never receives the key. The
+reader continues to measure palettes and leave exact coordinates, dimensions,
+walls, and final geometry to the deterministic CAD engine. The smoke test
+verified provider selection and Python compilation without making a network
+request. Live activation still requires the deployment secret.
 
 ---
 
@@ -1075,3 +1121,94 @@ generalise beyond the CAD engine:
    `git ls-files` — and it still swamps a repo-wide grep with the whole three.js
    bundle. Search `src` only. (Do not go looking for it in git and conclude this
    note is stale; the directory is real, it is just not tracked.)
+
+## 2026-08-25 - room finishes and attachment targets
+
+Reconstruction now emits a separate `wall_roomN_<slug>` finish skin and
+`ceiling_roomN_<slug>` underside for every indoor room on every storey. Wall
+skins sit 1 mm proud of the measured wall face, face into their room, and split
+around the same hosted doors and windows as the masonry; they do not change
+quantities. Ceilings are deliberately underside-only: visible to a person
+walking inside, back-face culled from above so roofless plan/isometric views
+still show furniture instead of a patchwork roof. Later room renders can now
+override their matching floor, wall, and ceiling while the first render remains
+the fallback. The real two-storey villa rebuilt to 121 GLB meshes: 45 room/site
+floors, 35 indoor room-wall meshes, and 35 matching ceilings; verification had
+no blocking findings.
+
+The design reader now distinguishes `painting`, `mirror`, `wall-light`,
+`ceiling-light`, and `pendant`. Render-derived proposals use `boundedBy` plus
+the reconstruction's measured wall thickness to stand wall objects on the room
+face, and arrange ceiling objects inside the measured polygon. They remain
+**seen in render** review evidence because perspective does not prove plan
+position. Stronger CAD or accepted objects suppress only the same attachment
+class, so a drawn sofa stops floor guesses without erasing a visible painting
+or pendant.
+
+Remaining honest gaps: labels that are genuinely absent from the source drawing,
+bespoke assets outside the catalogue, and exact decor positions that appear
+only in perspective renders. Unknown-but-plausible room labels now survive the
+CAD context filter, so a caption such as `MEDIA ROOM` can target its measured
+space. Unsupported render items now carry an Asset Hub search phrase in the
+review row, with a copy action; they remain review-only until conditioned and
+explicitly placed.
+
+**2026-08-25 — reviewed Hub assets can now become real scene objects.** An
+unresolved row's **Find asset** action opens the Hub with the reader's exact
+search phrase. The reviewer must choose a real floor-standing catalogue item
+as the physical template (dimensions, placement class, 2D symbol and fallback),
+then choose a Hub result. The server conditions that result to the web budget,
+caches a private metadata sidecar, and returns server-authored licence, author,
+source, triangle count and facing. The resolved proposal goes back through the
+existing `placeFurniture` path; the conditioned model and its attribution are
+persisted on the placed object and flow into publication credits. A later
+manual GLB correctly supersedes both the Hub model and its credit. Raw Hub GLBs
+still never enter scenes. Wall and ceiling templates remain refused until a
+measured attachment target exists; a perspective render proves inventory, not
+the exact mounting point. Verified: 12 focused Hub-placement assertions, 30
+credit assertions, 17 Hub API assertions, all 784 Studio assertions, full API
+suite, Studio production build, and `git diff --check`. The browser smoke test
+was attempted but the Windows sandbox could not launch the browser-control
+process, so no visual-interaction claim is made.
+
+**2026-08-25 — measured Hub attachments and current-model stills are closed.**
+The reviewed Hub flow now offers floor, wall, and ceiling catalogue templates.
+Wall and ceiling choices expose the proposal's measured room context and remain
+disabled until the reviewer selects a specific room face or ceiling point;
+there is no centroid shortcut. In-wall templates remain excluded because a
+door/window replacement must bind to an actual opening. The selected target is
+resolved through the same measured placement functions as recognised render
+decor, then the conditioned model, dimensions, facing, and attribution persist
+through the normal plan-object path.
+
+Preview, isometric, and full stills previously submitted only `sceneId`, so the
+worker loaded the older saved `scene.modelUrl` unless Publish or Bake happened
+first. `SceneView` now shares one current-model capture path between Publish and
+those still presets: it waits for models, exports the complete dressed and
+furnished editor state, uploads it, updates `modelUrl`, and only then queues the
+job. Measured-plan scenes rebuild with ceilings; imported/hybrid scenes export
+the composed viewer model; unloaded model-only scenes preserve their stored
+building. A scene with a baked atlas deliberately preserves its bake-time
+model because replacing its mesh/UV layout would apply the atlas to the wrong
+geometry. Verified: 25 design-furnishing assertions, 18 Hub-placement
+assertions, 8 capture-policy assertions, all 800 Studio assertions, strict
+TypeScript, Studio production build, and `git diff --check`. A real worker
+image comparison and the in-app browser interaction smoke remain unclaimed.
+
+**2026-08-25 - OpenAI vision integrated and live-tested under a hard cap.**
+`adjudicate.py` now has an optional process-wide provider-call ceiling, clamps
+output tokens per call, records returned token usage, and exposes only those
+non-secret counters through `/health`. `evaluate_openai.py` refuses keys on its
+command line and defaults to three calls: one render DesignSpec, one suspect
+plan crop, and one whole-plan window pass. The credential was supplied through
+a hidden, process-scoped prompt and removed after the run.
+
+The real two-sheet deck used exactly 3 calls / 2,287 total tokens. Integration
+passed: OpenAI image input and the structured response contract worked. Accuracy
+did not earn an unattended-production pass. The bedroom inventory and painted
+wall palette were useful, but carpet was misclassified as wood/plank. The plan
+pass changed 55 walls / 13 rooms to 54 / 12, removed one 90%-confidence fixture
+enclosure, and accepted three snapped windows; a one-crop cap cannot cover all
+five owner-annotated defect groups. The prompt now distinguishes carpet pile
+from plank seams/grain, but no second live call was spent. Full evidence and the
+next bounded comparison are in `docs/OPENAI-VISION-EVAL-2026-08-25.md`.

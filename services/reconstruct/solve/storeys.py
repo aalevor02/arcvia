@@ -213,8 +213,13 @@ def register_storeys(frames, rise: float = DEFAULT_STOREY_RISE) -> Registration:
         if len(members) < 2:
             continue
 
-        levels = [(i, classify_level(getattr(frames[i], "title", None)))
-                  for i in members]
+        levels = []
+        for i in members:
+            titled = classify_level(getattr(frames[i], "title", None))
+            levels.append((
+                i,
+                titled if titled is not None else getattr(frames[i], "level_hint", None),
+            ))
         named = [(i, lv) for i, lv in levels if lv is not None]
 
         # Every member must be named. A group where two frames are titled and a
@@ -249,7 +254,11 @@ def register_storeys(frames, rise: float = DEFAULT_STOREY_RISE) -> Registration:
             Storey(
                 frame_index=i,
                 level=lv,
-                title=getattr(frames[i], "title", "") or "",
+                title=(
+                    getattr(frames[i], "title", "")
+                    or getattr(frames[i], "level_label", "")
+                    or f"Level {lv:g}"
+                ),
                 base_z=(lv - ground) * rise,
             )
             for i, lv in named

@@ -442,6 +442,22 @@ async function runJob(job) {
         return
       }
 
+      // Several congruent CAD frames with no confirmed stack are not a
+      // successful one-storey building. They are an unresolved choice. The
+      // old path silently published only frame 0, which is how a two-storey
+      // house became one floor. An explicit frame selection is the one case
+      // where the user has answered that choice.
+      const storeyRefusals = model.storeys?.refusals ?? []
+      if (storeyRefusals.length > 0 && job.spec.frame == null) {
+        const why = storeyRefusals.map((item) => item.reason).join(' ')
+        await finish('failed', {
+          error:
+            'The drawing contains several matching plans but their floor order ' +
+            `could not be confirmed. ${why}`,
+        })
+        return
+      }
+
       const outputUrl = glbPath ? await publish(glbPath, job) : null
       const planUrl = plan ? await publish(plan, job).catch(() => null) : null
       // The model JSON rides along because the GLB alone is a picture: the
@@ -450,7 +466,16 @@ async function runJob(job) {
       // "furnish this building" instead of an empty plan beside a model.
       // Best-effort like the plan: a reconstruction without its JSON is
       // degraded, not failed.
-      const modelJsonUrl = modelPath ? await publish(modelPath, job).catch(() => null) : null
+      // The Studio's 2D editor is hydrated from building.json. Publishing a
+      // GLB without it creates a 3D-only dead end whose 2D view is blank, so
+      // the JSON is required rather than a best-effort attachment.
+      if (!modelPath) {
+        await finish('failed', {
+          error: 'The reconstruction produced no editable building data.',
+        })
+        return
+      }
+      const modelJsonUrl = await publish(modelPath, job)
       await finish('done', {
         progress: 100,
         outputUrl,
@@ -465,6 +490,8 @@ async function runJob(job) {
           openings: model.openings?.total ?? 0,
           unit: model.unit,
           layers: model.layersUsed,
+          verifyWarnings: verify.warnings ?? 0,
+          verifyChecks: verify.checks ?? [],
           // Deck sheets carry scale evidence instead of a drawing unit; the
           // reviewer's question there is "was the scale confirmed or guessed".
           ...(model.scale

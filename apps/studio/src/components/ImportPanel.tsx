@@ -21,7 +21,12 @@ interface Props {
    * `modelJsonUrl` is the reconstruction's building.json when the engine
    * produced one — the fixture placements the editor can furnish from.
    */
-  onLanded(modelUrl: string, summary: CadSummary | null, modelJsonUrl?: string | null): void
+  onLanded(
+    modelUrl: string,
+    summary: CadSummary | null,
+    modelJsonUrl?: string | null,
+    sourceDocumentUrl?: string | null,
+  ): void | Promise<void>
   onDismiss(): void
 }
 
@@ -29,7 +34,15 @@ type Phase =
   | { at: 'pick' }
   | { at: 'uploading'; name: string }
   | { at: 'surveying'; name: string }
-  | { at: 'choose'; key: string; survey: DeckSurvey; sheet: number; anchor: number; metres: string }
+  | {
+      at: 'choose'
+      key: string
+      sourceUrl: string
+      survey: DeckSurvey
+      sheet: number
+      anchor: number
+      metres: string
+    }
   | { at: 'working'; jobId: string; progress: number; charged: number }
   | { at: 'failed'; message: string; refunded: boolean }
 
@@ -66,7 +79,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
     }
   }, [])
 
-  function watch(jobId: string, charged: number) {
+  function watch(jobId: string, charged: number, sourceDocumentUrl?: string) {
     jobRef.current = jobId
     setPhase({ at: 'working', jobId, progress: 0, charged })
     pollRef.current = setInterval(async () => {
@@ -74,7 +87,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         const job = await cadJob(jobId)
         if (job.status === 'done' && job.outputUrl) {
           if (pollRef.current) clearInterval(pollRef.current)
-          onLanded(job.outputUrl, job.summary, job.modelJsonUrl)
+          await onLanded(job.outputUrl, job.summary, job.modelJsonUrl, sourceDocumentUrl)
           return
         }
         if (job.status === 'failed' || job.status === 'cancelled') {
@@ -127,6 +140,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         setPhase({
           at: 'choose',
           key: stored.key,
+          sourceUrl: stored.url,
           survey,
           sheet: 0,
           anchor,
@@ -166,7 +180,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         index: sheet.index,
         scale: chosenScale(p),
       })
-      watch(submitted.jobId, submitted.creditsCharged)
+      watch(submitted.jobId, submitted.creditsCharged, p.sourceUrl)
     } catch (error) {
       setPhase({
         at: 'failed',

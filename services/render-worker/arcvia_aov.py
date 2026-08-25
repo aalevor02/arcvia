@@ -13,8 +13,8 @@ filter with a geometric prior rather than a fresh hallucination that happens to
 resemble the last one.
 
 Cryptomatte is keyed on the mesh names the engine writes (`storey0_walls`,
-`storey0_floors`, `storey0_fixtures`), so a mask can be pulled per element class
-without a second render.
+`storey0_floor_room2_bedroom`, `storey0_fixtures`), so masks can be pulled
+per room or per element class without a second render.
 
 ── Why they are written as separate files ──────────────────────────────────
 Multi-layer EXR is the tidy answer and a poor one here: every consumer

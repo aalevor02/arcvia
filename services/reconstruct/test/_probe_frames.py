@@ -97,9 +97,15 @@ def grade_frame(frame, reading, scale, origin, chosen, labels, placements):
         and y0 - 1 <= p["position"]["y"] <= y1 + 1
     ]
 
-    shortlist = layerscan.recommended(layerscan.scan(within)) | (set(chosen) & set(within))
-    selected, _trace = layerscan.select_within_frame(
+    scores = layerscan.scan(within)
+    shortlist = layerscan.recommended(scores) | (set(chosen) & set(within))
+    shortlist.update(
+        name for name, layer_faces in within.items()
+        if len(layer_faces) >= 4 and kernel.classify(name) != "ignore"
+    )
+    selected, trace = layerscan.select_within_frame(
         within, shortlist, in_frame, blocks, classify_room, kernel.guess_item,
+        seed=set(chosen) & set(within),
     )
     if not selected:
         selected = set(chosen) & set(within)
@@ -118,6 +124,8 @@ def grade_frame(frame, reading, scale, origin, chosen, labels, placements):
         "largest": round(max((s.area for s in spaces), default=0.0), 2),
         "area": round(sum(s.area for s in rooms), 2),
         "layers": sorted(selected),
+        "trace": trace,
+        "scores": [score.as_dict() for score in scores],
     }
 
 
@@ -196,7 +204,10 @@ def probe(path: Path, grade: bool = False) -> None:
                             placements)
             print(f"  {frame.index:>3} {g['rooms']:>5} {g['named']:>5} "
                   f"{g['largest']:>8.1f} {g['area']:>8.1f} {g['walls']:>5}  "
-                  f"labels={label_count} {title or '-'}")
+                  f"labels={label_count} {title or '-'} "
+                  f"layers={','.join(g.get('layers', []))}")
+            print(f"      trace={g.get('trace', [])}")
+            print(f"      scores={g.get('scores', [])}")
 
 
 if __name__ == "__main__":

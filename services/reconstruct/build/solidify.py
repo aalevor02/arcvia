@@ -22,11 +22,20 @@ Cryptomatte mask needs something to key on.
 
 from __future__ import annotations
 
+import math
+import re
+import unicodedata
+
 from .glb import MeshBuilder
 
 #: Slab thickness. Thin enough not to eat headroom, thick enough to read as a
 #: floor rather than a plane when the camera is near it.
 SLAB_THICKNESS = 0.12
+
+#: Room finish surfaces are deliberately separate from structural masonry.
+#: One millimetre keeps the paint face in front of the wall without changing a
+#: room dimension anyone can measure.
+FINISH_PROUD = 0.001
 
 #: Walls the engine derived rather than read. Kept as a name because two
 #: separate modules test for it and a typo in either fails silently.
@@ -165,6 +174,10 @@ def _segment(mesh: MeshBuilder, wall, start: float, end: float,
 #: OUTDOOR_WORDS; kept local so build/ does not depend on quantify/.
 _OUTDOOR_WORDS = ("lawn", "garden", "patio", "deck", "terrace", "balcony",
                   "court", "pool", "barbeque", "barbecue", "driveway", "parking")
+_WATER_WORDS = ("pool", "swimming", "pond", "fountain", "water feature")
+_LAWN_WORDS = ("lawn", "garden", "planting", "landscape")
+_PAVING_WORDS = ("patio", "deck", "terrace", "balcony", "court",
+                 "barbeque", "barbecue", "driveway", "parking")
 
 
 def _space_is_outdoor(space) -> bool:
@@ -172,6 +185,23 @@ def _space_is_outdoor(space) -> bool:
         return True
     name = str(getattr(space, "name", "") or "").lower()
     return any(word in name for word in _OUTDOOR_WORDS)
+
+
+def _space_surface_kind(space) -> str:
+    """The honest ground material class for one room or site region."""
+    name = str(getattr(space, "name", "") or "").lower()
+    if any(word in name for word in _PAVING_WORDS):
+        return "paving"
+    if any(word in name for word in _WATER_WORDS):
+        return "water"
+    if any(word in name for word in _LAWN_WORDS):
+        return "lawn"
+    if _space_is_outdoor(space):
+        # A deck, terrace, balcony, court or unnamed outdoor region is hard
+        # ground. Calling every outdoor polygon lawn made the villa's decks
+        # green and would turn a pool surround into turf.
+        return "paving"
+    return "floor"
 
 
 def build_slabs(mesh: MeshBuilder, spaces, base_z: float = 0.0,
@@ -194,6 +224,219 @@ def build_slabs(mesh: MeshBuilder, spaces, base_z: float = 0.0,
         target.add_polygon_slab(space.loop, base_z - SLAB_THICKNESS, SLAB_THICKNESS)
         built += 1
     return {"slabs": built, "thickness": SLAB_THICKNESS, "lawn": lawned}
+
+
+def _room_mesh_slug(space) -> str:
+    """A stable, readable suffix for one room's GLB mesh name."""
+    raw = str(getattr(space, "name", None) or getattr(space, "kind", None) or "room")
+    ascii_name = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")[:48]
+    return slug or "room"
+
+
+def build_room_slabs(spaces, base_z: float = 0.0) -> tuple[dict[str, MeshBuilder], dict]:
+    """
+    Build one addressable floor mesh per room.
+
+    `build_slabs` remains the aggregate primitive for callers that genuinely
+    want one material bucket. The reconstruction GLB uses this split form: a
+    bedroom carpet and a hall tile have to be different objects before any
+    editor can stop either finish at the doorway.
+
+    Names carry all three identities a downstream consumer needs:
+
+      floor_room3_master-bedroom
+      lawn_room7_garden
+
+    The caller prefixes the storey. The numeric index is unambiguous even when
+    a drawing contains three rooms all labelled BEDROOM; the slug lets the
+    deck-design reader match a render caption without fetching building.json.
+    Outdoor slabs remain `lawn_*`, `paving_*` or `water_*`, so dressing an
+    interior floor cannot paint a garden as timber or a pool as carpet merely
+    because all of them are horizontal polygons.
+    """
+    meshes: dict[str, MeshBuilder] = {}
+    site_counts = {"lawn": 0, "paving": 0, "water": 0}
+
+    for space in spaces:
+        kind = _space_surface_kind(space)
+        key = f"{kind}_room{space.index}_{_room_mesh_slug(space)}"
+        target = MeshBuilder()
+        target.add_polygon_slab(
+            space.loop,
+            base_z - SLAB_THICKNESS,
+            SLAB_THICKNESS,
+        )
+        if target.indices:
+            meshes[key] = target
+        if kind in site_counts:
+            site_counts[kind] += 1
+
+    return meshes, {
+        "slabs": len(meshes),
+        "thickness": SLAB_THICKNESS,
+        **site_counts,
+        "roomMeshes": len(meshes),
+    }
+
+
+def _boundary_intervals(space, wall) -> list[tuple[float, float]]:
+    """Runs of ``wall`` that actually bound ``space``, measured from wall.a."""
+    length = wall.length
+    if length < 1e-9:
+        return []
+    dx, dy = (wall.bx - wall.ax) / length, (wall.by - wall.ay) / length
+    intervals: list[tuple[float, float]] = []
+    loop = space.loop
+    for a, b in zip(loop, loop[1:] + loop[:1]):
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        edge_length = math.hypot(ex, ey)
+        if edge_length < 1e-9:
+            continue
+        ex, ey = ex / edge_length, ey / edge_length
+        if abs(ex * dx + ey * dy) < 0.995:
+            continue
+        # Room cycles and wall axes are nominally coincident. The tolerance is
+        # the same corner-join tolerance used to attribute Space.bounded_by.
+        da = abs((a[0] - wall.ax) * -dy + (a[1] - wall.ay) * dx)
+        db = abs((b[0] - wall.ax) * -dy + (b[1] - wall.ay) * dx)
+        if max(da, db) > 0.055:
+            continue
+        ta = (a[0] - wall.ax) * dx + (a[1] - wall.ay) * dy
+        tb = (b[0] - wall.ax) * dx + (b[1] - wall.ay) * dy
+        lo, hi = max(0.0, min(ta, tb)), min(length, max(ta, tb))
+        if hi - lo > 0.01:
+            intervals.append((lo, hi))
+
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [intervals[0]]
+    for lo, hi in intervals[1:]:
+        old_lo, old_hi = merged[-1]
+        if lo <= old_hi + 0.01:
+            merged[-1] = (old_lo, max(old_hi, hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _finish_face(mesh: MeshBuilder, wall, start: float, end: float,
+                 base: float, height: float, side: float) -> None:
+    """One single-sided finish quad facing into its room."""
+    if end - start < 0.01 or height <= 0:
+        return
+    length = wall.length
+    dx, dy = (wall.bx - wall.ax) / length, (wall.by - wall.ay) / length
+    # Left normal. `side` selects the side containing the room.
+    nx, ny = -dy * side, dx * side
+    offset = wall.thickness / 2 + FINISH_PROUD
+    ax = wall.ax + dx * start + nx * offset
+    ay = wall.ay + dy * start + ny * offset
+    bx = wall.ax + dx * end + nx * offset
+    by = wall.ay + dy * end + ny * offset
+
+    def v(x, y, z):
+        return (x, z, -y)
+
+    lo, hi = base, base + height
+    # add_quad(a,b,b',a') faces the RIGHT side of a->b after plan->glTF.
+    # Reverse it when the room is on the left so every material is visible from
+    # inside even though glTF materials remain correctly single-sided.
+    if side > 0:
+        mesh.add_quad(v(bx, by, lo), v(ax, ay, lo),
+                      v(ax, ay, hi), v(bx, by, hi))
+    else:
+        mesh.add_quad(v(ax, ay, lo), v(bx, by, lo),
+                      v(bx, by, hi), v(ax, ay, hi))
+
+
+def build_room_finishes(spaces, walls, openings, height: float,
+                        base_z: float = 0.0) -> tuple[dict[str, MeshBuilder], dict]:
+    """Build opening-aware wall faces and a ceiling mesh for every indoor room.
+
+    Structural walls remain one mesh. These are finish layers only: addressable
+    by room, proud of the measured wall face, and cut around the exact openings
+    already used by ``build_walls``. That lets a bedroom wear wallpaper without
+    painting the hall side of its shared wall or covering its door.
+    """
+    from shapely.geometry import Polygon
+
+    meshes: dict[str, MeshBuilder] = {}
+    by_wall: dict[int, list] = {}
+    for opening in openings:
+        by_wall.setdefault(opening.wall, []).append(opening)
+
+    wall_faces = 0
+    ceilings = 0
+    for space in spaces:
+        if _space_is_outdoor(space):
+            continue
+        slug = f"room{space.index}_{_room_mesh_slug(space)}"
+        wall_mesh = MeshBuilder()
+        poly = Polygon(space.loop)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty:
+            continue
+        centre = poly.representative_point()
+
+        candidates = space.bounded_by or list(range(len(walls)))
+        for wall_index in candidates:
+            if wall_index < 0 or wall_index >= len(walls):
+                continue
+            wall = walls[wall_index]
+            if not wall.paired or wall.length < 1e-9:
+                continue
+            dx = (wall.bx - wall.ax) / wall.length
+            dy = (wall.by - wall.ay) / wall.length
+            cross = dx * (centre.y - wall.ay) - dy * (centre.x - wall.ax)
+            side = 1.0 if cross >= 0 else -1.0
+
+            for interval_lo, interval_hi in _boundary_intervals(space, wall):
+                holes = sorted(by_wall.get(wall_index, []), key=lambda o: o.along)
+                cursor = interval_lo
+                for hole in holes:
+                    start = max(interval_lo, hole.along - hole.width / 2)
+                    end = min(interval_hi, hole.along + hole.width / 2)
+                    if end <= start:
+                        continue
+                    if start - cursor > 0.01:
+                        _finish_face(wall_mesh, wall, cursor, start, base_z, height, side)
+                        wall_faces += 1
+                    head = hole.sill + hole.height
+                    if height - head > 0.01:
+                        _finish_face(wall_mesh, wall, start, end,
+                                     base_z + head, height - head, side)
+                        wall_faces += 1
+                    if hole.sill > 0.01:
+                        _finish_face(wall_mesh, wall, start, end,
+                                     base_z, hole.sill, side)
+                        wall_faces += 1
+                    cursor = max(cursor, end)
+                if interval_hi - cursor > 0.01:
+                    _finish_face(wall_mesh, wall, cursor, interval_hi,
+                                 base_z, height, side)
+                    wall_faces += 1
+
+        if wall_mesh.indices:
+            meshes[f"wall_{slug}"] = wall_mesh
+
+        ceiling = MeshBuilder()
+        # Underside only: a first-person camera sees the ceiling, while the
+        # existing roofless isometric/plan cameras see its culled back face and
+        # can still inspect furniture. A solid slab here would hide the design.
+        ceiling.add_polygon_face(space.loop, base_z + height, up=False)
+        if ceiling.indices:
+            meshes[f"ceiling_{slug}"] = ceiling
+            ceilings += 1
+
+    return meshes, {
+        "finishWallMeshes": sum(1 for name in meshes if name.startswith("wall_")),
+        "finishWallFaces": wall_faces,
+        "ceilingMeshes": ceilings,
+        "ceilingThickness": 0.0,
+    }
 
 
 #: Catalogue items that are greenery, not furniture. A box is the right

@@ -7,8 +7,8 @@
  * multi-storey scene DOES carry is its geometry, and both producers name it
  * recognisably:
  *
- *   - the CAD engine emits one mesh set per storey: `storey0_walls`,
- *     `storey1_floors`, … (build/glb.py)
+ *   - the CAD engine emits named meshes per storey: `storey0_walls`,
+ *     `storey1_floor_room2_bedroom`, and so on (build/glb.py)
  *   - the studio's plan builder emits one group per floor: `floor:<id>`
  *     (buildGeometry.ts), children positioned at the floor's elevation
  *

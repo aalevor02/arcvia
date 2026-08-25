@@ -1,12 +1,12 @@
 """
 A vision model adjudicates what the heuristic proposed.
 
-── Why this exists ──────────────────────────────────────────────────────────
+â”€â”€ Why this exists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 On a rendered presentation plan the heuristic's geometry is precise and its
 CLASSIFICATION is blind: a bed drawn as a crisp rectangle encloses a
 room-sized area, so its outline ships as four walls; a potted plant becomes
 masonry. Measured on a real client plan (2026-08-24, the owner marked five
-failures — see A:/Tools/FloorplanModel/realdecks). Three heuristic prototypes
+failures â€” see A:/Tools/FloorplanModel/realdecks). Three heuristic prototypes
 hit this same ceiling; nothing local to a stroke separates furniture from
 wall. What CAN separate them is looking at the picture, which is exactly what
 a vision-language model does.
@@ -17,16 +17,16 @@ decides WHAT a proposed thing is. Each suspect wall cluster is cropped with
 its proposal drawn on top, and the model answers one closed question about
 it. Coordinates never come from the model.
 
-── Fail-open, always ────────────────────────────────────────────────────────
+â”€â”€ Fail-open, always â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 No key, no network, a slow answer, an unparseable answer: every failure path
 returns the input unchanged with a note. The adjudicator can only ever make
-the result better or leave it alone — a detector that got WORSE when a third
+the result better or leave it alone â€” a detector that got WORSE when a third
 party had a bad day would be a regression dressed as a feature.
 
-── Cost and terms ───────────────────────────────────────────────────────────
+â”€â”€ Cost and terms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Uses NVIDIA's hosted NIM endpoint (free developer tier: dev/test/eval only,
 40 req/min). A plan costs at most ADJUDICATE_MAX_CROPS + 1 calls. For
-production traffic the operator must supply a key whose terms allow it —
+production traffic the operator must supply a key whose terms allow it â€”
 which is why the env var, not this file, decides whether any of this runs.
 """
 
@@ -36,24 +36,43 @@ import base64
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.request
 
 import cv2
 import numpy as np
 
-ENDPOINT = os.environ.get(
-    "FLOORPLAN_ADJUDICATOR_URL", "https://integrate.api.nvidia.com/v1/chat/completions"
-)
+_PROVIDER = os.environ.get("FLOORPLAN_AI_PROVIDER", "auto").lower()
+
+# The service speaks the OpenAI-compatible chat/completions shape.  NVIDIA
+# remains the default when its key is present; setting OPENAI_API_KEY is enough
+# to opt a deployment into OpenAI without putting a provider key in the browser.
+if _PROVIDER == "openai" or (
+    _PROVIDER == "auto"
+    and os.environ.get("OPENAI_API_KEY")
+    and not (os.environ.get("FLOORPLAN_ADJUDICATOR_KEY") or os.environ.get("NVIDIA_API_KEY"))
+):
+    PROVIDER = "openai"
+    ENDPOINT = os.environ.get(
+        "FLOORPLAN_ADJUDICATOR_URL", "https://api.openai.com/v1/chat/completions"
+    )
+    MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+    KEY = os.environ.get("OPENAI_API_KEY", "")
+else:
+    PROVIDER = "nvidia"
+    ENDPOINT = os.environ.get(
+        "FLOORPLAN_ADJUDICATOR_URL", "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
 #: The nano VL model, not the 90B. Measured 2026-08-24: the 90B timed out on
-#: 5 of 12 calls at 25 s on the free tier — an adjudicator that answers
+#: 5 of 12 calls at 25 s on the free tier â€” an adjudicator that answers
 #: SOMETIMES is worse than none, because the result depends on the weather.
 #: The 12B answers in seconds and the questions here are closed-form
 #: classification of a small crop, not reasoning.
-MODEL = os.environ.get("FLOORPLAN_ADJUDICATOR_MODEL", "nvidia/nemotron-nano-12b-v2-vl")
-KEY = os.environ.get("FLOORPLAN_ADJUDICATOR_KEY") or os.environ.get("NVIDIA_API_KEY", "")
+    MODEL = os.environ.get("FLOORPLAN_ADJUDICATOR_MODEL", "nvidia/nemotron-nano-12b-v2-vl")
+    KEY = os.environ.get("FLOORPLAN_ADJUDICATOR_KEY") or os.environ.get("NVIDIA_API_KEY", "")
 
-#: At most this many cluster crops per plan — the free tier allows 40 req/min
+#: At most this many cluster crops per plan â€” the free tier allows 40 req/min
 #: and a plan should never be a minute of API calls. Suspects are ordered
 #: smallest first (beds and plants are small; real wall networks are not), so
 #: the cap drops the least suspicious, not the most.
@@ -61,17 +80,67 @@ MAX_CROPS = int(os.environ.get("ADJUDICATE_MAX_CROPS", "10"))
 
 #: A cluster whose bounding-box diagonal exceeds this fraction of the image is
 #: not a suspect. Structural, not tuned: the classes this pass exists to catch
-#: — a bed, a plant pot, a wardrobe outline — are furniture-sized, and the
+#: â€” a bed, a plant pot, a wardrobe outline â€” are furniture-sized, and the
 #: genuine wall network of any real plan spans most of the sheet. Measured on
 #: the eval plan: both beds sit near 0.16, the plant under 0.08, the true
 #: network above 0.8.
 SUSPECT_MAX_DIAGONAL = 0.35
 
-#: Confidence floor for acting on a verdict. Below it the proposal stands —
+#: Confidence floor for acting on a verdict. Below it the proposal stands â€”
 #: the heuristic was there first, and doubt goes to the incumbent.
 MIN_CONFIDENCE = 0.6
 
 _TIMEOUT_S = float(os.environ.get("ADJUDICATE_TIMEOUT_S", "25"))
+
+# Optional process-wide guardrails for evaluation and low-spend deployments.
+MAX_PROVIDER_CALLS = max(
+    0, int(os.environ.get("FLOORPLAN_AI_MAX_PROVIDER_CALLS", "0"))
+)
+MAX_OUTPUT_TOKENS = max(
+    1, int(os.environ.get("FLOORPLAN_AI_MAX_OUTPUT_TOKENS", "1200"))
+)
+
+_budget_lock = threading.Lock()
+_calls_started = 0
+_input_tokens = 0
+_output_tokens = 0
+_total_tokens = 0
+
+
+def _reserve_call() -> bool:
+    global _calls_started
+    with _budget_lock:
+        if MAX_PROVIDER_CALLS and _calls_started >= MAX_PROVIDER_CALLS:
+            return False
+        _calls_started += 1
+        return True
+
+
+def _record_usage(payload: dict) -> None:
+    global _input_tokens, _output_tokens, _total_tokens
+    raw = payload.get("usage")
+    if not isinstance(raw, dict):
+        return
+    prompt = int(raw.get("prompt_tokens", raw.get("input_tokens", 0)) or 0)
+    completion = int(raw.get("completion_tokens", raw.get("output_tokens", 0)) or 0)
+    total = int(raw.get("total_tokens", prompt + completion) or 0)
+    with _budget_lock:
+        _input_tokens += prompt
+        _output_tokens += completion
+        _total_tokens += total
+
+
+def usage() -> dict:
+    """Non-secret provider budget/usage telemetry for health checks and evals."""
+    with _budget_lock:
+        return {
+            "calls_started": _calls_started,
+            "max_calls": MAX_PROVIDER_CALLS or None,
+            "input_tokens": _input_tokens,
+            "output_tokens": _output_tokens,
+            "total_tokens": _total_tokens,
+            "max_output_tokens_per_call": MAX_OUTPUT_TOKENS,
+        }
 
 #: Data-URL images above ~180 KB are refused by the hosted endpoint, so crops
 #: re-encode until they fit. The full-image window pass downsamples to this
@@ -85,7 +154,7 @@ def available() -> bool:
 
 
 def name() -> str | None:
-    return MODEL if available() else None
+    return f"{PROVIDER}:{MODEL}" if available() else None
 
 
 # --------------------------------------------------------------------------
@@ -102,10 +171,14 @@ def _encode(image: np.ndarray) -> str | None:
 
 
 def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
-    """One image, one question, the raw text answer — or None on any failure."""
+    """One image, one question, the raw text answer â€” or None on any failure."""
     encoded = _encode(image)
     if not encoded:
         return None
+    if not _reserve_call():
+        print("[adjudicate] provider call budget exhausted", flush=True)
+        return None
+    max_tokens = min(max(1, max_tokens), MAX_OUTPUT_TOKENS)
     body = json.dumps({
         "model": MODEL,
         "messages": [{
@@ -116,7 +189,7 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
                  "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
             ],
         }],
-        # 300 fits a verdict; a caller wanting a whole DesignSpec passes more —
+        # 300 fits a verdict; a caller wanting a whole DesignSpec passes more â€”
         # the first truncated spec parsed as "no answer" and read as a refusal.
         "max_tokens": max_tokens,
         "temperature": 0.0,
@@ -134,7 +207,15 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        _record_usage(payload)
         answer = payload["choices"][0]["message"]["content"]
+        # OpenAI can return content as typed text parts; the compatible NVIDIA
+        # endpoint returns a plain string. Normalize both to the reader's
+        # existing parser contract.
+        if isinstance(answer, list):
+            answer = "".join(
+                part.get("text", "") for part in answer if isinstance(part, dict)
+            )
         print(f"[adjudicate] answered: {answer[:160]!r}", flush=True)
         return answer
     except urllib.error.HTTPError as error:
@@ -168,7 +249,7 @@ def _verdict_of(text: str) -> dict | None:
     """
     A verdict from an answer that may or may not have obeyed the format.
 
-    Even at temperature 0 the model sometimes narrates instead — observed:
+    Even at temperature 0 the model sometimes narrates instead â€” observed:
     "the bright orange lines are tracing the outline of a bed", no JSON
     anywhere, and the bed survived because the parse failed. When the words
     plainly assert a classification, use it at reduced confidence; a plain
@@ -244,15 +325,15 @@ _ROOM_PROMPT = (
     "This is a crop of an architectural floor plan. The orange outline traces "
     "a small enclosed shape that an automatic reader classified as a ROOM "
     "with walls. Look at what is drawn INSIDE and AS the orange outline. Is "
-    "it actually a room, or is it a piece of furniture drawn on the plan — a "
-    "bed, sofa, wardrobe, table — whose outline merely closed? Answer ONLY a "
+    "it actually a room, or is it a piece of furniture drawn on the plan â€” a "
+    "bed, sofa, wardrobe, table â€” whose outline merely closed? Answer ONLY a "
     'JSON object: {"verdict": one of "room", "bed", "sofa", "wardrobe", '
     '"furniture", "fixture", "other", "confidence": 0..1}. '
     "A mattress with pillows is a bed. Only a genuine walled space is room."
 )
 
 #: Verdicts that remove the proposal. "railing" and "boundary" are NOT
-#: removed in v1 — a balcony edge legitimately carries a parapet wall and a
+#: removed in v1 â€” a balcony edge legitimately carries a parapet wall and a
 #: removal there needs the parapet-height build the engine does not yet have.
 #: They are reported in the notes instead, so the reviewer's eye goes there.
 _DROP = {"bed", "sofa", "wardrobe", "furniture", "fixture", "plant"}
@@ -265,7 +346,7 @@ def _suspects(walls, rooms) -> list[dict]:
     Isolated small clusters catch a free-standing plant or fitting. They MISS
     the worst offender: a bed whose headboard touches the room wall joins the
     main network and never looks small. But that bed already betrayed itself
-    another way — it closed, so it is sitting in `rooms` as a small UNNAMED
+    another way â€” it closed, so it is sitting in `rooms` as a small UNNAMED
     room. Measured on the eval plan: both beds are exactly that. So small
     unnamed rooms are suspects too, cropped by their own outline.
     """
@@ -282,7 +363,7 @@ def _suspects(walls, rooms) -> list[dict]:
 
     for index, room in enumerate(rooms):
         if room.name or room.kind != "room":
-            continue  # a NAMED small room is a real room — SHOWER, WC
+            continue  # a NAMED small room is a real room â€” SHOWER, WC
         xs = [p.x for p in room.polygon]
         ys = [p.y for p in room.polygon]
         x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
@@ -323,7 +404,7 @@ def _crop_for(image, walls, suspect):
     else:
         # The room's own POLYGON, not its bounding box. A rectangle around
         # the area contains the bed AND the genuine walls beside it, and the
-        # model — reasonably — answered about the walls: measured, both bed
+        # model â€” reasonably â€” answered about the walls: measured, both bed
         # enclosures came back "wall, confidence 1". The polygon traces
         # exactly the strokes in question and nothing else.
         points = np.array(
@@ -374,12 +455,12 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                 dropped_boxes.append(suspect["box"])
                 notes.append(
                     f"adjudicator: dropped {len(suspect['members'])} proposed "
-                    f"wall(s) — {kind} ({confidence:.0%})"
+                    f"wall(s) â€” {kind} ({confidence:.0%})"
                 )
             else:
                 # The room IS the furniture's enclosure. It goes, along with
-                # every wall living strictly inside its outline — the bed's
-                # own edges — while the room's boundary walls, which sit ON
+                # every wall living strictly inside its outline â€” the bed's
+                # own edges â€” while the room's boundary walls, which sit ON
                 # the outline, stay. The pad is what separates "inside" from
                 # "on": tight, because the wall a headboard touches must
                 # survive.
@@ -401,12 +482,12 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                         dropped += 1
                 notes.append(
                     f"adjudicator: an unnamed {room_label(rooms[suspect['room_index']])} "
-                    f"enclosure is {kind} ({confidence:.0%}) — removed it "
+                    f"enclosure is {kind} ({confidence:.0%}) â€” removed it "
                     f"and {dropped} inner wall(s)"
                 )
         elif kind in ("railing", "boundary") and confidence >= MIN_CONFIDENCE:
             notes.append(
-                f"adjudicator: a proposed structure looks like {kind} — "
+                f"adjudicator: a proposed structure looks like {kind} â€” "
                 "kept, review it"
             )
 
@@ -513,7 +594,7 @@ def _point_to_segment(x: float, y: float, wall) -> float:
 def adjudicate(image, walls, objects, rooms, detection_cls):
     """
     Second-guess the proposals against the picture. Returns
-    (walls, objects, rooms, notes) — unchanged plus a note on any failure.
+    (walls, objects, rooms, notes) â€” unchanged plus a note on any failure.
     """
     notes: list[str] = []
     if not available():
@@ -522,6 +603,6 @@ def adjudicate(image, walls, objects, rooms, detection_cls):
     try:
         walls, rooms = _adjudicate_clusters(image, walls, rooms, notes)
         objects = list(objects) + _find_windows(image, walls, detection_cls, notes)
-    except Exception as exc:  # noqa: BLE001 — fail-open is the contract
+    except Exception as exc:  # noqa: BLE001 â€” fail-open is the contract
         notes.append(f"adjudicator: skipped ({type(exc).__name__})")
     return walls, objects, rooms, notes

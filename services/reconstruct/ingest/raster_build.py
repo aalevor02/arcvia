@@ -52,7 +52,8 @@ def reconstruct_raster(
 ) -> dict:
     """A photograph or scan of a floor plan -> walls, rooms, GLB."""
     from build.glb import MeshBuilder, write_glb
-    from build.solidify import build_slabs, build_walls
+    from build.solidify import build_room_finishes, build_room_slabs, build_walls
+    from hypothesise import openings as op
     from solve import spaces as sp
     from solve import verify as vf
 
@@ -134,9 +135,40 @@ def reconstruct_raster(
     room_stats["fromWallGraph"] = len(graph_rooms)
     room_stats["outdoorExcluded"] = outdoor_count
 
-    wall_mesh, floor_mesh = MeshBuilder(), MeshBuilder()
-    wall_build = build_walls(wall_mesh, walls, [], height)
-    slab_build = build_slabs(floor_mesh, rooms)
+    holes = []
+    unhosted = 0
+    for detected in reading.openings:
+        wall_index, along = op.host(detected["x"], detected["y"], walls)
+        if wall_index is None:
+            unhosted += 1
+            continue
+        wall = walls[wall_index]
+        width = max(0.5, min(float(detected["width"]), 3.0))
+        if wall.length < width + 2 * op.END_MARGIN:
+            unhosted += 1
+            continue
+        along = max(
+            op.END_MARGIN + width / 2,
+            min(wall.length - op.END_MARGIN - width / 2, along),
+        )
+        kind = detected["kind"]
+        holes.append(op.Opening(
+            kind=kind,
+            wall=wall_index,
+            along=along,
+            width=width,
+            height=op.WINDOW_HEIGHT if kind == "window" else op.DOOR_HEIGHT,
+            sill=op.WINDOW_SILL if kind == "window" else op.DOOR_SILL,
+            source="rasterDetector",
+            confidence=detected["confidence"],
+        ))
+    holes = op.dedupe(holes)
+    opening_stats = op.summarise(holes, unhosted)
+
+    wall_mesh = MeshBuilder()
+    wall_build = build_walls(wall_mesh, walls, holes, height)
+    room_meshes, slab_build = build_room_slabs(rooms)
+    finish_meshes, finish_build = build_room_finishes(rooms, walls, holes, height)
 
     # Verified against the *graph* rooms deliberately. The gate exists to catch a
     # wall network that contradicts its own input, and handing it rooms that did
@@ -146,15 +178,45 @@ def reconstruct_raster(
         input_segments=len(reading.faces) + len(reading.walls),
         walls=walls,
         spaces=graph_rooms,
-        openings=[],
-        unhosted=[],
+        openings=holes,
+        unhosted=unhosted,
         scale_candidates=None,
     )
 
-    manifest = write_glb(
-        {"storey0_walls": wall_mesh, "storey0_floors": floor_mesh},
-        out / f"{source.stem}.glb",
-    )
+    # Raster detection is allowed to propose geometry; it is not allowed to
+    # publish geometry that contradicts its own room result. The failed deck
+    # that prompted this had eight detector rooms but a wall graph enclosing
+    # zero, and the old generic verifier called that only a warning.
+    if indoor and not graph_rooms:
+        verdict.checks.append(vf.Check(
+            "raster-wall-enclosure",
+            "blocking",
+            f"The detector proposed {len(indoor)} indoor rooms, but its wall graph "
+            "encloses none. Review the 2D extraction; do not build this in 3D.",
+            0,
+        ))
+    if reading.low_confidence:
+        verdict.checks.append(vf.Check(
+            "raster-confidence",
+            "blocking",
+            "The plan detector marked this extraction low-confidence. Review the "
+            "2D walls, rooms and openings before any model is built.",
+            0,
+        ))
+    if len(indoor) >= 2 and not holes:
+        verdict.checks.append(vf.Check(
+            "raster-openings",
+            "blocking",
+            f"{len(indoor)} indoor rooms were proposed but no doors or windows "
+            "could be hosted on a wall. The plan is incomplete.",
+            0,
+        ))
+
+    manifest = write_glb({
+        "storey0_walls": wall_mesh,
+        **{f"storey0_{name}": mesh for name, mesh in room_meshes.items()},
+        **{f"storey0_{name}": mesh for name, mesh in finish_meshes.items()},
+    }, out / f"{source.stem}.glb")
 
     return {
         "source": str(source),
@@ -162,8 +224,9 @@ def reconstruct_raster(
         "detector": reading.summary(),
         "walls": wall_stats,
         "rooms": room_stats,
+        "openings": opening_stats,
         "detectorRooms": reading.rooms,
-        "build": {**wall_build, **slab_build},
+        "build": {**wall_build, **slab_build, **finish_build},
         "verify": verdict.as_dict() if hasattr(verdict, "as_dict") else verdict,
         "glb": manifest,
         # Surfaced because everything measured downstream inherits it, and a
@@ -198,7 +261,7 @@ def reconstruct_raster(
         "elements": {
             "walls": [w.as_dict() for w in walls],
             "spaces": [r.as_dict() for r in rooms],
-            "openings": [],
+            "openings": [opening.as_dict() for opening in holes],
             "fixtures": [],
         },
     }

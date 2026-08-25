@@ -481,6 +481,37 @@ def join_corners(walls: list[Wall], tolerance: float = CORNER_TOLERANCE) -> list
                 else:
                     wall.bx, wall.by = best
 
+    # A wall run can continue with a small lateral drafting offset rather than
+    # a perpendicular corner. Intersection-based snapping deliberately ignores
+    # parallel walls, so weld only endpoint-to-endpoint continuations here.
+    # Both ends move to their midpoint; no length is invented beyond the small
+    # measured gap and the graph becomes topologically continuous.
+    for i, first in enumerate(out):
+        first_face = Face(first.ax, first.ay, first.bx, first.by)
+        for second in out[i + 1:]:
+            if '<bridged:labelled-opening>' not in (first.layer, second.layer):
+                continue
+            second_face = Face(second.ax, second.ay, second.bx, second.by)
+            if not _is_parallel(first_face, second_face, ANGLE_TOLERANCE_DEG):
+                continue
+            for first_end in ('a', 'b'):
+                fx = first.ax if first_end == 'a' else first.bx
+                fy = first.ay if first_end == 'a' else first.by
+                for second_end in ('a', 'b'):
+                    sx = second.ax if second_end == 'a' else second.bx
+                    sy = second.ay if second_end == 'a' else second.by
+                    if math.hypot(fx - sx, fy - sy) > tolerance:
+                        continue
+                    midpoint = ((fx + sx) / 2, (fy + sy) / 2)
+                    if first_end == 'a':
+                        first.ax, first.ay = midpoint
+                    else:
+                        first.bx, first.by = midpoint
+                    if second_end == 'a':
+                        second.ax, second.ay = midpoint
+                    else:
+                        second.bx, second.by = midpoint
+
     return out
 
 

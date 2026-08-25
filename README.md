@@ -50,6 +50,26 @@ pip install -r requirements.txt
 uvicorn main:app --port 8090
 ```
 
+The optional render/design vision pass is configured only on the Python
+service. It supports the existing NVIDIA-compatible endpoint, or OpenAI:
+
+```bash
+# Preferred for an OpenAI deployment; never put this in browser code.
+set OPENAI_API_KEY=your_server_secret
+set FLOORPLAN_AI_PROVIDER=openai
+# Optional model override; the default is gpt-4.1-mini.
+set OPENAI_VISION_MODEL=gpt-4.1-mini
+```
+
+With `FLOORPLAN_AI_PROVIDER=auto`, an `OPENAI_API_KEY` is used when no NVIDIA
+key is present. The reader remains fail-open when no key is configured, and
+CAD measurements and geometry continue to come from the deterministic engine.
+For a bounded first evaluation, additionally set
+`FLOORPLAN_AI_MAX_PROVIDER_CALLS=3`,
+`FLOORPLAN_AI_MAX_OUTPUT_TOKENS=1200`, and `ADJUDICATE_MAX_CROPS=1`. The health
+response reports non-secret call/token usage. `evaluate_openai.py` applies
+those limits automatically and refuses to accept a key on its command line.
+
 Copy `.env.example` to `.env` first if you want to change any defaults. You do
 not have to — every value has a working development default.
 

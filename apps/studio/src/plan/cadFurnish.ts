@@ -50,6 +50,8 @@ export interface CadFixture {
 /** One per-storey element block — only the registration is read here. */
 export interface CadStoreyBlock {
   storey: number
+  title?: string | null
+  level?: number
   /**
    * The registration shift the engine applied to this storey's MESHES to
    * stack frames drawn at different spots on the sheet. Fixtures are
@@ -60,11 +62,51 @@ export interface CadStoreyBlock {
    * blocks and no shift, which is the identity contract below.
    */
   shift?: [number, number]
+  spaces?: CadSpace[]
+  walls?: CadWall[]
+  openings?: CadOpening[]
+}
+
+export interface CadWall {
+  a: { x: number; y: number }
+  b: { x: number; y: number }
+  thickness: number
+}
+
+/** One measured room polygon from reconstruction's building.json. */
+export interface CadSpace {
+  index: number
+  name?: string | null
+  kind?: string | null
+  area?: number
+  loop: [number, number][]
+  boundedBy?: number[]
+}
+
+export interface CadOpening {
+  kind: 'door' | 'window' | 'opening' | string
+  /** Index into the wall list of this storey block. */
+  wall: number
+  /** Metres from wall.a along the wall centreline. */
+  along: number
+  width: number
+  height: number
+  sill: number
+  source?: string
+  confidence?: number
 }
 
 /** The slice of building.json this reads. Everything else is ignored. */
 export interface CadModel {
-  elements?: { fixtures?: CadFixture[]; storeys?: CadStoreyBlock[] }
+  wallHeight?: number
+  storeys?: { primary?: number }
+  elements?: {
+    fixtures?: CadFixture[]
+    walls?: CadWall[]
+    spaces?: CadSpace[]
+    openings?: CadOpening[]
+    storeys?: CadStoreyBlock[]
+  }
 }
 
 const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
@@ -117,6 +159,8 @@ export function furnishFromCad(model: CadModel, { storey = 0 }: { storey?: numbe
       rotation: fixture.rotation,
       size: measured(fixture.item as string, fixture.footprint.w, fixture.footprint.d),
       room: fixture.room,
+      storey,
+      storeyName: model.elements?.storeys?.find((candidate) => candidate.storey === storey)?.title ?? undefined,
       // A drawn, named block is the strongest evidence class the review
       // distinguishes — the architect put it there.
       evidence: 'labelled' as const,

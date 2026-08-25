@@ -5,6 +5,7 @@ import { requireAuth } from '../lib/auth.js'
 import {
   CONDITIONED_DIR,
   NotConditionable,
+  conditionedAssetModel,
   conditionModel,
   hubPathOf,
   pickPreview,
@@ -96,11 +97,13 @@ export async function registerAssetRoutes(app) {
 
     try {
       const result = await conditionModel(ref, { budget })
+      const url = `/hub/conditioned/${result.name}`
       return {
-        url: `/hub/conditioned/${result.name}`,
+        url,
         triangles: result.triangles,
         bytes: result.bytes,
         cached: result.cached,
+        model: conditionedAssetModel(result.asset, result, url),
       }
     } catch (error) {
       if (error instanceof NotConditionable) {

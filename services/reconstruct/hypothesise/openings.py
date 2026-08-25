@@ -46,6 +46,10 @@ HOST_RADIUS = 0.9
 
 #: An opening must sit within the wall, not off its end.
 END_MARGIN = 0.02
+MIN_LABELLED_GAP = 0.45
+MAX_LABELLED_GAP = 3.2
+LABEL_RADIUS = 4.0
+COLLINEAR_TOLERANCE = 0.18
 
 
 @dataclass
@@ -97,6 +101,122 @@ def host(px: float, py: float, walls, radius: float = HOST_RADIUS):
         if perp < best_perp:
             best_index, best_along, best_perp = i, along, perp
     return best_index, best_along
+
+
+def _label_kind(text: str) -> str:
+    lowered = (text or '').lower()
+    return 'window' if 'window' in lowered or 'ventana' in lowered else 'door'
+
+
+def _gap_candidate(label, first, second):
+    '''Return the labelled gap between two axis-aligned wall runs, if any.'''
+    first_horizontal = abs(first.bx - first.ax) >= abs(first.by - first.ay)
+    second_horizontal = abs(second.bx - second.ax) >= abs(second.by - second.ay)
+    if first_horizontal != second_horizontal:
+        return None
+
+    if first_horizontal:
+        line_a = (first.ay + first.by) / 2
+        line_b = (second.ay + second.by) / 2
+        if abs(line_a - line_b) > COLLINEAR_TOLERANCE:
+            return None
+        ends_a = (min(first.ax, first.bx), max(first.ax, first.bx))
+        ends_b = (min(second.ax, second.bx), max(second.ax, second.bx))
+        if ends_a[1] <= ends_b[0]:
+            gap_a, gap_b = ends_a[1], ends_b[0]
+        elif ends_b[1] <= ends_a[0]:
+            gap_a, gap_b = ends_b[1], ends_a[0]
+        else:
+            return None
+        gap = gap_b - gap_a
+        midpoint = ((gap_a + gap_b) / 2, (line_a + line_b) / 2)
+        merged = (min(ends_a[0], ends_b[0]), midpoint[1], max(ends_a[1], ends_b[1]), midpoint[1])
+    else:
+        line_a = (first.ax + first.bx) / 2
+        line_b = (second.ax + second.bx) / 2
+        if abs(line_a - line_b) > COLLINEAR_TOLERANCE:
+            return None
+        ends_a = (min(first.ay, first.by), max(first.ay, first.by))
+        ends_b = (min(second.ay, second.by), max(second.ay, second.by))
+        if ends_a[1] <= ends_b[0]:
+            gap_a, gap_b = ends_a[1], ends_b[0]
+        elif ends_b[1] <= ends_a[0]:
+            gap_a, gap_b = ends_b[1], ends_a[0]
+        else:
+            return None
+        gap = gap_b - gap_a
+        midpoint = ((line_a + line_b) / 2, (gap_a + gap_b) / 2)
+        merged = (midpoint[0], min(ends_a[0], ends_b[0]), midpoint[0], max(ends_a[1], ends_b[1]))
+
+    if not MIN_LABELLED_GAP <= gap <= MAX_LABELLED_GAP:
+        return None
+    label_distance = math.hypot(label.x - midpoint[0], label.y - midpoint[1])
+    if label_distance > LABEL_RADIUS:
+        return None
+    return label_distance, gap, midpoint, merged
+
+
+def from_text_labels(labels, walls) -> tuple[list, list[Opening], int]:
+    '''Close explicitly labelled wall gaps and retain each span as an opening.'''
+    walls = list(walls)
+    pending: list[tuple[str, float, float, float, float]] = []
+
+    # Resolve the most spatially specific labels first. Text in this DWG is
+    # centred beside, not on, the opening; the ambiguous middle note must not
+    # steal the left gap from a later label that only fits that gap.
+    def nearest_gap(label):
+        distances = [
+            found[0]
+            for i, first in enumerate(walls)
+            for second in walls[i + 1:]
+            if (found := _gap_candidate(label, first, second)) is not None
+        ]
+        return min(distances, default=float('inf'))
+
+    for label in sorted(labels, key=nearest_gap):
+        best = None
+        for i, first in enumerate(walls):
+            for j in range(i + 1, len(walls)):
+                found = _gap_candidate(label, first, walls[j])
+                if found is not None and (best is None or found[0] < best[0][0]):
+                    best = (found, i, j)
+
+        kind = _label_kind(label.text)
+        if best is None:
+            pending.append((kind, label.x, label.y, 1.2 if kind == 'window' else 1.8, 0.72))
+            continue
+
+        (_distance, gap, midpoint, merged), i, j = best
+        first, second = walls[i], walls[j]
+        replacement = type(first)(
+            ax=merged[0], ay=merged[1], bx=merged[2], by=merged[3],
+            thickness=max(first.thickness, second.thickness),
+            paired=first.paired or second.paired,
+            confidence=min(first.confidence, second.confidence, 0.88),
+            layer='<bridged:labelled-opening>',
+        )
+        walls = [wall for k, wall in enumerate(walls) if k not in (i, j)]
+        walls.append(replacement)
+        pending.append((kind, midpoint[0], midpoint[1], gap, 0.96))
+
+    openings: list[Opening] = []
+    unhosted = 0
+    for kind, px, py, width, confidence in pending:
+        index, along = host(px, py, walls, radius=LABEL_RADIUS)
+        if index is None or walls[index].length < width + 2 * END_MARGIN:
+            unhosted += 1
+            continue
+        along = max(END_MARGIN + width / 2, min(
+            walls[index].length - END_MARGIN - width / 2, along,
+        ))
+        openings.append(Opening(
+            kind=kind, wall=index, along=along, width=width,
+            height=DOOR_HEIGHT if kind == 'door' else WINDOW_HEIGHT,
+            sill=DOOR_SILL if kind == 'door' else WINDOW_SILL,
+            source='textLabel', confidence=confidence,
+        ))
+
+    return walls, openings, unhosted
 
 
 def from_sized_blocks(placements, walls, guess_item) -> tuple[list[Opening], int]:

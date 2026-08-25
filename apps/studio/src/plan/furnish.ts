@@ -2,7 +2,7 @@ import type { DetectedRoom, DetectionResult } from './detections'
 import type { Underlay, Vec2 } from './types'
 import { CATALOGUE } from '../catalogue/items'
 import { identify, roomItems, type Evidence } from '../catalogue/recognise'
-import type { CatalogueItem, Size } from '../catalogue/types'
+import type { AssetModel, CatalogueItem, Size } from '../catalogue/types'
 
 /**
  * Furnishing a plan from what the drawing already shows.
@@ -32,9 +32,47 @@ export interface Proposal {
   size?: Size
   /** Which room this belongs to, for grouping in the review. */
   room: string | null
+  /** Reconstruction storey for render/CAD proposals. Absent means active floor. */
+  storey?: number
+  /** Human title from the source drawing, used when a plan floor must be created. */
+  storeyName?: string
+  /** Saved design identity, present only for render-derived review bookkeeping. */
+  designKey?: string
+  /** Optional attachment height; ceiling values are drops below the ceiling. */
+  elevation?: number
+  /** Plan wall identity when the proposal came from an editable plan wall. */
+  wallId?: string
+  /** Review-only observation with no safe catalogue asset or placement yet. */
+  reviewOnly?: boolean
+  /** Original reader wording for an unresolved render item. */
+  observedItem?: string
+  /** Search phrase for the Asset Hub, kept separate from the catalogue id. */
+  hubQuery?: string
+  /**
+   * Measured room geometry retained only while an unresolved render item is
+   * under review. It lets a later catalogue template choose a real wall face,
+   * ceiling point, or floor position instead of reusing the room centroid.
+   */
+  placementContext?: ProposalPlacementContext
+  /** Reviewed, conditioned Hub model with its required licence provenance. */
+  customModel?: AssetModel
+  /** User-facing name carried onto the accepted object. */
+  label?: string
   evidence: Evidence
   confidence: number
   because: string
+}
+
+export interface ProposalAttachmentEdge {
+  a: Vec2
+  b: Vec2
+  /** Measured wall thickness in metres, or the documented legacy fallback. */
+  thickness: number
+}
+
+export interface ProposalPlacementContext {
+  polygon: Vec2[]
+  edges: ProposalAttachmentEdge[]
 }
 
 const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
@@ -331,8 +369,10 @@ function freeSpot(
 export function summariseFurniture(proposals: Proposal[]) {
   return {
     total: proposals.length,
-    drawn: proposals.filter((p) => p.evidence !== 'typical').length,
+    drawn: proposals.filter((p) => p.evidence === 'labelled' || p.evidence === 'measured').length,
+    rendered: proposals.filter((p) => p.evidence === 'rendered').length,
     assumed: proposals.filter((p) => p.evidence === 'typical').length,
+    unresolved: proposals.filter((p) => p.evidence === 'unresolved').length,
     rooms: new Set(proposals.map((p) => p.room).filter(Boolean)).size,
   }
 }

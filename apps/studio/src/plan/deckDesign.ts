@@ -43,9 +43,9 @@ export interface DesignFurniture {
 /**
  * Which of the deck's renders a spec was read from — page and index into the
  * stored document, plus whether the read fired automatically on scene open.
- * Provenance only: `applyDesignToModel` never looks at it. It exists so the
- * panel can mark the render the model is wearing after a reload, and so an
- * automatic read is distinguishable from a chosen one.
+ * Provenance and room addressing: the panel uses page/index to mark worn
+ * renders, while `applyDesignsToModel` uses the room caption to find a named
+ * reconstruction floor. `applyDesignToModel` itself remains source-agnostic.
  */
 export interface DesignSource {
   page: number
@@ -66,6 +66,54 @@ export interface DesignSpec {
   palette: string[]
   model?: string
   source?: DesignSource
+}
+
+/**
+ * Scenes written before room-by-room dressing stored one object. New scenes
+ * store an array, but the reader accepts both indefinitely so opening an old
+ * project never depends on a migration having run first.
+ */
+export type StoredDesign = DesignSpec | DesignSpec[] | null | undefined
+
+export function designsOf(stored: StoredDesign): DesignSpec[] {
+  if (Array.isArray(stored)) return stored
+  return stored ? [stored] : []
+}
+
+export function designRoomName(spec: DesignSpec): string {
+  return spec.source?.room?.trim() || spec.room?.trim() || ''
+}
+
+/** A stable identity for replacing one room's look without losing the rest. */
+export function designRoomKey(spec: DesignSpec): string {
+  const room = compactRoom(designRoomName(spec))
+  if (room) return `room:${room}`
+  if (spec.source) return `render:${spec.source.page}:${spec.source.index}`
+  return 'room:unknown'
+}
+
+/**
+ * One review decision for one observed inventory. Replacing a room's render
+ * keeps its material upsert key but must reopen furniture review when the
+ * source or the items changed.
+ */
+export function designFurnitureKey(spec: DesignSpec): string {
+  const source = spec.source ? `${spec.source.page}:${spec.source.index}` : 'unsourced'
+  const inventory = spec.furniture
+    .map((piece) => piece.item.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join(',')
+  return `${designRoomKey(spec)}|${source}|${inventory}`
+}
+
+/** Append a new room, or replace that room in place so the first fallback is stable. */
+export function upsertDesign(stored: StoredDesign, next: DesignSpec): DesignSpec[] {
+  const designs = designsOf(stored)
+  const key = designRoomKey(next)
+  const index = designs.findIndex((candidate) => designRoomKey(candidate) === key)
+  if (index < 0) return [...designs, next]
+  return designs.map((candidate, at) => (at === index ? next : candidate))
 }
 
 // The network half (readDesign) lives with the panel, not here: this module
@@ -178,10 +226,8 @@ export interface AppliedDesign {
  * Dress a loaded model in the spec's finishes: the matching surface maps,
  * tinted toward the measured colours.
  *
- * Works on whole mesh classes because that is what the models offer: a CAD
- * GLB has one floors mesh per storey, so "the bedroom's carpet" cannot be
- * painted onto one room of it — per-room split is an engine change, recorded
- * as the follow-up, and the panel says which render's finishes were applied.
+ * One spec still dresses each matching surface class. Use
+ * `applyDesignsToModel` when a scene carries the newer room-design array.
  *
  * Materials are CLONED from the shared surface cache before tinting.
  * `surface(kind)` returns the one instance every plan mesh shares — tinting
@@ -190,8 +236,7 @@ export interface AppliedDesign {
 export function applyDesignToModel(root: THREE.Object3D, spec: DesignSpec): AppliedDesign {
   const applied: AppliedDesign = { floors: 0, walls: 0, ceilings: 0 }
 
-  const floorKind = FLOOR_SURFACE_BY_MATERIAL[spec.floor?.material ?? '']
-  const floorMat = tinted(floorKind ?? 'floor-tile', spec.floor?.colour, floorKind ? 0.35 : 0.8)
+  const floorMat = floorMaterial(spec)
   const wallMat = tinted('wall', spec.walls?.colour, 0.65)
   const ceilingMat = tinted('ceiling', spec.ceiling?.colour, 0.5)
 
@@ -210,6 +255,82 @@ export function applyDesignToModel(root: THREE.Object3D, spec: DesignSpec): Appl
     }
   })
   return applied
+}
+
+/**
+ * Dress a model from all saved room renders.
+ *
+ * The first render remains a whole-model fallback. This keeps old scenes and
+ * aggregate plan-builder meshes looking exactly as they did before arrays
+ * existed. Each later render then replaces only the named reconstruction
+ * floor, wall-finish and ceiling meshes whose room slug matches its caption.
+ * The structural `storeyN_walls` mesh keeps the fallback material underneath;
+ * its room skins are what stop one paint colour at the doorway.
+ */
+export function applyDesignsToModel(
+  root: THREE.Object3D,
+  stored: StoredDesign,
+): AppliedDesign {
+  const designs = designsOf(stored)
+  if (designs.length === 0) return { floors: 0, walls: 0, ceilings: 0 }
+
+  const applied = applyDesignToModel(root, designs[0])
+  for (const spec of designs.slice(1)) {
+    const label = designRoomName(spec)
+    if (!label) continue
+    const floor = spec.floor ? floorMaterial(spec) : null
+    const wall = spec.walls ? tinted('wall', spec.walls.colour, 0.65) : null
+    const ceiling = spec.ceiling ? tinted('ceiling', spec.ceiling.colour, 0.5) : null
+    root.traverse((object) => {
+      const mesh = object as THREE.Mesh
+      if (!mesh.isMesh || !object.name) return
+      const floorSlug = roomSurfaceSlug(object.name, 'floor')
+      const wallSlug = roomSurfaceSlug(object.name, 'wall')
+      const ceilingSlug = roomSurfaceSlug(object.name, 'ceiling')
+      // An absent surface means the reader could not identify it. Preserve the
+      // fallback rather than converting uncertainty into a guessed material.
+      if (floor && floorSlug && roomNameMatches(label, floorSlug)) mesh.material = floor
+      else if (wall && wallSlug && roomNameMatches(label, wallSlug)) mesh.material = wall
+      else if (ceiling && ceilingSlug && roomNameMatches(label, ceilingSlug)) {
+        mesh.material = ceiling
+      }
+    })
+  }
+  return applied
+}
+
+function floorMaterial(spec: DesignSpec): THREE.MeshStandardMaterial {
+  const floorKind = FLOOR_SURFACE_BY_MATERIAL[spec.floor?.material ?? '']
+  return tinted(floorKind ?? 'floor-tile', spec.floor?.colour, floorKind ? 0.35 : 0.8)
+}
+
+/** Extract an addressable indoor room surface, never lawn/paving/water. */
+function roomSurfaceSlug(name: string, kind: 'floor' | 'wall' | 'ceiling'): string | null {
+  return new RegExp(`(?:^|_)${kind}_room\\d+_([^:]+)$`, 'i').exec(name)?.[1] ?? null
+}
+
+function compactRoom(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function roomTokens(value: string): string[] {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token && !['render', 'view', 'interior', 'design'].includes(token))
+}
+
+export function roomNameMatches(label: string, meshSlug: string): boolean {
+  if (compactRoom(label) === compactRoom(meshSlug)) return true
+  const wanted = roomTokens(label)
+  const available = new Set(roomTokens(meshSlug))
+  return wanted.length > 0 && wanted.every((token) => available.has(token))
 }
 
 /**
