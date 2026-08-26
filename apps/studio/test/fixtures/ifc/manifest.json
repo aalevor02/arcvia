@@ -1,0 +1,53 @@
+{
+  "source": {
+    "title": "buildingSMART Certification datasets",
+    "publisher": "buildingSMART International Ltd.",
+    "repository": "https://github.com/buildingSMART/Certification-datasets",
+    "commit": "e6f1c1d80ac216e1c1d6f88d4650f13d8c8277b7",
+    "license": "Creative Commons Attribution 4.0 International",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "retrievedAt": "2026-08-25"
+  },
+  "files": [
+    {
+      "file": "IFC4-wall-opening-window.ifc",
+      "sourcePath": "IFC 4.0.2.1 (IFC 4)/ISO Spec - ReferenceView_V1.2/wall-with-opening-and-window.ifc",
+      "bytes": 12492,
+      "sha256": "73b0e45d931d5dc13bfee5fdc7bd80f796526445458b2de74c4168d209097832",
+      "purpose": "Explicit IfcWall, IfcOpeningElement, IfcWindow, IfcRelVoidsElement and IfcRelFillsElement regression fixture",
+      "requiredKinds": ["wall", "opening", "window"]
+    },
+    {
+      "file": "IFC4-building-architecture.ifc",
+      "sourcePath": "IFC 4.0.2.1 (IFC 4)/PCERT-Sample-Scene/Building-Architecture.ifc",
+      "bytes": 225635,
+      "sha256": "3ff9b10bd00c7b96dded51e7ca5a6b69efbea38b049adcdd05fcd247de7e70d5",
+      "purpose": "IFC4 architectural object, property, material and spatial regression fixture",
+      "requiredKinds": ["wall", "slab", "roof", "space", "furniture", "chimney", "proxy"]
+    },
+    {
+      "file": "IFC4-building-structural.ifc",
+      "sourcePath": "IFC 4.0.2.1 (IFC 4)/PCERT-Sample-Scene/Building-Structural.ifc",
+      "bytes": 296640,
+      "sha256": "68be722391e7aaa53bb9278645a02aa4b6382f13cc07548a1612e9b1dc3def67",
+      "purpose": "IFC4 structural element and type regression fixture",
+      "requiredKinds": ["wall", "beam", "roof", "foundation", "chimney", "proxy"]
+    },
+    {
+      "file": "IFC4X3-building-architecture.ifc",
+      "sourcePath": "IFC 4.3.2.0 (IFC4X3_ADD2)/PCERT-Sample-Scene/Building-Architecture.ifc",
+      "bytes": 220789,
+      "sha256": "a42962f9e2068040ac96636b1e7f6117150b6c0e3371f81088721b22796e463f",
+      "purpose": "IFC4.3 architectural compatibility regression fixture",
+      "requiredKinds": ["wall", "slab", "roof", "space", "furniture", "chimney", "proxy"]
+    },
+    {
+      "file": "IFC4X3-building-hvac.ifc",
+      "sourcePath": "IFC 4.3.2.0 (IFC4X3_ADD2)/PCERT-Sample-Scene/Building-Hvac.ifc",
+      "bytes": 179394,
+      "sha256": "5451d81cd76a5743b33e0a685bf9c45fa283ca62f3807542c858c4d90aad7919",
+      "purpose": "IFC4.3 distribution and HVAC compatibility regression fixture",
+      "requiredKinds": ["equipment", "chimney", "proxy"]
+    }
+  ]
+}
