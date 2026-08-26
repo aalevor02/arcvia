@@ -1892,3 +1892,41 @@ but each starts from a signed-in Studio, so they need the owner at the keyboard
 for the sign-in step. The gate is open; the door still needs a person.
 
 Both servers started for this were stopped and their data directories removed.
+
+**2026-08-27 — title-aware frame ranking is MEASURED AND REFUSED, not pending.**
+
+The previous entry left "ranking does not read the title" as the next real
+piece of work, wanting the corpus in front of it before changing frame
+selection. The corpus was surveyed. It argues the other way.
+
+Across every accepted build on disk — 14 models covering the seven unique local
+drawings plus their dwg/dxf pairs and two client uploads — the frame that
+ranking picks is:
+
+    Lower Ground Floor Plan     x2      FIRST FLOOR PLAN          x1
+    Ground Floor Plan           x2      LOWER GROUND FLOOR PLAN   x1
+    (untitled)                  x7      REVISED SITE PLAN         x1   <-- site
+
+**Exactly one drawing picks a site-titled frame.** Everything else lands on a
+proper floor-plan title or on an untitled frame, and all but three verify with
+zero blocking findings.
+
+So demoting a frame for its title would fire on one model in fourteen and would
+be justified by a single sheet. That is the thing this file already warns
+against in `ENVELOPE_COVERAGE_MIN`: one good example is not a sample to fit a
+threshold to. Worse, the rule would be load-bearing on every drawing in the
+corpus while being evidenced by one, and the failure it would introduce —
+demoting a site frame that was genuinely the best available — is silent.
+
+The one case is already handled without touching ranking. `fallback_frame_note`
+says the pick was a wall-count fallback and names the alternatives as
+`--frame N`; `openings-present` says the frame is a site layout and that the
+finding is about frame choice rather than opening detection. Both were verified
+end to end on that sheet.
+
+**Closing this as decided rather than pending.** Reopen it only with a corpus
+that has more than one instance — and note the survey method, because it
+misled once: models under `work/enclosure-retry` are REFUSED retry artefacts,
+not accepted builds, and including them made REDDY look like a second site-
+titled pick when its accepted build picks an untitled 36.6 m frame and grades
+OK. Filter that directory out of any corpus survey.
