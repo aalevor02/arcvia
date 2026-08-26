@@ -9,7 +9,7 @@ const API: string = import.meta.env.VITE_API_URL
   ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
   : `${window.location.protocol}//${window.location.hostname}:${API_PORT}`
 
-export type RenderPreset = 'preview' | 'isometric' | 'full' | 'bake' | 'ai'
+export type RenderPreset = 'preview' | 'isometric' | 'full' | 'panorama' | 'bake' | 'ai'
 
 export interface RenderUpdate {
   status: 'queued' | 'rendering' | 'done' | 'failed' | 'cancelled'

@@ -86,15 +86,8 @@ bills per second.** Read [`docs/costs.md`](docs/costs.md) before switching.
 Edit [`packages/brand/brand.config.mjs`](packages/brand/brand.config.mjs). Name,
 domains, colours and type all flow from that one file into every app.
 
-## What still needs your input
+## Session and credit policy
 
-Two decisions are marked `TODO(you)` in the source because they are business
-judgements, not engineering ones:
-
-| Where | Decision |
-|---|---|
-| `apps/web/src/lib/auth.ts` | Session expiry policy — hard, sliding, or hybrid |
-| `services/api/src/lib/credits.js` | What happens when someone runs out of credits mid-render |
-
-Both have working defaults and a written-out comparison of the options in the
-comments above them.
+Sessions expire after 12 idle hours or 30 absolute days. Queueable work holds
+its credits before submission; non-queueable work is rejected when the account
+does not have enough credits.

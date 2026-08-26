@@ -68,6 +68,19 @@ const title = 'Walkthrough'
       button:hover { border-color: rgba(255,255,255,.28); }
       button[aria-pressed='true'] { background: #2f6df6; border-color: #2f6df6; }
 
+      #panoramaDialog { position: fixed; inset: 0; z-index: 5; display: grid;
+        place-items: center; padding: 18px; background: rgba(4, 6, 10, .9); }
+      #panoramaDialog[hidden] { display: none; }
+      #panoramaPanel { width: min(1100px, 96vw); padding: 14px; border-radius: 14px;
+        background: #10141b; border: 1px solid var(--line); box-shadow: 0 20px 80px #000; }
+      #panoramaHead { display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; margin-bottom: 12px; }
+      #panoramaHead strong { display: block; }
+      #panoramaHead span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+      #panoramaCanvas { height: min(72vh, 680px); border-radius: 9px; cursor: grab;
+        touch-action: none; background: #080a0e; }
+      #panoramaStatus { position: absolute; color: var(--muted); pointer-events: none; }
+
       /* The view bar sits above the controls rather than beside them: on a
          phone the two together would wrap into an unusable pile, and the views
          are the thing a client actually uses. */
@@ -170,6 +183,7 @@ const title = 'Walkthrough'
            unreachable. -->
       <span id="floors" hidden></span>
       <button id="fit">Overview</button>
+      <button id="panoramaToggle" hidden>View 360</button>
       <!-- Shown only when the device can actually present immersive VR — a flat
            browser must not offer a button that does nothing. -->
       <button id="viewVr" hidden>View in VR</button>
@@ -200,6 +214,22 @@ const title = 'Walkthrough'
       <h2>Models</h2>
       <ul id="creditList"></ul>
     </aside>
+
+    <div id="panoramaDialog" role="dialog" aria-modal="true" aria-labelledby="panoramaTitle" hidden>
+      <div id="panoramaPanel">
+        <div id="panoramaHead">
+          <div>
+            <strong id="panoramaTitle">360 panorama</strong>
+            <span>Drag to look around. Use the wheel to zoom.</span>
+          </div>
+          <button id="panoramaClose" type="button">Close</button>
+        </div>
+        <div style="position: relative; display: grid; place-items: center;">
+          <canvas id="panoramaCanvas" aria-label="Interactive 360 panorama"></canvas>
+          <span id="panoramaStatus">Loading panorama...</span>
+        </div>
+      </div>
+    </div>
 
     <form id="gate" hidden>
       <strong>This walkthrough is private</strong>
@@ -255,7 +285,7 @@ const title = 'Walkthrough'
     </script>
 
     <script>
-      import { SceneViewer, WalkController } from '@arcvia/viewer'
+      import { PanoramaViewer, SceneViewer, WalkController } from '@arcvia/viewer'
       import { mountConfigurator } from '../../lib/configurator'
 
 
@@ -323,6 +353,10 @@ const title = 'Walkthrough'
         walk: must('walk'),
         floors: must('floors'),
         fit: must('fit'),
+        panoramaToggle: must('panoramaToggle'),
+        panoramaDialog: must('panoramaDialog'),
+        panoramaClose: must('panoramaClose'),
+        panoramaStatus: must('panoramaStatus'),
         viewVr: must('viewVr'),
         credits: must('credits'),
         creditList: must('creditList'),
@@ -354,6 +388,52 @@ const title = 'Walkthrough'
       // optional would have made those guards look unnecessary.
       const absolute = (url: string) => (url.startsWith('/') ? api + url : url)
 
+      /** Add the public-page modal controls around the shared renderer. */
+      function createPanorama(src: string) {
+        const dialog = els.panoramaDialog
+        const canvas = must('panoramaCanvas') as HTMLCanvasElement
+        const status = els.panoramaStatus
+        const panorama = new PanoramaViewer({
+          canvas,
+          src,
+          onLoad: () => {
+            status.hidden = true
+          },
+          onError: () => {
+            status.textContent = 'The panorama could not be loaded.'
+          },
+        })
+        const close = () => {
+          dialog.hidden = true
+          els.panoramaToggle.setAttribute('aria-pressed', 'false')
+          els.panoramaToggle.focus()
+        }
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === 'Escape' && !dialog.hidden) close()
+        }
+        const onBackdrop = (event: Event) => {
+          if (event.target === dialog) close()
+        }
+
+        window.addEventListener('keydown', onKey)
+        els.panoramaClose.addEventListener('click', close)
+        dialog.addEventListener('click', onBackdrop)
+
+        return {
+          open() {
+            dialog.hidden = false
+            els.panoramaToggle.setAttribute('aria-pressed', 'true')
+            els.panoramaClose.focus()
+            panorama.resize()
+          },
+          dispose() {
+            window.removeEventListener('keydown', onKey)
+            els.panoramaClose.removeEventListener('click', close)
+            dialog.removeEventListener('click', onBackdrop)
+            panorama.dispose()
+          },
+        }
+      }
       /**
        * Ask for the access code and exchange it for the scene.
        *
@@ -509,6 +589,18 @@ const title = 'Walkthrough'
         }
 
         viewer.frameModel()
+
+        // A panorama is optional and intentionally lazy: do not download a
+        // 4096x2048 image unless the visitor asks to see it.
+        if (scene.panoramaUrl) {
+          let panorama: ReturnType<typeof createPanorama> | null = null
+          els.panoramaToggle.hidden = false
+          els.panoramaToggle.addEventListener('click', () => {
+            panorama ??= createPanorama(absolute(scene.panoramaUrl))
+            panorama.open()
+          })
+          window.addEventListener('beforeunload', () => panorama?.dispose(), { once: true })
+        }
 
         // ---- The configurator -----------------------------------------------
         // Finish switching, mounted only when the author composed options for

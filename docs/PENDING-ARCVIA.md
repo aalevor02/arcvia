@@ -218,13 +218,52 @@ on the tag; the flat `elements.*` stays the primary storey so every existing
 consumer keeps its shape), read through ONE iterator
 (`solve/storeys.py::element_blocks`) by all four consumers. Clearance and the
 code checks run per floor with findings tagged (two beds at the same (x, y)
-on different floors are NOT an overlap; egress runs only on the entry storey,
-with the others skipped in coverage saying "stairs are not modelled" — never
-silently). Openings re-host by index offset in the concatenated view, or
+on different floors are NOT an overlap; egress crosses floors only through
+explicitly named, registered-overlapping stair rooms and the real door graph,
+with unproven upper routes skipped in coverage rather than passed silently).
+Openings re-host by index offset in the concatenated view, or
 every upstairs door lands on a ground-floor wall. **On the villa the bill
 went from ₹957,376 to ₹1,985,270 — the old bill priced half the building.**
 `test/test_multistorey.py`, 17 assertions; the full engine suite is 531
 green.
+
+**2026-08-26 — physical stair geometry now covers straight and dog-leg/U
+layouts, with a conservative measured-riser fallback.** The named-room path is
+unchanged: registered footprints, ambiguity refusal, straight-first and a
+code-sized U fallback. When labels do not name a stair room, the second path
+requires paired regular lower riser runs, explicit `UP`, a measured landing
+edge, matching registered upper risers, upper `DOWN`, and exactly one evidence
+core. It triangulates partial floor/ceiling caps around the measured opening,
+records both the label refusal and the successful evidence source, and emits
+`floor_stair / assumed`. Focused geometry is 93/93 and all 23 reconstruction
+scripts are 874/874.
+
+The real `DOWN VILLA -WD 22-1-24.dxf` now emits a 9+9 dog-leg: 0.300 m going,
+1.169/1.153 m flight widths, 0.079 m gap, 1.200 m landing depth, and a measured
+3.900 x 2.400 m opening. Its mesh has 456 vertices / 228 triangles and joins
+-3.0 m to 0.0 m exactly. Blender 5.1 imported the full 143-mesh GLB and rendered
+the 1280x720 isometric without a frame warning after disabling OIDN to stay
+within host memory. This is still not full stair-detail recovery: opposing
+direction and tread solids are inferred, while riser spacing, widths, landing
+edge, and core position are measured. Winders, spirals, L/three-flight stairs,
+irregular wells, railings/guards, strings/soffits, headroom and structural
+design remain unbuilt. Human visual approval of the render remains pending
+until the in-app browser is usable; its current Windows sandbox fails with
+error 1344.
+
+**2026-08-26 — weekly construction-rate refresh is now genuinely scheduled and
+live-validated.** The Windows task existed but its first apparent success was
+false: `cmd.exe` misparsed UTF-8 comments, the relative log directory did not
+exist after `cd services/reconstruct`, Python never ran, and the wrapper still
+returned zero. `tools/refresh-rates.cmd` is now ASCII-safe, resolves the repo
+from its own path, logs beside the repository rate library, and returns Python's
+exit code. The first actual write found a separate freshness regression: three
+12 Aug timber rows were replaced from a 6 Aug page because their price movement
+was within `TRUST_BAND`. `quantify/refresh.py` now refuses a page date older than
+the row already stored, and the three rows were restored. The guarded scheduled
+rerun completed with Last Result 0: 28 confirmed, zero unreachable, 171 refused;
+the next run is Monday 31 Aug at 09:00. Rate/BOQ coverage is 96/96 and the full
+reconstruction suite is 874/874 across 24 scripts.
 
 ---
 
@@ -283,9 +322,10 @@ and verified by check_atlas's new layout mode incl. the UV-v/PNG-row flip;
 `99fc5bb`); multi-storey CAD furnishing reviews one storey per batch
 (`c38d830`); and the LATEST DRAWINGS frame bug was closed by frame
 ranking (`141fe0f`, aalev-c3). Still open and honestly research-grade,
-each worth its own session: the 6/18 unhosted villa doors and ~44%
-pairing (both are MISSING WALLS, not tolerances — no cheap fix exists),
-and the M5 review queue (`CadImport.tsx`), which is a full feature. The
+each worth its own session: the then-observed 6/18 unhosted villa doors and
+~44% pairing, plus the M5 review queue (`CadImport.tsx`). Current 2026-08-25
+evidence below supersedes those two villa figures; this paragraph is retained
+as history, not an open-defect claim. The
 two `TODO(you)` business decisions were put to the owner directly.
 
 **2026-08-24 (evening) — the deck's design now REACHES the walkthrough**
@@ -576,8 +616,10 @@ through, not the widest pocket an inscribed circle finds. Embedded in every
 `building.json` at build time (the clearance lesson: a report behind a
 separate CLI command is a finished producer with no consumer). Ventilation
 rule sits ready but skips loudly until the importer detects windows. Egress is
-reachability on the primary storey's door graph; stairs are not modelled, and
-a storey with no exterior door says so rather than guessing.
+reachability on each storey's real door graph, connected vertically only by
+explicitly named stair rooms whose registered footprints overlap. A missing or
+misaligned stair remains a coverage skip; this route check does not certify the
+inferred stair geometry, headroom, or dimensional compliance.
 
 ~~**Daylight factor** (6–8 d).~~ ✅ **DONE**, aalev-51, `4a8faec`.
 
@@ -870,9 +912,11 @@ undivided session.
 
 - **Black pockets in lit renders.** Six hypotheses eliminated with evidence —
   see `HANDOFF-POCHE.md` §3 and do not re-test any of them. Owned by aalev-f3.
-- **6 of 18 doors unhosted** on the villa. Not a tolerance problem: the gap
-  distribution is bimodal (hosted at 0.02 m, lost at 7–13 m). Those walls do not
-  exist in the model.
+- ~~**6 of 18 doors unhosted**~~ — **NO LONGER REPRODUCES** on the current
+  auto-layer, multi-storey pipeline. The 2026-08-25 real villa integration
+  reports `unassigned: 0`. Reconstruction now preserves the block, storey,
+  registered position, reason, and nearest-wall distance for every future
+  unhosted sized opening, so a regression is a repair target rather than a count.
 - ~~**`LATEST DRAWINGS` yields only small rooms**~~ — **FIXED `b7fd2da`, and it
   was never a frame problem.** It is recorded elsewhere as one; it is a **unit**
   problem. At the header's centimetres the sheet is 12.3 m across with 56 paired
@@ -885,20 +929,81 @@ undivided session.
   wrong.** Sheet now: 37 drawings instead of 1, rooms of 121 m² instead of
   eleven totalling 54.73, unframed linework 19% → 4%.
 
-- **Frame *selection* is still manual.** Splitting is solved; choosing the right
-  frame is not. `frames[0]` is whichever cluster has the most wall segments, and
-  on a 37-frame sheet that is a guess — worse, dense elevation linework outranks
-  a sparse floor plan, which is the same mistake layer selection already learned
-  to avoid ("optimise named rooms, not room count"). 3–5 d, aalev-35's lane.
-  Note the ranking key is load-bearing: on the villa the compound wall is 8
-  walls over 28 m and correctly ranks last *because* count is primary, so
-  ranking by area or length is not the fix.
-- **~44% wall pairing** on the villa. Some are genuinely single lines — railings,
-  jali, compound walls — but not all of them.
+- ~~**Frame selection is manual / `ALL PLANS` fuses several drawings.**~~
+  Fixed on the 2026-08-26 production path. Ranking now rejects a scope whose
+  walls segment into several drawings, rejects separated room islands and a
+  failed derived-envelope preflight, reserves shortlist capacity for compact
+  titled floor plans, and never lets an errored zero grade tie with a coherent
+  zero grade. `ALL PLANS` changed from the blocked 498-wall / 106-room fused
+  model to one `FIRST FLOOR PLAN`: 77 walls, 6 rooms / 5 named, 46.53 m²,
+  all four detected doors hosted, zero verifier warnings or blocks.
+  Reconstruction opens the DXF once and shares that document between reading,
+  blocks, and furniture. It now uses strict read + audit for a sound DXF and
+  falls back to full recovery on structural or remaining audit errors. The
+  unprofiled `PLANS_FOR_3D` A/B fell from 15.572 s with forced recovery to
+  9.091 s (41.6%), with identical walls, rooms, area, openings, layers, frame,
+  and ranking. `ALL PLANS` fell from 273.42 s to 174.90 s (36.0%) with the
+  same clean 77-wall / 6-room result. Four-thread candidate fitting helped the
+  small sheet by 7.6% but regressed `ALL PLANS` to 279.97 s, so it was
+  measured and reverted. Candidate preflight now rejects enclosing/fused
+  frames, semantic non-wall layers, and large unknown layers (over 400
+  segments) unless their scan verdict is `WALLS` with at least 10% paired-wall
+  coverage. Explicit wall layers and small partition supplements remain
+  eligible, and `pairedFraction` is exposed in the scan report.
 
-- **`solve/layerscan.py` picks the wrong layers for the villa's ground floor**,
-  and its own objective disagrees with its own outcome. Found 2026-08-22,
-  measured, unfixed. On frame 1 (`Ground Floor Plan`, bbox
+  Measured direct-reconstruction results: `PLANS_FOR_3D` is 8.545 s versus
+  15.491 s same-code control with the exact current 106-wall / 28-room /
+  105.61 m2 model preserved; `ALL PLANS` is 110.09 s versus the 174.90 s
+  fast-loader baseline, with an exact same-code semantic-filter control;
+  `LATEST DRAWINGS` now finishes in 240.06 s (75 walls, 12 rooms, 78.58 m2,
+  six openings); and `SITE PLAN FOR 3D` now finishes in 646.84 s (1,453 walls,
+  179 rooms, 3,355.23 m2) without `ESMajor`. All three dense files previously
+  exceeded 15 minutes where noted. `SITE PLAN WITH GARDEN LEVELS` finishes in
+  5.67 s filtered (8 walls, no rooms, `A1 WALLS|Wall`) while the same-code
+  control with only the large-unknown threshold disabled still exceeded 15
+  minutes. That last result is a performance finding only: semantic equivalence
+  is not claimed because the control did not complete.
+
+  Visual QA rejects both newly completed site models as corpus truth. The
+  `SITE PLAN FOR 3D` raster shows the actual villa cluster occupying a small
+  central region while a 577.13 m unpaired `A1 WALLS` diagonal and large
+  layer-`0` rectangles dominate the 833.28 m selected scope. Verification is
+  correctly blocking (plan span and zero openings), also warning that the
+  envelope covers only 5% and rooms split into separate groups. The garden
+  result is only two tiny fragments: 8 walls / 0 rooms across 3.72 m at the
+  header's 0.01 scale despite 252 room labels, and verification correctly
+  blocks `rooms-from-labels`. Do not accept either model's quantities. Next
+  treat the full site sheet as a site containing individual buildings rather
+  than weakening building gates.
+
+  The garden unit diagnosis is now actionable. Its wall scorer prefers metres
+  (13 paired walls) over feet (5), but the 2.6x margin correctly remains below
+  the 3x automatic-decision threshold. When labels exist but zero rooms close,
+  the blocking finding now names that unresolved metre candidate before asking
+  for layer review. An explicit metre control completes in 16.06 s as a 32.76 m
+  plan with 142 walls, 20 rooms / 16 named, and 122.98 m2. It is still not an
+  accepted model: no openings are hosted, wall run is high, envelope coverage
+  is 84%, and rooms split into two groups. Preserve the human unit choice; do
+  not lower the global confidence threshold for this one file.
+
+- ~~**CLI enclosure retry can replace a correct measured-unit model.**~~ Fixed
+  with an acceptance guard: an enclosure retry may replace a blocked build only
+  when its scale is unchanged and its enclosed-room and named-room evidence do
+  not regress. The real `PLANS_FOR_3D` CLI path now retains measured metres and
+  the 106-wall / 28-room model instead of substituting the header-mm, `tx`-only
+  4-wall / 1-room retry. Its original verification findings remain visible.
+- ~~**~44% wall pairing / 3.48 m/m² wall run.**~~ Fixed on the real villa.
+  Per-layer attribution showed generic layer `0` bought one extra named room
+  with 137 walls, while `A6 SANITARY WARE` entered only through the broad
+  fallback. Automatic selection now rejects disproportionate wall growth and
+  admits fallback layers only when their semantic class is wall/other. Current
+  result: 104/148 paired (70.3%), 21 rooms / 14 named, 260.09 m², wall run
+  1.263 m/m², all four openings hosted, zero verification warnings.
+
+- ~~**`solve/layerscan.py` picks the wrong layers for the villa's ground
+  floor.**~~ Found 2026-08-22 and now fixed in two stages: shared perimeter
+  basis, then proportionate evidence growth plus semantic fallback filtering.
+  On frame 1 (`Ground Floor Plan`, bbox
   `90.63,299.94 .. 111.44,315.04`):
 
   | layers | rooms | named | largest |
@@ -1212,3 +1317,578 @@ enclosure, and accepted three snapped windows; a one-crop cap cannot cover all
 five owner-annotated defect groups. The prompt now distinguishes carpet pile
 from plank seams/grain, but no second live call was spent. Full evidence and the
 next bounded comparison are in `docs/OPENAI-VISION-EVAL-2026-08-25.md`.
+
+**2026-08-25 — 360 panorama delivery is built; browser smoke remains blocked.**
+The API now exposes an 8-credit `panorama` preset at 4096×2048, 64 samples, and
+equirectangular projection; the worker maps it to Blender's `PANO` /
+`EQUIRECTANGULAR` camera and the heavy queue lane. Studio persists completed
+output as `scene.panoramaUrl`, restores it independently of transient still
+output, previews it with drag/zoom, and can clear it. The public walkthrough
+loads the panorama lazily, withholds it until protected scenes are unlocked,
+and loses **View 360** when the panorama is removed. Both clients use the shared
+Three.js `PanoramaViewer`, including resize and disposal handling.
+
+Verification passed: pricing 23/23; isolated panorama API render 28/28; queue
+lanes 10/10; scene patch 35/35; access-code integration 26/26; Studio strict
+TypeScript and production build; web Astro check and production build; and
+`git diff --check` apart from line-ending notices. A real colour-coded GLB also
+rendered through Blender 5.1 on CPU at 512×256 and one sample, with a 0.58 mean
+RGB seam difference and distinct red, green, and blue regions. This does not
+claim a production-size 4096×2048 64-sample run. The required browser runtime
+was retried after the Codex restart and still exited before launch with
+`SetTokenInformation(TokenDefaultDacl) failed: 1344`; no browser interaction
+claim is made.
+
+**2026-08-25 — CAD verifier findings now reach an explicit Studio review.**
+Successful reconstruction jobs already exposed the gate's structured
+`verifyChecks`, but `ImportPanel` discarded them and landed in the editor
+immediately. The API contract is now typed and warning-bearing jobs pause on a
+review surface that shows the exact finding messages and model facts. The
+reviewer must choose **Use reconstruction**, try another file, or close; passed
+informational measurements remain available without interrupting clean jobs.
+This is deliberately a first M5 slice, not a claim that solver choices,
+re-solve, or persistent `ModelPatch` replay exist.
+
+Validation passed: focused review logic 7/7, Studio strict TypeScript, the full
+Studio suite, and the Studio production build. A real villa DXF ran end to end
+through one isolated non-watch API process: 43/43 assertions passed, including
+seven delivered verification checks and a warning count of one. The temporary
+API used its own database and upload directory, then stopped and removed them.
+
+A later current-path villa run closed those stale backlog claims. It hosts all
+detected openings (`unassigned: 0`) and pairs 104/148 walls (70.3%). Per-layer
+attribution and proportionate evidence scoring removed generic layer `0` and
+`A6 SANITARY WARE`; wall run is now 1.263 m/m², inside the 0.6–1.6 band, with
+zero verifier warnings. Reconstruction retains exact
+block/storey/position/nearest-wall evidence for every future unhosted sized
+opening, and the API/Studio review surface exposes those targets. Focused
+reconstruction tests pass 153/153; frame-ranking tests pass 24/24; the real API
+seam passes 49/49.
+
+**2026-08-26 — a site sheet now names its buildings, and a rejected build can
+no longer publish itself as a clean pass.**
+
+Two things, and the second was found while trying to get evidence for the first.
+
+*The artefact bug.* `cli.py` re-seeds layers and runs a SECOND reconstruct when
+a build blocks, then asks `enclosure_retry_improves()` which to keep. The guard
+was correct and refused the bad retry. It was defeated anyway, because
+`reconstruct()` writes `<stem>.building.json` and `<stem>.glb` as its final act
+and both builds wrote to the same `--out`: the rejected retry overwrote the
+accepted model before the guard was ever consulted. Measured on
+`PLANS_FOR_3D`: the console printed 106 walls / 28 rooms / BLOCKED while the
+file on disk held 4 walls / 1 room / 2.49 m2 and `"ok": true`. A **rejected
+build published as a clean pass** — and `services/api/src/lib/cadEngine.js`
+reads the model from disk and never sees stdout, so the worse the drawing, the
+tidier the model it shipped to a viewer. Its own docstring calls that outcome
+worse than failing. A trial build now goes to `work/enclosure-retry` and only a
+decision promotes it (`promote_build`); a refused retry now says so instead of
+vanishing. The tell, for anyone auditing a similar guard, was a MISSING key:
+`layerRetry` was absent from the on-disk model, which proved the file had been
+written by the retry itself rather than by the accepted path. When a guard
+chooses between two artefacts, check where each one was WRITTEN, not only which
+one the code returns.
+
+*The site sheet.* `solve/site.py` separates the buildings on a site, which is
+the third scale of separation in this engine and needed its own criterion.
+`solve/frames.py` separates the DRAWINGS on a sheet by emptiness, and it is
+right to return one frame for a site — roads, plot lines and the compound wall
+run continuously between the villas, so there is no channel to find.
+`quantify/dwellings.py` separates the DWELLINGS in a building by the door
+graph, and it starts from the grouping being asked for here. The new criterion
+is topological: **the rooms of one building tile, so they share bounding
+walls; two villas on a plot share none.** `Space.bounded_by` already carries
+it, so there is no distance in the rule and nothing to tune — which matters,
+because `frames.py` records at length how no single gutter value can both keep
+a plan whole and separate two plans.
+
+Measured. Four real drawings that verify cleanly today — `PLANS_FOR_3D`,
+`DOWN VILLA` and two client uploads — each return exactly **one** building, so
+the check cannot fire on a model the engine already accepts. `SITE PLAN FOR 3D`
+returns **six**: 82 rooms / 1,615.15 m2, 69 / 954.93, 23 / 598.73, then a
+2-room 180.36 m2 group spanning 77.60 m and two fragments of 5.10 and 0.92 m2.
+582 walls totalling 3,503.8 m bound no room at all and are reported as site
+linework rather than billed to the nearest villa. Room area totals 3,355.2 m2,
+matching the figure the previous session measured, so this reads the same model.
+
+The fragments are deliberately NOT filtered out. A "minimum plausible building"
+threshold is exactly the kind of constant this criterion exists to avoid, and
+the span and area columns let a reviewer see that the 77.60 m two-room group is
+an artefact. Before this, the operator's entire report on that sheet was
+`plan-span: 833.28 m — not a building`.
+
+`verify.check()` grades it: `site-scope` BLOCKS at two or more buildings,
+naming each one and how to escape, and reports INFO on a single building
+including the length of linework that bounds nothing — a villa's few stray
+metres growing into thousands is the earliest sign a scope has stopped being
+one building. `--building N` rebuilds one, and it narrows the WALL list and
+re-solves rather than filtering rooms, so the openings, fixtures, perimeter,
+meshes and bill all follow; the wall statistics are recomputed after narrowing,
+because they were first computed against the whole frame and would otherwise
+have priced the site's 106 walls against one building's 102. `--building`
+refuses a multi-storey stack outright: the numbering is per frame, so index 2
+downstairs need not be index 2 upstairs, and a silent mismatch stacks one
+villa's ground floor under another's first floor and renders plausibly.
+
+`model.site` is always the primary storey's answer, carrying the rest under
+`storeys` when there is more than one — the shape rule `elements.*` follows.
+
+Verification: `test/test_site.py` 48/48 new; the full reconstruction suite is
+841 assertions across 23 scripts, all green, up from 785/22. The multi-storey
+refusal and the `--building 0` narrowing were both exercised on real drawings.
+
+Visual QA was then run on the result, and it settles what building #0 is.
+Rendered from the model's own geometry, #0 is a ROW OF REPEATED VILLA UNITS,
+not one villa: three `TYPE - C` units along the top and four `TYPE - D` along
+the bottom, each with its own `STILT` and `U.GR.FL.`. The room-name census says
+the same thing without the picture — `STILT` x7, `TYPE - D` x4, `U.GR.FL.` x4,
+`TYPE - C` x3 — and "TYPE C/D" are the developer's villa-type designations.
+
+That is the criterion behaving CORRECTLY, not failing. The units are genuinely
+wall-connected: dropping every room over 90 m2 from #0 still leaves ONE
+component, and dropping everything over 45 m2 leaves two, so the row is not
+bridged by a few spurious site-linework enclosures that could be filtered away.
+A terrace sharing party walls is one structure, which is exactly what
+`solve/site.py` says it will report, and separating the individual dwellings
+inside it is `quantify/dwellings.py`'s job, by door graph.
+
+The zero-openings blocker was then chased to its root, and the answer is NOT
+the one it looked like. It is not missing opening recovery.
+
+The sheet does carry doors: 15 `D750` block placements plus 45 `WINDOW1` lines,
+on layers `door` / `WINDOW1`, and `_width_from_name('D750')` already reads 0.75
+correctly. They are read into `placements` too — the block reader returns all
+15. What stops them is `_blocks_in`, the frame's position filter: the doors sit
+at x 2690-2693, and the SELECTED FRAME spans x 1010-1844. **Zero of the 15 fall
+inside it.** The emitter never sees them, which is why the model shows neither
+an opening nor a refusal — `openingIssues` is 0, and a hosting failure would
+have recorded 15.
+
+The sheet holds **29 frames**. Ranking picked #0, `REVISED SITE PLAN` — 471
+walls, 833.28 m, the wall-count leader — and that frame is a SITE LAYOUT. A
+site layout has no doors by nature; it depicts villa footprints, stilts and
+types. The doors live on the villa DETAIL drawings elsewhere on the same sheet,
+and frame **#2** (162 walls, 61.09 m, bbox 2646.6,209.6 .. 2707.7,269.3) is the
+one that contains them.
+
+So `openings-present` blocking on frame #0 is CORRECT, not a gap, and the
+earlier reading of this as missing opening recovery was wrong. What the sheet
+needs is the right FRAME, not a new emitter. That also revises the terrace
+finding above: building #0 is the site layout's depiction of a villa row, which
+is why it has `TYPE - C` / `TYPE - D` / `STILT` labels and no doors at all.
+
+Worth carrying forward as a rule: on a multi-drawing sheet, "no openings" is
+evidence about WHICH FRAME was chosen at least as often as it is evidence about
+opening detection. The frame's own bbox against the door blocks' coordinates
+settles it in one comparison.
+
+Two documentation defects found on the way, both in `hypothesise/openings.py`:
+its docstring advertises **two** emitters, SIZED BLOCKS and OPENING LAYERS, and
+says both read what the drawing already says. There is no opening-layer emitter
+anywhere in the codebase — no function, no call site, nothing referencing one —
+and the second emitter that DOES exist, `from_text_labels`, is not in that list.
+A reader following the docstring concludes that a drawing which draws its
+openings on a door layer is handled. It is not. `WINDOW1`'s 45 lines on this
+sheet are exactly that case.
+
+`--building 0` is nonetheless a large step on the real sheet: 1,453 walls / 179
+rooms / 833.28 m span / 2 blocking + 3 warnings becomes 386 walls / 82 rooms /
+50.39 m span / 1 blocking + 0 warnings, with 0.0 m of linework bounding no
+room. `plan-span`, `envelope-coverage` at 5%, `one-building` and `room-size`
+all clear; only `openings-present` remains.
+
+Building frame #2 then proved the diagnosis and caught a false positive in the
+new check at the same time. That frame yields **15 hosted doors**, `unassigned:
+0`, all `blockSized` — `openings-present` clears, exactly as the coordinate
+comparison predicted. But it also segments into 13 components, and 12 of them
+are the SAME stamped rectangle: one room, four walls, unnamed, 1.78-2.00 m2,
+3.33 m across. The check as first written blocked a real drawing because a
+symbol repeats twelve times.
+
+The gate now counts only components carrying at least one NAMED room. The
+discriminator is the drawing's own labelling rather than a size floor, for the
+reason `frames.py` argues at length and `layerscan.py` states as a rule —
+optimise named rooms, not room count. A magnitude threshold could not have done
+it anyway: 3.33 m already clears `PLAUSIBLE_SPAN`'s floor of 3.0 m. It fails in
+the safe direction, since an unnamed genuine second building becomes a false
+negative rather than a wrongly blocked model, and every component is still
+listed in `model.site.buildings`. The discounted fragments are named in the
+finding itself — a check that silently drops what it chose not to count teaches
+its reader that nothing was there.
+
+Current behaviour on the three measured cases: frame 0 BLOCKS with 3 buildings
+(the named clusters, 19 / 12 / 4 named rooms); frame 2 passes as one building
+and reports 12 discounted fragments; the known-good villa is unchanged.
+
+Not claimed: a per-villa quantity from this sheet. #0's 1,615.15 m2 is a
+terrace of roughly seven units and must not be quoted as a villa. Nothing in
+Studio or the API surfaces `--building` yet; this slice ends at the engine.
+
+**2026-08-26 (later) — the opening-layer emitter exists now, and the sheet's
+remaining windows are a MISSING WALL, not a threshold.**
+
+`hypothesise/openings.py` advertised two emitters, SIZED BLOCKS and OPENING
+LAYERS, and said both read what the drawing says. There was no opening-layer
+emitter anywhere in the codebase, and the second one that did exist,
+`from_text_labels`, was not in the list. `from_opening_layers` now exists and
+the docstring describes the three that are really there.
+
+It projects each segment onto the wall it hosts on and merges the overlapping
+along-ranges. The wall does the clustering, so there is no "how close is close"
+constant — and two windows on opposite faces of one 0.23 m partition stay two,
+where any proximity rule loose enough to join a single window's own lines joins
+those as well. Hosting is orientation-aware (`host_along`): parallelism filters
+the candidate walls rather than grading the winner, because a segment's
+direction is evidence about which wall it belongs to and `host()` — correctly,
+for a block, which is a point — cannot use it.
+
+Measured, on drawings that already worked:
+
+  * `DOWN VILLA`, the model that verifies clean, is BYTE-IDENTICAL: 149 walls,
+    25 rooms, 4 openings, all `blockSized`, zero issues, zero warnings. The new
+    emitter adds nothing to it.
+  * `PLANS_FOR_3D` goes from BLOCKED with zero openings to PASS with four
+    hosted doors at 0.97 / 1.00 / 1.00 / 2.30 m. Its sparseness is not hidden:
+    `clearance` reports 14 rooms with no door and a new `openings-hosted`
+    warning says 3 of 7 could not be placed.
+  * `SITE PLAN FOR 3D` frame 2: 33 openings — 15 doors from blocks, 18 windows
+    from `WINDOW1` — and PASS with 4 warnings.
+
+**A correction worth recording, because the reasoning failed in a way that
+looked like evidence.** The width split on frame 2 is 13 windows of 0.60 m and
+5 of 2.00 m. That was read as a defect against an assumed truth of "15 windows
+of 2.00 m", and a cause was proposed — `host()` picking a perpendicular wall,
+against which a tick looks like a glazing line. The fix was written and it
+changed nothing: the split was identical afterwards.
+
+Instrumenting all 45 segments individually gave the real picture, and it is not
+the one that was assumed:
+
+  * all 15 of the 0.60 m lines HOST successfully, running along a wall. They
+    are not cross-ticks. The tick story came from reading one sample row of
+    2.00 m lines and inferring the rest;
+  * 15 of the 30 2.00 m lines host cleanly at 2.00 m;
+  * the other 15 are refused, and their NEAREST wall of any orientation is
+    0.93-1.01 m away.
+
+So the emitter's orientation handling was never the problem, and the assumed
+truth was never measured. The refusals are correct: a window symbol one metre
+from the nearest reconstructed wall does not have a wall to sit in. That is the
+same finding this project has recorded before about unhosted doors — the wall
+does not exist in the model — and it is a wall-detection gap, not a tolerance.
+
+**Do not raise `HOST_RADIUS` to 1.05 to collect them.** It would host five
+windows onto a wall a metre away, which is a wrong answer that verifies clean,
+and it would be a constant fitted to one drawing.
+
+The orientation-aware hosting was kept. It is defensible on its own terms and
+regressed nothing, but it fixed a problem that was never demonstrated to exist,
+and it is recorded that way rather than as the fix it was written as.
+
+Verification: `test/test_opening_layers.py` 32 new; `test/test_site.py` 48;
+the full suite is 877 assertions across 24 scripts, all green.
+
+**2026-08-26 (later still) — two defects in the new emitter, found by running
+it rather than by reading it, and a correction to the entry above.**
+
+*The villa result stated above is superseded.* `PLANS_FOR_3D` was recorded as
+going from BLOCKED to PASS with four hosted doors. It now recovers THREE doors
+and is still BLOCKED, and that is the better answer. One of the four was a
+0.9712 m door hosted on a 0.9602 m wall — an opening 11 mm WIDER than the wall
+it was cut into, which is not a thing that can be built. `from_sized_blocks`
+has always refused this shape (`wall.length < width + 2 * END_MARGIN`) and the
+new emitter did not; it does now, using the sibling's rule rather than a looser
+one invented for the occasion. Dropping it moves `openings-hosted` from "3 of
+7" to "3 of 6", which crosses into blocking.
+
+So the net for that drawing across the day is: still blocked, but for an honest
+reason (half its opening linework has no wall to sit on) instead of a false one
+(no openings at all), and with three real doors recovered. `DOWN VILLA` is
+unchanged throughout — 149 walls, 25 rooms, 4 blockSized openings, zero
+blocking, zero warnings.
+
+*The crash.* Adding that guard ended a villa build with `KeyError: 'position'`.
+`cli.py` copies `issue["position"]` into `registeredPosition` for every opening
+issue, unguarded, and the two refusals raised against a MERGED run have no
+single segment to point at. Both halves are fixed: every refusal this module
+raises now carries a position — including the ambiguous-layer one, which is why
+the segment midpoint is computed before the kind test rather than after — and
+`cli.py` reads it with `.get`. The second half matters more than the first. This
+is the review payload for ADVISORY findings, and an advisory that cannot be
+displayed must not end a build that had already reconstructed a building. It is
+the same rule the clearance and codecheck blocks a few lines below already
+follow, and it was the one place that did not.
+
+*Why the frame-2 windows are still refused, precisely.* Instrumenting a single
+refused segment against both the raw DXF and the model settles it. The window
+runs x=2690.13 from y=237.95 to y=239.95. The raw `Wall` linework has a stub
+ENDING at y=237.95 and another STARTING at y=239.95, collinear with it and
+touching both endpoints exactly. **The window is the gap in the wall run.**
+
+There is therefore no wall at the opening's midpoint, by construction — and
+`host()` and `host_along()` both host by midpoint. It is not a radius problem,
+not a missing wall, and not a length filter: the flanking stubs are 0.52 m and
+0.75 m, both well over `MIN_LENGTH = 0.35`. The wall is present and
+interrupted, which is exactly the shape `_gap_candidate` already bridges for
+TEXT labels — that machinery simply is not reachable from linework.
+
+Bridging two collinear walls across a labelled gap is the fix, and it belongs
+in wall joining rather than in an emitter. It is not attempted here: it changes
+geometry every other stage consumes, and it deserves its own session with the
+pairing tests in front of it.
+
+Verification: `test/test_opening_layers.py` 35; the full suite is 880
+assertions across 24 scripts, all green.
+
+**2026-08-26 (last) — a wall gap that an opening's own linework sits in is now
+bridged, and it closes rooms as well as openings.**
+
+`bridge_opening_runs` closes the shape diagnosed above: an opening drawn AS the
+gap in a wall run, with no wall at its own midpoint for any host test to find.
+It reuses `_gap_candidate` — the machinery `from_text_labels` already relies on
+— by passing the run's own midpoint as a stand-in label. The evidence is at
+least as good as a text label's: a `D750` written beside a gap says an opening
+is there, and a 2 m window run drawn IN the gap says it with geometry.
+
+It runs BEFORE `detect_spaces`, beside the labelled-gap bridge, and that
+placement is the load-bearing decision rather than a detail. Bridging changes
+geometry, and the rooms, the wall statistics and the bill all read that
+geometry afterwards. Doing it inside the emitter — where it would have been
+convenient, since that is where the runs are already gathered — would leave the
+rooms solved against a wall run that no longer exists, and every artefact would
+look correct on its own.
+
+Measured on `SITE PLAN FOR 3D` frame 2, four bridges made:
+
+  | | before | after |
+  |---|---|---|
+  | walls | 658 | 651 |
+  | rooms | 135 | **139** |
+  | unhosted openings | 15 | **3** |
+  | window widths | 13 x 0.60, 5 x 2.00 | **9 x 0.60, 9 x 2.00** |
+  | verdict | PASS, 4 warnings | PASS, 4 warnings |
+
+The room count is the result worth noticing. Bridging was built to host
+openings, and closing those gaps also closed FOUR MORE ROOMS — which is the
+whole reason it had to run before room detection rather than after.
+
+Not a complete recovery, and it should not be read as one. The sheet draws 15
+window symbols; nine now measure 2.00 m where four did before, and nine 0.60 m
+readings remain. Three openings are still unhosted.
+
+Guards, because a bridge merges two walls the drawing drew apart:
+
+  * the gap must match the run's own length within one wall thickness — a run
+    is drawn on a FACE and the gap is measured between CENTRELINES, 2.00
+    against 2.115 on the real case. Without it a 0.60 m ventilator closes a 2 m
+    doorway elsewhere and reports it as its own;
+  * a run whose wall is intact never bridges;
+  * every bridge is recorded in `model.openingBridges` — always present, so
+    "none were made" and "never attempted" stay different states. A reviewer
+    looking at a wall that is not in the drawing can find out why it is there.
+
+Cost is not a concern: 15 runs against 658 walls is 0.06 s, because once a gap
+closes the remaining runs host on the merged wall and never search.
+
+Regression: `DOWN VILLA` is unchanged — 149 walls, 25 rooms, 4 blockSized
+openings, zero blocking, zero warnings, `openingBridges: []`. `PLANS_FOR_3D` is
+unchanged at 106 walls / 28 rooms / 3 doors.
+
+Verification: `test/test_opening_layers.py` 48; the full suite is 893
+assertions across 24 scripts, all green.
+
+**2026-08-26 (closing) — the 0.60 m windows are REAL, and the guess about them
+was wrong three times.**
+
+The frame-2 result was left with an open doubt: nine window readings of 0.60 m
+whose provenance nobody could account for. They were described first as
+cross-ticks through an opening, then as a symbol artefact, then as unexplained.
+All three readings were wrong, and each was an inference from a length
+histogram rather than a look at the geometry.
+
+Drawing the raw linework settles it. A 0.60 m reading is TWO horizontal
+`WINDOW1` lines 0.115 m apart — y=224.30 and y=224.41, spanning x 2690.76 to
+2691.36 — which is one wall thickness, i.e. the two FACES of a wall. That is
+the identical construction to a 2.00 m window; the only difference is that it
+sits in a horizontal wall rather than a vertical one. The rendered crop shows
+the pair, the `W0.60` opening correctly placed on the wall beneath them, and
+two `D0.75` doors either side.
+
+So the emitter is reading them correctly and they are small windows or
+ventilators. Nothing needs fixing here.
+
+The 2.00 m symbol was also mis-described earlier as "two glazing lines plus a
+0.60 m cross tick". It is THREE parallel 2.00 m lines — two faces and a centre
+line — and there is no tick anywhere in the symbol.
+
+Expected against measured, from the raw counts: 15 lines of 0.60 pair into
+roughly 7 windows and 30 lines of 2.00 triple into 10, so about 17 in total.
+The build reports 9 and 9, which is 18. Slightly over on the small ones and one
+short on the large ones, and close enough that the remaining difference is
+merge behaviour rather than a misread symbol.
+
+The lesson is the one that keeps recurring in this file, in a new costume: a
+length histogram is not geometry. Three separate stories were told about these
+lines from their LENGTHS alone, all three were plausible, and all three were
+wrong. Drawing them took one render and settled it. Nothing was ever filtered
+on the strength of those wrong stories, which is the only reason the real data
+survived to be looked at.
+
+**2026-08-26 (frame choice) — a fallback frame now says it is a fallback.**
+
+The day's largest time sink was diagnosed backwards twice before the ranking
+trace was read, so the trace is worth quoting. On `SITE PLAN FOR 3D`:
+
+    frame 0 REVISED SITE PLAN  error: scope contains 3 independently framed drawings
+    frame 1 (untitled)         error: reconstructed rooms split across a 5.83 m gap
+    frame 2 (untitled)         error: reconstructed rooms split across a 10.82 m gap
+    frame 3 (untitled)         error: preflight envelope-coverage ...
+    picked: 0   promoted: false
+
+EVERY candidate errored. `best_eligible_graded_index` then returned the
+wall-count incumbent, which is its documented behaviour and the right
+conservative move — a broken grade is no basis for promoting anything over
+anything else.
+
+The consequence is what nobody could see. The incumbent is the 833 m
+`REVISED SITE PLAN`, a SITE LAYOUT, which has no doors by nature and blocks on
+two checks. Frame 2 was rejected for the mildest of the four reasons and builds
+a model that PASSES with 15 hosted doors, 139 rooms and zero blocking findings.
+The fallback picked a blocking model over a passing one, and reported it the
+same way it reports a decision.
+
+`fallback_frame_note` now states it: "NO candidate graded cleanly, so this
+frame is the wall-count fallback rather than a choice — the others were
+considered and rejected: --frame 1 (...): reconstructed rooms split across a
+5.83 m gap; --frame 2 (...): ...". It reaches the console through the existing
+`framingNote`, naming each rejected frame as a flag the operator can type.
+
+**It deliberately does not re-rank.** Choosing between four broken grades needs
+a severity order; that order would be invented here rather than measured, and
+the rejected candidate is not reliably the better one — on this sheet it was,
+on the next sheet it need not be. The operator settles it in one build with
+`--frame N`, and now knows there is something to settle.
+
+The silence case is tested as carefully as the firing case: a single clean
+grade must silence it entirely, or every ordinary build grows a warning nobody
+reads and the real one is lost in the noise.
+
+Still open, and larger than a note: nothing in frame ranking knows that a SITE
+LAYOUT and a CONSTRUCTION PLAN are different kinds of drawing. The title said
+"REVISED SITE PLAN" the whole time. Ranking grades on what a scope reconstructs
+into — walls, rooms, named rooms — and a site layout scores respectably on all
+three while being the wrong artefact to build. That is a real gap and it is not
+addressed here.
+
+**2026-08-26 (title) — `openings-present` now explains itself on a site layout.**
+
+The entry above left this open: nothing in the engine knew that a SITE LAYOUT
+and a CONSTRUCTION PLAN are different kinds of drawing, while the title read
+`REVISED SITE PLAN` throughout the day it cost.
+
+`verify.is_site_layout_title` now reads it. When `openings-present` fires on a
+frame whose own title says site/master/layout/key/location plan, the finding
+adds: the frame is a site layout, not a construction plan; a site layout
+carries no doors by nature; so this is about which frame was built rather than
+about opening detection, and the framing note lists the candidates.
+
+Three things it deliberately does NOT do:
+
+  * it does not change the finding's LEVEL. `openings-present` still blocks. A
+    gate that explains itself is not a weakened gate;
+  * it does not touch frame ranking. Demoting a frame for its title would
+    change frame selection across the whole corpus on the strength of one
+    sheet, and a title is evidence rather than an answer — the rule walls and
+    plan titles already follow here;
+  * it does not guess from the word "plan". The qualifier carries the meaning:
+    `GROUND FLOOR PLAN` and `SITE PLAN` differ only in what precedes it, and
+    `BLOCK - A FINAL CONCEPT PLANS` is a real corpus title that must not match.
+    All three are pinned by test.
+
+Verification: `test/test_framerank.py` 37, including the five title cases and
+the eight fallback-note cases; the full suite is 901 assertions across 24
+scripts, all green.
+
+**2026-08-27 — `--building` now reaches the API, and the browser runtime is
+unblocked.**
+
+The engine's building selector ended at the CLI. It now runs the whole way:
+`cadEngine.reconstruct` takes `building`, `renderQueue` passes it from the job
+spec, and `POST /cad/jobs` accepts it.
+
+Two details that are the actual work rather than the plumbing:
+
+  * **It is in the idempotency fingerprint.** That route's own comment says the
+    fingerprint covers every input that changes the output, and `building` is
+    the easiest one to leave out, because every other field is identical
+    between the two requests — same drawing, same layers, same frame, same
+    height. Omitted, asking for building 1 after building 0 would deduplicate
+    against it and hand the reviewer the WRONG VILLA together with a cheerful
+    "not charged again". Five assertions pin both directions: two different
+    buildings are two jobs, the same building twice is one.
+  * **A building pick suppresses `--storeys`.** The engine REFUSES the pair,
+    because the numbering is per frame and index 2 downstairs need not be index
+    2 upstairs; the API sends `--storeys` by default, so passing both would
+    fail the job instead of honouring the request. The narrower intent wins and
+    the reason travels to the caller through `onProgress`.
+
+Studio deliberately NOT wired. `submitCadJob` sends `{ key }` and nothing else
+— no frame, no unit, no layers — so the Studio has never exposed a
+reconstruction setting, and adding this one alone would be incoherent. The
+surface that lets a reviewer read `site.buildings` and choose is the M5 review
+queue, and it belongs there.
+
+Verification: the full API suite is 472 assertions across 32 files, all green,
+run against a live server on 8787 with its own data directory, which was then
+stopped and removed. `cad.mjs` alone is 54.
+
+**A silent skip worth knowing about.** Run with no server up, `test/cad.mjs`
+prints "0 passed, 0 failed" and exits 0. So does `cad-cancel.mjs`. A suite that
+reports zero assertions and succeeds is indistinguishable at a glance from one
+that ran — this was nearly read as "the CAD tests pass" before the server was
+started and the same file reported 49. Not fixed here; recorded, because the
+same shape has been found three times in this project already.
+
+**The browser runtime is no longer blocked.** `SetTokenInformation
+(TokenDefaultDacl) failed: 1344` no longer reproduces — a tab group opens. The
+three items gated on it (the 360 panorama flow end to end, the live post-edit
+render comparison, and human visual approval of the stairs) are now runnable.
+None of them were run here; only the gate was tested.
+
+**2026-08-27 — the silent skip is fixed, and the browser stack is verified as
+far as the sign-in wall.**
+
+*The skip.* `test/cad.mjs` and `test/cad-cancel.mjs` both bailed on one failed
+health fetch, and that collapsed two different answers into one. With no server
+running they printed "0 passed, 0 failed" and exited 0 — indistinguishable at a
+glance from a suite that ran, and nearly read that way here before a server was
+started and the same file reported 54.
+
+They are now told apart, because only one of them is a skip:
+
+    no response at all   -> the HARNESS is wrong. Nobody started the server, so
+                            nothing was tested. Exit 1, and name the command
+                            that starts one.
+    a reply saying the
+    engine is missing    -> a real skip. The Python engine is a separate
+                            install. Exit 0, loudly.
+
+Both directions verified: with no server the two files now exit 1 with
+"0 passed, 1 failed (nothing was tested)"; with a server they are 54 and 5.
+
+*The browser.* The runtime that failed with `SetTokenInformation
+(TokenDefaultDacl) failed: 1344` throughout the previous sessions now works. A
+tab group opens, the built Studio serves from `vite preview` on 5173, loads
+against a live API on 8787, renders its project list, and correctly reports
+`Session expired. Sign in again.` for a token that predates the fresh data
+directory. The console is clean — no errors and no warnings on load.
+
+**That is as far as this can go without the owner.** Everything past that
+screen is behind authentication, and entering a password or creating an account
+through the browser is not something this assistant does. The three items
+gated on the browser — the 360 panorama flow end to end, the live post-edit
+render comparison, and human visual approval of the stairs — are now RUNNABLE
+but each starts from a signed-in Studio, so they need the owner at the keyboard
+for the sign-in step. The gate is open; the door still needs a person.
+
+Both servers started for this were stopped and their data directories removed.

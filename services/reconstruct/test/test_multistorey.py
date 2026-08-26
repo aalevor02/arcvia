@@ -13,8 +13,8 @@ that honest:
     produced keeps meaning what it meant;
   * fixtures land on their own floor — two beds at the same (x, y) on
     different storeys are NOT an overlap, and the same two on one storey are;
-  * egress runs only on the storey the site is entered from, and the skipped
-    storeys appear in coverage saying so — never silently;
+  * egress crosses storeys only through named, plan-aligned stair spaces; an
+    unproved vertical route remains an explicit coverage skip;
   * an opening hosts on a wall BY INDEX within its own storey, so the
     concatenated building view must re-index or every upstairs door re-hosts
     onto a ground-floor wall.
@@ -137,7 +137,7 @@ ok("an upstairs bedroom answers to the same area figure",
 egress_row = next(r for r in coverage if r["rule"] == "egress")
 ok("egress ran on the entry storey only",
    egress_row["checked"] == 1
-   and any("stairs are not modelled" in skip["reason"]
+   and any("no named, plan-aligned stair route" in skip["reason"]
            for skip in egress_row["skipped"]),
    str(egress_row))
 ok("and no upstairs room is called unreachable",
@@ -145,6 +145,63 @@ ok("and no upstairs room is called unreachable",
 single_findings, _ = codecheck.check_building(SINGLE, BOOK)
 ok("a single-storey model behaves as plain check()",
    not any(f.storey is not None for f in single_findings))
+
+
+def _stair_floor(storey, title):
+    walls = [
+        _wall(0, 0, 4, 0), _wall(0, 4, 0, 0), _wall(4, 4, 0, 4),
+        _wall(4, 0, 4, 4), _wall(4, 0, 8, 0), _wall(8, 0, 8, 4),
+        _wall(8, 4, 4, 4),
+    ]
+    spaces = [
+        {**_space("STAIRCASE", "circulation"), "index": 0},
+        {**_space("BEDROOM", "bedroom"), "index": 1,
+         "loop": [(4, 0), (8, 0), (8, 4), (4, 4)]},
+    ]
+    openings = [{**DOOR, "wall": 3}]
+    if storey == 0:
+        openings.insert(0, DOOR)
+    return {"storey": storey, "level": storey, "title": title,
+            "shift": [0, 0], "walls": walls, "spaces": spaces,
+            "openings": openings}
+
+
+print("")
+print("-- stair-connected egress --")
+stair_blocks = [
+    _stair_floor(0, "Ground Floor Plan"),
+    _stair_floor(1, "First Floor Plan"),
+]
+stair_model = {
+    "storeys": {"primary": 0},
+    "elements": {
+        "fixtures": [],
+        "storeys": stair_blocks,
+    },
+}
+stair_findings, stair_coverage = codecheck.check_building(stair_model, BOOK)
+stair_egress = next(r for r in stair_coverage if r["rule"] == "egress")
+ok("aligned named stairs enable egress checks on both storeys",
+   stair_egress["checked"] == 2 and not stair_egress["skipped"],
+   str(stair_egress))
+ok("both bedrooms reach the ground-floor exit through real doors and stairs",
+   not any(f.rule == "egress" for f in stair_findings),
+   str([(f.message, f.storey) for f in stair_findings if f.rule == "egress"]))
+blocked_blocks = [stair_blocks[0], {**stair_blocks[1], "openings": []}]
+blocked = {**stair_model, "elements": {**stair_model["elements"],
+           "storeys": blocked_blocks}}
+blocked_findings, _coverage = codecheck.check_building(blocked, BOOK)
+ok("a bedroom with no door to the proven stair is reported unreachable",
+   any(f.rule == "egress" and f.storey == 1 for f in blocked_findings),
+   str([(f.message, f.storey) for f in blocked_findings if f.rule == "egress"]))
+misaligned_blocks = [stair_blocks[0], {**stair_blocks[1], "shift": [20, 0]}]
+misaligned = {**stair_model, "elements": {**stair_model["elements"],
+              "storeys": misaligned_blocks}}
+_findings, missed_coverage = codecheck.check_building(misaligned, BOOK)
+missed_egress = next(r for r in missed_coverage if r["rule"] == "egress")
+ok("a misaligned stair is not invented into a vertical route",
+   missed_egress["checked"] == 1 and len(missed_egress["skipped"]) == 1,
+   str(missed_egress))
 
 
 print("")

@@ -29,12 +29,67 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 from pathlib import Path
 
 #: glTF component types
 _FLOAT = 5126
 _UINT = 5125
+
+
+def _box_uv(point, normal) -> tuple[float, float]:
+    """
+    A texture coordinate for one vertex, in METRES of real building.
+
+    ── Why UVs exist here at all ────────────────────────────────────────────
+    Every mesh this writer produced carried POSITION and NORMAL and nothing
+    else, so a reconstructed model had no texture coordinates — and a model
+    with no UVs cannot take a textured material at all. Only the parametric
+    half of a material library (glass, water, flat paint) could ever bind;
+    brick, plaster, stone, timber and every tiled floor were unreachable, on
+    every building the engine has ever produced.
+
+    ── Why box projection, and why metres ───────────────────────────────────
+    Architectural geometry is axis-aligned slabs and prisms, so the cheap,
+    correct projection is per-face: drop the dominant axis of the face normal
+    and use the other two world coordinates. Faces do not share vertices in
+    this builder — `add_quad` and `add_tri` append their own — so each face
+    projects independently and there are no seams to reconcile.
+
+    The unit is the point. `u = 1.0` means ONE METRE of building, not one
+    tile, so a material knows how to tile itself from its own physical size:
+    a 0.6 m floor tile repeats every 0.6 of u. Vendor presets habitually ship
+    `uvtiling 1.0` with no physical size at all, which is exactly the
+    information a renderer cannot recover later — emitting metres here means
+    the size always comes from the material, never from a guess baked into
+    the mesh.
+
+    Computed at WRITE time from the final positions and normals rather than
+    stored per vertex, so `translate_plan` cannot leave UVs pointing at where
+    the geometry used to be.
+    """
+    ax, ay, az = abs(normal[0]), abs(normal[1]), abs(normal[2])
+    x, y, z = point
+    if ay >= ax and ay >= az:
+        return (x, z)          # floors and ceilings, seen from above
+
+    # ── A wall is measured ALONG ITSELF, not along a world axis ─────────────
+    # Dropping the dominant axis is right for a wall that runs north-south or
+    # east-west and wrong for every other wall: at 45 degrees the run L
+    # projects onto x as L·cos45, so the texture is compressed to 70.7% and a
+    # brick course comes out 41.4% too long. The engine's own fixtures are all
+    # orthogonal, so nothing caught it.
+    #
+    # The wall's direction is recoverable from the face itself: for a vertical
+    # face the horizontal run is perpendicular to the normal in the ground
+    # plane. Measuring u along THAT is exact at every angle, and for an
+    # axis-aligned wall it reduces to the old +/-x or +/-z. `v` stays world
+    # height, so courses remain horizontal by construction rather than by
+    # convention.
+    length = math.hypot(nz := normal[2], nx := normal[0]) or 1.0
+    ux, uz = -nz / length, nx / length
+    return (x * ux + z * uz, y)
 
 
 class MeshBuilder:
@@ -163,6 +218,9 @@ class MeshBuilder:
     def add_box_from_segment(
         self, ax: float, ay: float, bx: float, by: float,
         thickness: float, height: float, base_z: float = 0.0,
+        right_face: "MeshBuilder | None" = None,
+        left_face: "MeshBuilder | None" = None,
+        end_face: "MeshBuilder | None" = None,
     ) -> None:
         """
         A wall: a segment given width and height.
@@ -196,15 +254,35 @@ class MeshBuilder:
         c2 = (bx - nx, by - ny)
         c3 = (ax - nx, ay - ny)
 
-        self.add_quad(v(*c0, hi), v(*c1, hi), v(*c2, hi), v(*c3, hi))   # top
-        self.add_quad(v(*c3, lo), v(*c2, lo), v(*c1, lo), v(*c0, lo))   # bottom
-        self.add_quad(v(*c0, lo), v(*c1, lo), v(*c1, hi), v(*c0, hi))   # side
-        self.add_quad(v(*c1, lo), v(*c2, lo), v(*c2, hi), v(*c1, hi))   # end
-        self.add_quad(v(*c2, lo), v(*c3, lo), v(*c3, hi), v(*c2, hi))   # side
-        self.add_quad(v(*c3, lo), v(*c0, lo), v(*c0, hi), v(*c3, hi))   # end
+        # The two long faces may belong to DIFFERENT surface classes — the
+        # outside of an envelope wall is sand-faced plaster, its inside is
+        # putty and emulsion — so a caller that knows which side is which can
+        # route them to separate meshes. `right` is the +n face (the RIGHT-hand
+        # normal of a->b, per the note above); `left` is -n. Both default to
+        # this mesh, so a caller that does not classify gets exactly the box it
+        # got before.
+        right = right_face or self
+        left = left_face or self
+        # The END faces are the wall's cut ends. Beside an opening they are the
+        # REVEAL — the strip of wall you see standing in a doorway — and their
+        # finish follows the frame rather than either wall side, which is a
+        # materials decision the geometry cannot make. At a joined corner the
+        # same face is buried inside the joint, and at a free end it is simply
+        # a wall end. All three are "not a wall side", so they route together
+        # and a library decides; folding them into external or internal would
+        # be the guess this split exists to avoid.
+        ends = end_face or self
+
+        self.add_quad(v(*c0, hi), v(*c1, hi), v(*c2, hi), v(*c3, hi))    # top
+        self.add_quad(v(*c3, lo), v(*c2, lo), v(*c1, lo), v(*c0, lo))    # bottom
+        right.add_quad(v(*c0, lo), v(*c1, lo), v(*c1, hi), v(*c0, hi))   # +n side
+        ends.add_quad(v(*c1, lo), v(*c2, lo), v(*c2, hi), v(*c1, hi))    # end
+        left.add_quad(v(*c2, lo), v(*c3, lo), v(*c3, hi), v(*c2, hi))    # -n side
+        ends.add_quad(v(*c3, lo), v(*c0, lo), v(*c0, hi), v(*c3, hi))    # end
 
     def add_polygon_slab(
-        self, loop: list[tuple[float, float]], z: float, thickness: float
+        self, loop: list[tuple[float, float]], z: float, thickness: float,
+        holes=(),
     ) -> None:
         """
         A floor or ceiling slab from a room outline.
@@ -219,7 +297,7 @@ class MeshBuilder:
 
         if len(loop) < 3:
             return
-        poly = Polygon(loop)
+        poly = Polygon(loop, holes=holes)
         if not poly.is_valid:
             poly = poly.buffer(0)
         if poly.is_empty or poly.geom_type != "Polygon":
@@ -243,7 +321,8 @@ class MeshBuilder:
                                 up=False)
 
     def add_polygon_face(
-        self, loop: list[tuple[float, float]], z: float, up: bool = True
+        self, loop: list[tuple[float, float]], z: float, up: bool = True,
+        holes=(),
     ) -> None:
         """One triangulated polygon face, with an explicit facing direction."""
         from shapely.geometry import Polygon
@@ -251,7 +330,7 @@ class MeshBuilder:
 
         if len(loop) < 3:
             return
-        poly = Polygon(loop)
+        poly = Polygon(loop, holes=holes)
         if not poly.is_valid:
             poly = poly.buffer(0)
         if poly.is_empty or poly.geom_type != "Polygon":
@@ -346,6 +425,161 @@ _MATERIAL_BY_NAME = (
 )
 
 
+#: The engine's own mesh kinds and room kinds, mapped onto the shared
+#: SURFACE-CLASS vocabulary that a material library binds against
+#: (`A:\Research\BIM\tools\material_bridge.json`, 39 classes).
+#:
+#: ── Why this is a tag and not a material ─────────────────────────────────
+#: The writer must not choose a brick or a plaster. What it alone knows is
+#: WHAT EACH SURFACE IS — this face is a ceiling, that one is a bathroom
+#: floor — and a library keyed on that can then choose per project, per
+#: budget, per region without the geometry being rebuilt. Emitting the class
+#: rather than the material is what keeps a rendered finish a presentation
+#: decision instead of a reconstruction one.
+_FLOOR_CLASS_BY_ROOM_KIND = {
+    "bathroom": "floor_bath",
+    "bedroom": "floor_bedroom",
+    "circulation": "floor_corridor",
+    "dining": "floor_dining",
+    "kitchen": "floor_kitchen",
+    "living": "floor_living",
+    "parking": "floor_parking",
+    "pooja": "floor_pooja",
+    "store": "floor_store",
+    "study": "floor_living",
+    "toilet": "floor_toilet",
+    "utility": "floor_utility",
+}
+
+#: An OUTDOOR floor's class, by a word in the room's own name.
+#:
+#: ── Why paving cannot be one class ───────────────────────────────────────
+#: `build/solidify.py` routes every outdoor room to a `paving_*` mesh —
+#: balcony, terrace, patio, deck, courtyard and parking bay alike — because
+#: for GEOMETRY they are all hard ground. For MATERIAL they are not: a
+#: balcony gets a floor finish and a driveway gets pavers, and mapping the
+#: whole mesh kind to `driveway` put tarmac on the most visible surface in a
+#: villa walkthrough. The room's name is the only evidence available and it
+#: is usually enough.
+_OUTDOOR_CLASS_BY_WORD = (
+    ("balcony", "floor_balcony"),
+    ("verandah", "floor_verandah"),
+    ("veranda", "floor_verandah"),
+    ("sitout", "floor_verandah"),
+    ("terrace", "floor_balcony"),
+    ("deck", "floor_balcony"),
+    ("court", "floor_courtyard"),
+    ("patio", "floor_courtyard"),
+    ("parking", "floor_parking"),
+    ("garage", "floor_parking"),
+    ("porch", "floor_parking"),
+    ("drive", "driveway"),
+)
+
+#: Mesh-kind token -> surface class, for kinds that carry no room type.
+_CLASS_BY_MESH_KIND = {
+    "ceiling": "ceiling",
+    "water": "water_body",
+    "lawn": "lawn",
+    "plants": "planting_bed",
+    "foliage": "planting_bed",
+    # The poché's long faces, split by which side a room lies on — see
+    # build/solidify.py `side_classes`. Before that split there was one
+    # `walls` mesh carrying both, and it could not be tagged at all.
+    "wallface_external": "external_wall",
+    "wallface_internal": "internal_wall",
+    # Wall END faces. Beside an opening this is the reveal, whose finish
+    # follows the FRAME rather than either wall side — a materials decision,
+    # not a geometric one. Emitted as its own class so a library can dress it
+    # distinctly, or alias it to `internal_wall` in one line if it does not
+    # care. Folding it into external or internal here would be exactly the
+    # guess the poché split exists to avoid.
+    "wallface_reveal": "wallface_reveal",
+    # The first 450 mm of an external wall: flamed granite or a harder
+    # plaster, and doc 18 §5 records it as a strong Indian cue.
+    "wallface_plinth": "plinth",
+    "parapet": "parapet_coping",
+}
+
+
+def surface_class(name: str, room_kind: str | None = None) -> tuple[str | None, str]:
+    """
+    (surface class, provenance) for one mesh — or (None, "none") when the
+    engine cannot honestly say.
+
+    ── The refusals are the point ───────────────────────────────────────────
+    `storey0_walls` carries only the tops and bottoms of wall pieces, buried
+    under slabs; the visible faces were split out by `build/solidify.py`.
+    Fixtures are furniture, not a building surface. Both get no tag.
+
+    ── And so is the PROVENANCE ─────────────────────────────────────────────
+    A class derived from evidence and a class filled in by a default are not
+    the same claim, and a render cannot tell them apart by looking. An
+    unnamed, unclassified room used to resolve silently to `floor_living` —
+    which in the material library is vitrified 800, the most expensive floor
+    in the catalogue — so a room the drawing never described was quietly
+    rendered as the premium option. That is the same failure as an area
+    figure quoted without its definition: a plausible value wearing the
+    clothes of a known one.
+
+    So every tag carries how it was reached:
+      "measured" — the engine determined it (room kind, mesh kind, side split)
+      "assumed"  — a default filled a gap the drawing did not answer
+    and the writer emits both, so a material decision stays auditable.
+    """
+    tokens = f"_{name.lower()}_"
+    # The room's own name, which is everything after `room<N>_`. Word tests
+    # run against THIS and never against the whole mesh name — `storey0`
+    # contains "store", so matching the full name typed every unnamed room on
+    # the ground floor as a store cupboard. The material lookup below already
+    # carries a scar from the same class of bug; this is the second.
+    slug = ""
+    match = re.search(r"_room\d+_(.*)$", tokens.strip("_"))
+    if match:
+        slug = match.group(1)
+
+    # The roof is INFERRED, never drawn — see build/solidify.build_roof.
+    # Its provenance is assumed by construction rather than by a gap in the
+    # room classifier.
+    if "_roof_" in tokens:
+        return "roof", "assumed"
+    if "_parapet_" in tokens:
+        return "parapet_coping", "assumed"
+    # The footprint is measured from named, registered stair rooms, but the
+    # straight-flight direction and tread layout are inferred inside it.
+    if "_stair_" in tokens:
+        return "floor_stair", "assumed"
+    for token, klass in _CLASS_BY_MESH_KIND.items():
+        if f"_{token}_" in tokens:
+            return klass, "measured"
+    if "_wall_" in tokens:
+        # A wall surface generated FOR a room faces into that room.
+        return "internal_wall", "measured"
+    if "_paving_" in tokens:
+        for word, klass in _OUTDOOR_CLASS_BY_WORD:
+            if word in slug:
+                return klass, "measured"
+        # An outdoor floor the drawing did not name. Hard ground is the safe
+        # reading — it is what `_space_surface_kind` already decided — but it
+        # is a default, and it says so.
+        return "driveway", "assumed"
+    if "_floor_" in tokens:
+        kind = (room_kind or "").lower()
+        klass = _FLOOR_CLASS_BY_ROOM_KIND.get(kind)
+        if klass:
+            return klass, "measured"
+        # Also try the room's own name, which survives in the mesh slug even
+        # when the classifier could not type it.
+        for word, mapped in (("stair", "floor_stair"), ("lobby", "floor_lobby"),
+                             ("foyer", "floor_lobby"), ("store", "floor_store"),
+                             ("utility", "floor_utility"), ("pooja", "floor_pooja"),
+                             ("puja", "floor_pooja"), ("wash", "floor_utility")):
+            if word in slug:
+                return mapped, "measured"
+        return "floor_living", "assumed"
+    return None, "none"
+
+
 def _material_for(name: str) -> int:
     lowered = name.lower()
     for token, index in _MATERIAL_BY_NAME:
@@ -357,9 +591,15 @@ def _material_for(name: str) -> int:
     return 0
 
 
-def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
+def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path,
+              room_kinds: dict[str, str] | None = None) -> dict:
     """
     Write one GLB containing a named node + mesh per entry.
+
+    `room_kinds` maps a mesh name to the kind of room it belongs to, so a
+    floor can be tagged `floor_bath` rather than a generic one. Optional: a
+    caller that does not supply it still gets every other surface class, and
+    floors fall back to the commonest.
 
     Returns a small manifest, so a caller can assert on what it produced without
     parsing the file back.
@@ -388,6 +628,10 @@ def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
 
         pos_bytes = b"".join(struct.pack("<3f", *p) for p in mesh.positions)
         nrm_bytes = b"".join(struct.pack("<3f", *n) for n in mesh.normals)
+        uv_bytes = b"".join(
+            struct.pack("<2f", *_box_uv(p, n))
+            for p, n in zip(mesh.positions, mesh.normals)
+        )
         idx_bytes = b"".join(struct.pack("<I", i) for i in mesh.indices)
 
         xs = [p[0] for p in mesh.positions]
@@ -396,6 +640,7 @@ def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
 
         pos_view = add_view(pos_bytes, 34962)
         nrm_view = add_view(nrm_bytes, 34962)
+        uv_view = add_view(uv_bytes, 34962)
         idx_view = add_view(idx_bytes, 34963)
 
         accessors.append({
@@ -408,16 +653,35 @@ def write_glb(meshes: dict[str, MeshBuilder], out_path: str | Path) -> dict:
             "count": len(mesh.normals), "type": "VEC3",
         })
         accessors.append({
+            "bufferView": uv_view, "componentType": _FLOAT,
+            "count": len(mesh.positions), "type": "VEC2",
+        })
+        accessors.append({
             "bufferView": idx_view, "componentType": _UINT,
             "count": len(mesh.indices), "type": "SCALAR",
         })
 
-        base = len(accessors) - 3
+        base = len(accessors) - 4
+        klass, provenance = surface_class(name, (room_kinds or {}).get(name))
         gltf_meshes.append({
             "name": name,
+            # The surface class travels as glTF `extras`, which every loader
+            # carries through untouched and no loader interprets — so a
+            # renderer that knows the material library can bind, and one that
+            # does not is unaffected. Absent when the engine cannot tell: see
+            # `surface_class`, where the refusals are deliberate.
+            #
+            # `surfaceClassSource` rides alongside so a reviewer can separate
+            # what was determined from what was defaulted. A render that puts
+            # premium vitrified in a room the drawing never named should be
+            # answerable for it.
+            **({"extras": {"surfaceClass": klass,
+                           "surfaceClassSource": provenance}} if klass else {}),
             "primitives": [{
-                "attributes": {"POSITION": base, "NORMAL": base + 1},
-                "indices": base + 2,
+                "attributes": {
+                    "POSITION": base, "NORMAL": base + 1, "TEXCOORD_0": base + 2,
+                },
+                "indices": base + 3,
                 # Material by mesh name: foliage and bark are their own colours,
                 # everything else is the beige poché. Named meshes rather than
                 # per-triangle materials keeps the writer simple and the seam

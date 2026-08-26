@@ -14,16 +14,20 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from build.glb import MeshBuilder, write_glb  # noqa: E402
+from ingest import blocks as ingest_blocks  # noqa: E402
 from ingest.blocks import AGAINST_WALL_M, RoomLabel, wall_gap  # noqa: E402
 from build.solidify import (  # noqa: E402
     build_room_finishes, build_room_slabs, build_slabs, build_walls,
 )
 from hypothesise import openings as op  # noqa: E402
-from hypothesise.pair import Face, Wall, join_corners, pair_faces  # noqa: E402
+from hypothesise.pair import (  # noqa: E402
+    Face, Wall, join_corners, pair_faces, summarise_by_layer,
+)
 from hypothesise.perimeter import add_perimeter  # noqa: E402
 from solve import spaces as sp  # noqa: E402
 from solve import verify as vf  # noqa: E402
@@ -45,6 +49,51 @@ def ok(label: str, cond: bool, extra: str = "") -> None:
 
 def close(a: float, b: float, tol: float = 0.02) -> bool:
     return abs(a - b) <= tol
+
+
+# ── DXF loading: fast when sound, forgiving when malformed ──────────────────
+print("-- dxf loading --")
+_strict_doc = Mock()
+_strict_audit = Mock(errors=[], fixes=[])
+_strict_doc.audit.return_value = _strict_audit
+with (
+    patch.object(ingest_blocks.ezdxf, "readfile", return_value=_strict_doc),
+    patch.object(ingest_blocks.recover, "readfile") as _recover,
+):
+    _opened, _audited = ingest_blocks.open_dxf("sound.dxf")
+    ok("a sound DXF uses strict read plus audit",
+       _opened is _strict_doc and _audited is _strict_audit)
+    ok("sound input does not pay for recovery", not _recover.called)
+
+_recovered_doc, _recovered_audit = Mock(), Mock(errors=[], fixes=[])
+with (
+    patch.object(
+        ingest_blocks.ezdxf, "readfile",
+        side_effect=ingest_blocks.ezdxf.DXFStructureError("broken"),
+    ),
+    patch.object(
+        ingest_blocks.recover, "readfile",
+        return_value=(_recovered_doc, _recovered_audit),
+    ) as _recover,
+):
+    _opened, _audited = ingest_blocks.open_dxf("broken.dxf")
+    ok("a structurally broken DXF falls back to recovery",
+       _opened is _recovered_doc and _audited is _recovered_audit)
+    ok("the recovery path is invoked exactly once", _recover.call_count == 1)
+
+_dirty_doc = Mock()
+_dirty_doc.audit.return_value = Mock(errors=[Mock()], fixes=[])
+with (
+    patch.object(ingest_blocks.ezdxf, "readfile", return_value=_dirty_doc),
+    patch.object(
+        ingest_blocks.recover, "readfile",
+        return_value=(_recovered_doc, _recovered_audit),
+    ) as _recover,
+):
+    _opened, _audited = ingest_blocks.open_dxf("audited-but-broken.dxf")
+    ok("remaining audit errors also force recovery",
+       _recover.call_count == 1
+       and _opened is _recovered_doc and _audited is _recovered_audit)
 
 
 # ── A room drawn the way an architect draws one ──────────────────────────────
@@ -84,6 +133,15 @@ lengths = sorted(round(w.length, 3) for w in walls)
 ok("corner-joining closes the rectangle",
    close(lengths[0], H - T, 0.03) and close(lengths[-1], W - T, 0.03),
    f"lengths {lengths}")
+
+layer_stats = summarise_by_layer(walls, {0, 1})
+ok("wall run is attributed to its source layer",
+   len(layer_stats) == 1 and layer_stats[0]["layer"] == "WALLS",
+   str(layer_stats))
+ok("layer attribution separates billable and indoor run",
+   close(layer_stats[0]["billableLength"], sum(w.length for w in walls)) and
+   close(layer_stats[0]["indoorLength"], walls[0].length + walls[1].length),
+   str(layer_stats))
 
 
 print("\n-- rooms --")
@@ -188,6 +246,10 @@ ok("a courtyard is not two buildings",
    not [c for c in vf.check(input_segments=200, walls=one_room_walls,
                             spaces=courtyard, openings=[], unhosted=0).checks
         if c.name == "one-building"])
+ok("the shared room-island test exposes separated drawings",
+   vf.separated_room_groups(storeys) is not None)
+ok("and keeps a courtyard together",
+   vf.separated_room_groups(courtyard) is None)
 
 # Framing loss is a quantity only the CALLER can see: the walls are dropped
 # before verify is handed a wall list, so from here they never existed.
@@ -423,9 +485,20 @@ placements = [
     {"block": "D900", "position": {"x": mid_x, "y": mid_y}, "rotation": 0.0},
     {"block": "W1200", "position": {"x": mid_x + 90, "y": mid_y}, "rotation": 0.0},
 ]
-holes, unhosted = op.from_sized_blocks(placements, walls, lambda b: None)
+opening_issues = []
+holes, unhosted = op.from_sized_blocks(
+    placements, walls, lambda b: None, issues=opening_issues,
+)
 ok("a sized name is read without the kernel", len(holes) == 1, str(len(holes)))
 ok("the far one is reported, not dropped", unhosted == 1, str(unhosted))
+ok("the unhosted block keeps its repair target", len(opening_issues) == 1,
+   str(opening_issues))
+if opening_issues:
+    ok("the target names the lost opening", opening_issues[0]["block"] == "W1200",
+       str(opening_issues[0]))
+    ok("and measures its nearest modeled wall",
+       opening_issues[0]["nearestWallDistance"] > op.HOST_RADIUS,
+       str(opening_issues[0]["nearestWallDistance"]))
 if holes:
     ok("the door width comes from its name", close(holes[0].width, 0.9, 0.001),
        str(holes[0].width))
@@ -801,6 +874,20 @@ _LABELS = [
 ]
 _grade = lambda **kw: _ls.fit_of(_OPEN, _LABELS, [], classify_room, lambda _n: None, **kw)
 
+_paired_wall_faces = room_faces() + room_faces(10.0, 0.0)
+_wall_score = _ls.scan({"WALLS": _paired_wall_faces})[0]
+ok("a layer whose linework substantially pairs is wall evidence",
+   _wall_score.verdict == "WALLS",
+   _wall_score.as_dict())
+_mostly_noise = _paired_wall_faces + [
+    Face(20.0 + i * 2, i * 2, 21.0 + i * 2, i * 2, "NOISE")
+    for i in range(100)
+]
+_noise_score = _ls.scan({"NOISE": _mostly_noise})[0]
+ok("a few plausible pairs among mostly unrelated lines expose weak coverage",
+   _noise_score.paired_fraction < 0.10,
+   _noise_score.as_dict())
+
 _bare = _grade(perimeter=False)
 _ringed = _grade(perimeter=True)
 
@@ -811,6 +898,14 @@ ok("with it, the third room appears",
 ok("so the SAME layer set grades differently on the two bases — the whole bug",
    _ringed.score > _bare.score, f"{_ringed.score} vs {_bare.score}")
 ok("and the default is the basis cli.py builds on", _grade().rooms == _ringed.rooms)
+
+_seed_fit = _ls.Fit(walls=56, rooms=3, named=3, doors=3, unhosted=1)
+_useful_fit = _ls.Fit(walls=148, rooms=15, named=11, doors=4, unhosted=0)
+_noisy_fit = _ls.Fit(walls=285, rooms=13, named=12, doors=4, unhosted=0)
+ok("a layer may add substantial geometry when it explains substantial evidence",
+   _ls.efficient_improvement(_seed_fit, _useful_fit))
+ok("one extra label cannot admit a whole drawing layer of unrelated walls",
+   not _ls.efficient_improvement(_useful_fit, _noisy_fit))
 
 
 # ---------------------------------------------------------------------------

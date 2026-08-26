@@ -169,6 +169,8 @@ export interface Scene extends Omit<SceneListItem, 'floorCount' | 'hasPlan'> {
   cadModelJsonUrl?: string | null
   /** The baked lightmap atlas, once a bake has completed. */
   bakedUrl: string | null
+  /** The latest completed equirectangular render for interactive 360 viewing. */
+  panoramaUrl: string | null
   hdriUrl: string | null
   floorPlanUrl: string | null
   /** Presentation: where a client is taken, what they are told, whose name is on it. */
@@ -450,21 +452,69 @@ export const detectFloorplan = (url: string) =>
 // rooms and a walkable GLB come out. The API side has existed for some time;
 // these are the calls that finally reach it from the product.
 
+export type CadVerifyLevel = 'blocking' | 'warning' | 'info'
+
+export interface CadVerifyCheck {
+  name: string
+  level: CadVerifyLevel
+  message: string
+  value: unknown
+}
+
+export interface CadOpeningIssue {
+  source: 'blockSized'
+  block: string
+  kind: 'door' | 'window'
+  position: { x: number; y: number }
+  registeredPosition: { x: number; y: number }
+  width: number
+  rotation: number
+  reason: 'no-wall-within-host-radius' | 'host-wall-too-short'
+  nearestWallDistance: number | null
+  hostRadius?: number
+  hostWall?: number
+  hostWallLength?: number
+  storey: number
+  storeyTitle: string | null
+}
+
+export interface CadWallLayerSummary {
+  layer: string
+  walls: number
+  paired: number
+  totalLength: number
+  billableLength: number
+  indoorLength: number
+}
+
 /** What the engine found — the facts a reviewer needs to accept an import. */
 export interface CadSummary {
   rooms?: number
   named?: number
   walls?: number
+  wallsPaired?: number
+  /** Fraction 0..1 of reconstructed walls measured from paired faces. */
+  wallPairing?: number | null
   openings?: number
   /** Block placements the engine classified to catalogue items. */
   fixtures?: number
   unit?: string
   layers?: string[]
+  /** Per-source-layer wall run, with derived overlap removed from billable figures. */
+  wallLayers?: CadWallLayerSummary[]
   /** Present when the sheet drew several floors of ONE building. */
   storeys?: number
   storeyNames?: string[]
   roomsAllStoreys?: number
   wallsAllStoreys?: number
+  /** Warning count and complete gate evidence emitted by reconstruction. */
+  verifyWarnings?: number
+  verifyChecks?: CadVerifyCheck[]
+  openingsUnassigned?: number
+  openingIssues?: CadOpeningIssue[]
+  /** Presentation-deck scale evidence, when this was a PDF plan. */
+  scale?: number
+  scaleConfirmed?: boolean
 }
 
 export interface CadJob {

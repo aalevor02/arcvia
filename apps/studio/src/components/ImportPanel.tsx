@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { cadReviewChecks, cadReviewRequired, cadWallLayers } from '../plan/cadReview'
+
 import {
   cadJob,
   cancelCadJob,
@@ -44,6 +46,13 @@ type Phase =
       metres: string
     }
   | { at: 'working'; jobId: string; progress: number; charged: number }
+  | {
+      at: 'review'
+      modelUrl: string
+      summary: CadSummary
+      modelJsonUrl: string | null
+      sourceDocumentUrl?: string
+    }
   | { at: 'failed'; message: string; refunded: boolean }
 
 /**
@@ -87,6 +96,17 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         const job = await cadJob(jobId)
         if (job.status === 'done' && job.outputUrl) {
           if (pollRef.current) clearInterval(pollRef.current)
+          jobRef.current = null
+          if (job.summary && cadReviewRequired(job.summary)) {
+            setPhase({
+              at: 'review',
+              modelUrl: job.outputUrl,
+              summary: job.summary,
+              modelJsonUrl: job.modelJsonUrl,
+              sourceDocumentUrl,
+            })
+            return
+          }
           await onLanded(job.outputUrl, job.summary, job.modelJsonUrl, sourceDocumentUrl)
           return
         }
@@ -188,6 +208,10 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         refunded: false,
       })
     }
+  }
+
+  async function acceptReview(p: Extract<Phase, { at: 'review' }>) {
+    await onLanded(p.modelUrl, p.summary, p.modelJsonUrl, p.sourceDocumentUrl)
   }
 
   async function cancel() {
@@ -387,6 +411,110 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
           </div>
         </>
       )}
+
+      {phase.at === 'review' && (() => {
+        const required = cadReviewChecks(phase.summary)
+        const all = cadReviewChecks(phase.summary, true)
+        const wallLayers = cadWallLayers(phase.summary)
+        const facts = [
+          phase.summary.rooms != null ? `${phase.summary.rooms} rooms` : null,
+          phase.summary.walls != null ? `${phase.summary.walls} walls` : null,
+          phase.summary.wallPairing != null
+            ? `${Math.round(phase.summary.wallPairing * 100)}% wall faces paired`
+            : null,
+          phase.summary.openings != null ? `${phase.summary.openings} openings` : null,
+          phase.summary.unit ? `unit: ${phase.summary.unit}` : null,
+        ].filter((fact): fact is string => Boolean(fact))
+
+        return (
+          <>
+            <strong style={{ fontSize: 13 }}>Review the reconstruction before using it</strong>
+            <span style={{ fontSize: 12.5 }}>
+              The model was built, but the verification gate found {required.length}{' '}
+              item{required.length === 1 ? '' : 's'} that need a human glance.
+            </span>
+            {facts.length > 0 && (
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {facts.join(' · ')}
+              </span>
+            )}
+            <div style={{ display: 'grid', gap: 6 }}>
+              {required.map((finding) => (
+                <div
+                  key={finding.name}
+                  style={{
+                    border: '1px solid rgba(220, 150, 60, 0.5)',
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    display: 'grid',
+                    gap: 3,
+                  }}
+                >
+                  <strong style={{ fontSize: 12 }}>
+                    {finding.level === 'blocking' ? 'Blocking' : 'Check'} ·{' '}
+                    {finding.name.replaceAll('-', ' ')}
+                  </strong>
+                  <span style={{ fontSize: 12 }}>{finding.message}</span>
+                </div>
+              ))}
+            </div>
+            {(phase.summary.openingIssues?.length ?? 0) > 0 && (
+              <details open style={{ fontSize: 11.5 }}>
+                <summary>
+                  Show {phase.summary.openingIssues?.length} unhosted opening target{phase.summary.openingIssues?.length === 1 ? '' : 's'}
+                </summary>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {phase.summary.openingIssues?.map((issue, index) => (
+                    <li key={`${issue.storey}:${issue.block}:${issue.position.x}:${issue.position.y}:${index}`}>
+                      {issue.block} on {issue.storeyTitle ?? `storey ${issue.storey + 1}`} at{' '}
+                      ({issue.registeredPosition.x.toFixed(2)}, {issue.registeredPosition.y.toFixed(2)}) m
+                      {issue.nearestWallDistance != null
+                        ? ` · nearest modeled wall ${issue.nearestWallDistance.toFixed(2)} m away`
+                        : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {wallLayers.length > 0 && (
+              <details open style={{ fontSize: 11.5 }}>
+                <summary>Wall run by source layer</summary>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {wallLayers.map((layer) => (
+                    <li key={layer.layer}>
+                      {layer.layer}: {layer.billableLength.toFixed(2)} m billable
+                      {layer.indoorLength > 0
+                        ? ` | ${layer.indoorLength.toFixed(2)} m bounding indoor rooms`
+                        : ' | no indoor-room boundary attributed'}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {all.length > required.length && (
+              <details style={{ fontSize: 11.5 }}>
+                <summary>Show {all.length - required.length} passed measurement{all.length - required.length === 1 ? '' : 's'}</summary>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {all.filter((finding) => finding.level === 'info').map((finding) => (
+                    <li key={finding.name}>{finding.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={() => void acceptReview(phase)}>
+                Use reconstruction
+              </button>
+              <button className="icon-btn" onClick={() => setPhase({ at: 'pick' })}>
+                Try another file
+              </button>
+              <button className="icon-btn" onClick={onDismiss}>
+                Close
+              </button>
+            </div>
+          </>
+        )
+      })()}
 
       {phase.at === 'failed' && (
         <>

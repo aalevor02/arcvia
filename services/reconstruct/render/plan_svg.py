@@ -140,7 +140,10 @@ def render_plan(model: dict, out_path: str | Path, title: str | None = None) -> 
         length = math.hypot(bx - ax, by - ay) or 1.0
         dx, dy = (bx - ax) / length, (by - ay) / length
         t = op["along"]
-        cx, cy = ax + dx * t, ay + dy * t
+        # A composite wall's BODY sits `offset` left of its axis (Wall.offset);
+        # the punched-out opening must sit in the body, not astride the axis.
+        off = float(w.get("offset") or 0.0)
+        cx, cy = ax + dx * t - dy * off, ay + dy * t + dx * off
         thickness = w["thickness"] + 0.06
         nx, ny = -dy * thickness / 2, dx * thickness / 2
         half = op["width"] / 2
@@ -179,10 +182,12 @@ def render_plan(model: dict, out_path: str | Path, title: str | None = None) -> 
         if length < 1e-6:
             continue
         dx, dy = (bx - ax) / length, (by - ay) / length
+        off = float(w.get("offset") or 0.0)
+        ox, oy = -dy * off, dx * off
         nx, ny = -dy * w["thickness"] / 2, dx * w["thickness"] / 2
         corners = [
-            (ax + nx, ay + ny), (bx + nx, by + ny),
-            (bx - nx, by - ny), (ax - nx, ay - ny),
+            (ax + ox + nx, ay + oy + ny), (bx + ox + nx, by + oy + ny),
+            (bx + ox - nx, by + oy - ny), (ax + ox - nx, ay + oy - ny),
         ]
         pts = " ".join(f"{sx(px):.2f},{sy(py):.2f}" for px, py in corners)
         parts.append(f'<polygon points="{pts}" fill="{INK}" stroke="none"/>')

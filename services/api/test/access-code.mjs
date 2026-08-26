@@ -61,6 +61,7 @@ await fetch(`${BASE}/scenes/${scene.id}`, {
   body: JSON.stringify({
     modelUrl: '/uploads/scenes/x/model.glb',
     bakedUrl: '/uploads/renders/x/atlas.png',
+    panoramaUrl: '/uploads/renders/x/panorama.png',
     views: [{ id: 'a', name: 'Hall', position: [0, 1.6, 0], rotation: [0, 0] }],
   }),
 })
@@ -79,6 +80,8 @@ const publicUrl = `${BASE}/scenes/public/${slug}`
 {
   const body = await fetch(publicUrl).then((r) => r.json())
   ok('an open scene returns its model', body.scene?.modelUrl === '/uploads/scenes/x/model.glb')
+  ok('an open scene returns its panorama',
+    body.scene?.panoramaUrl === '/uploads/renders/x/panorama.png')
   ok('an open scene is not marked protected', !body.scene?.protected)
 }
 
@@ -110,6 +113,7 @@ const publicUrl = `${BASE}/scenes/public/${slug}`
 
   ok('the model is withheld', s.modelUrl === undefined, String(s.modelUrl))
   ok('the bake is withheld', s.bakedUrl === undefined, String(s.bakedUrl))
+  ok('the panorama is withheld', s.panoramaUrl === undefined, String(s.panoramaUrl))
   ok('the views are withheld', s.views === undefined)
   ok('nothing in the body looks like an upload path', !JSON.stringify(s).includes('/uploads/'))
 }
@@ -135,6 +139,8 @@ const publicUrl = `${BASE}/scenes/public/${slug}`
   const body = await right.json()
   ok('unlocking returns the model', body.scene?.modelUrl === '/uploads/scenes/x/model.glb')
   ok('unlocking returns the bake', body.scene?.bakedUrl === '/uploads/renders/x/atlas.png')
+  ok('unlocking returns the panorama',
+    body.scene?.panoramaUrl === '/uploads/renders/x/panorama.png')
   ok('unlocking returns the views', body.scene?.views?.length === 1)
 }
 

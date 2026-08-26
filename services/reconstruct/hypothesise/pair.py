@@ -50,6 +50,10 @@ MIN_LENGTH = 0.35
 ANGLE_TOLERANCE_DEG = 6.0
 #: How far a wall end may be extended to meet a neighbour.
 CORNER_TOLERANCE = 0.6
+#: A crossing this close to the other wall's segment lands ON it and will be
+#: noded by polygonize; anything further is a near-miss that only helps if a
+#: third line happens through it. See the two-tier selection in join_corners.
+ON_SEGMENT_TOLERANCE = 0.02
 #: Two walls closer to parallel than this have no meaningful crossing — forcing
 #: one puts the corner far off down the drawing.
 CORNER_PARALLEL_SKIP_DEG = 25.0
@@ -76,6 +80,18 @@ class Wall:
     #: ring — see hypothesise/perimeter.py. Anything QUANTIFYING wall length
     #: must subtract this, or it bills the same masonry twice.
     duplicate: float = 0.0
+    #: Where the SOLID sits relative to the axis, metres, along the left
+    #: normal of a→b (i.e. (-dy, dx)). Zero — the overwhelming case — means
+    #: the wall body is symmetric about its axis, which is what pairing
+    #: measures. Non-zero is the IFC layer-set idea (OffsetFromReferenceLine):
+    #: a composite wall keeps its AXIS on the leaf pairing found — where the
+    #: room graph, the bridges and the corner joins already meet it — while
+    #: its body is displaced to cover the full assembly. Every operation on
+    #: the axis (join, split, bridge, polygonize) ignores this; only the
+    #: stages that TURN the axis into a body (solidify, the plan's poché)
+    #: apply it. Moving the axis instead was tried and refuted — the record
+    #: is in hypothesise/assemble.py.
+    offset: float = 0.0
 
     @property
     def length(self) -> float:
@@ -90,6 +106,7 @@ class Wall:
             "confidence": round(self.confidence, 3),
             "layer": self.layer,
             "duplicate": round(self.duplicate, 4),
+            "offset": round(self.offset, 4),
         }
 
 
@@ -442,8 +459,23 @@ def join_corners(walls: list[Wall], tolerance: float = CORNER_TOLERANCE) -> list
             # 2 * tolerance away from the end point.
             candidates = tree.query(Point(px, py).buffer(tolerance * 2, resolution=1))
 
+            # Two tiers, ON-the-wall before NEAR-the-wall. The single check
+            # "within `tolerance` of the other wall" allowed a crossing up to
+            # 0.6 m PAST a segment's end to win on reach alone — and it cost a
+            # measured room: a partition ending 0.15 m from a real envelope
+            # axis snapped instead to a nearer phantom 0.12 m away that landed
+            # in open air beside a short ring segment, stopped 3 cm short of
+            # the axis, and polygonize (which nodes exact touches, not near
+            # misses) leaked two rooms into one. A crossing that lands ON the
+            # other wall produces a node BY CONSTRUCTION; a near-miss only
+            # closes a cycle when a third line happens to pass through the
+            # landing point. So genuine crossings are preferred at any reach
+            # within tolerance, and the just-past slack is what it always
+            # should have been: a fallback.
             best: tuple[float, float] | None = None
             best_reach = tolerance
+            fallback: tuple[float, float] | None = None
+            fallback_reach = tolerance
 
             for j in candidates:
                 j = int(j)
@@ -465,15 +497,16 @@ def join_corners(walls: list[Wall], tolerance: float = CORNER_TOLERANCE) -> list
                     continue
 
                 reach = math.hypot(crossing[0] - px, crossing[1] - py)
-                if reach > best_reach:
-                    continue
+                miss = _distance_to_segment(crossing[0], crossing[1], other)
+                if miss <= ON_SEGMENT_TOLERANCE:
+                    if reach <= best_reach:
+                        best, best_reach = crossing, reach
+                elif miss <= tolerance:
+                    if reach <= fallback_reach:
+                        fallback, fallback_reach = crossing, reach
 
-                # And it has to be on, or just past, the other wall — not out in
-                # space where its infinite line happens to pass.
-                if _distance_to_segment(crossing[0], crossing[1], other) > tolerance:
-                    continue
-
-                best, best_reach = crossing, reach
+            if best is None:
+                best = fallback
 
             if best is not None:
                 if end == "a":
@@ -534,3 +567,23 @@ def summarise(walls: list[Wall]) -> dict:
         "medianThickness": thicknesses[len(thicknesses) // 2] if thicknesses else None,
         "thicknessRange": [thicknesses[0], thicknesses[-1]] if thicknesses else None,
     }
+
+
+def summarise_by_layer(walls: list[Wall], indoor: set[int]) -> list[dict]:
+    """Billable and indoor wall run grouped by source layer."""
+    grouped = {}
+    for index, wall in enumerate(walls):
+        name = wall.layer or "(unlabelled)"
+        row = grouped.setdefault(name, dict(layer=name, walls=0, paired=0,
+            totalLength=0.0, billableLength=0.0, indoorLength=0.0))
+        billable = max(0.0, wall.length - wall.duplicate)
+        row["walls"] += 1
+        row["paired"] += int(wall.paired)
+        row["totalLength"] += wall.length
+        row["billableLength"] += billable
+        row["indoorLength"] += billable if index in indoor else 0.0
+    for row in grouped.values():
+        for key in ("totalLength", "billableLength", "indoorLength"):
+            row[key] = round(row[key], 2)
+    return sorted(grouped.values(), key=lambda row:
+        (-row["indoorLength"], -row["billableLength"], row["layer"]))

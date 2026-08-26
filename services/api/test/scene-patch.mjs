@@ -86,6 +86,7 @@ const clientShapes = [
   ['plan only', { plan: null }],
   ['presentation', { views: [], hotspots: [], branding: null }],
   ['baked url', { bakedUrl: '/uploads/renders/x/atlas.png' }],
+  ['panorama url', { panoramaUrl: '/uploads/renders/x/panorama.png' }],
   ['model url', { modelUrl: '/uploads/scenes/x/model.glb' }],
   ['duplicate-scene', {
     plan: null, modelUrl: null, lightsUrl: null, hdriUrl: null, floorPlanUrl: null,
@@ -96,6 +97,15 @@ for (const [label, body] of clientShapes) {
   const r = await patch(body)
   ok(`${label} is accepted`, r.status === 200, r.status === 200 ? '' : JSON.stringify(r.body))
 }
+
+console.log('\n-- a panorama can be removed from the scene and public presentation --')
+await patch({ panoramaUrl: '/uploads/renders/x/panorama.png' })
+const clearedPanorama = await patch({ panoramaUrl: null })
+ok('clearing the panorama is accepted', clearedPanorama.status === 200,
+  String(clearedPanorama.status))
+const afterPanoramaClear = await read()
+ok('and the cleared value survives the next read', afterPanoramaClear.panoramaUrl === null,
+  String(afterPanoramaClear.panoramaUrl))
 
 console.log('\n-- an unknown field is refused, not dropped --')
 const typo = await patch({ hdriUrl2: '/env/midday.hdr' })

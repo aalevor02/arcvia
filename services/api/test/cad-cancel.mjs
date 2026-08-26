@@ -38,8 +38,18 @@ const ok = (label, cond, extra = '') => {
   }
 }
 
+// A missing SERVER and a missing ENGINE are different answers and only one of
+// them is a skip — see the longer note in `cad.mjs`. Reported as "0 passed, 0
+// failed" with exit 0, a suite nobody started reads exactly like a suite that
+// passed.
 const health = await fetch(`${BASE}/cad/health`).then((r) => r.json()).catch(() => null)
-if (!health?.ok) {
+if (health === null) {
+  console.error(`FAIL  no API is listening on ${BASE} — start one before this suite:`)
+  console.error('        cd services/api && node src/server.js')
+  console.error('\n0 passed, 1 failed (nothing was tested)')
+  process.exit(1)
+}
+if (!health.ok) {
   console.log('SKIP  the CAD engine is not available on this server')
   console.log('\n0 passed, 0 failed')
   process.exit(0)

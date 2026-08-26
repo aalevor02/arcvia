@@ -74,7 +74,7 @@ Effort is rough working days.
 |---|---|---|---|
 | ✓ | The verify gate | — | refuses to ship a model it does not believe |
 | ✗ | **Residual queue (M5)** | 12–15 | The ranked list of what the solver is unsure about, with one-click choices. **This is what turns "usually right" into "safe to sell".** Needs the 12-drawing corpus first. |
-| ✗ | `CadImport.tsx` review screen | 5–7 | The queue needs a surface |
+| ◐ | `CadImport.tsx` review screen | 5–7 | First slice built: successful jobs with verifier warnings now pause before import, show ranked findings and model facts, and require explicit acceptance. Solver residual choices and persistent `ModelPatch` replay remain. |
 | ✗ | Fix-and-re-solve | 4–6 | Correct one wall, re-run, keep the correction |
 
 ### Stage 4 — Design: the part they enjoy
@@ -125,7 +125,7 @@ visualisation competitor offers it at all.
 | ✓ | Vector plan drawing | — | poché filled, named rooms, scale bar |
 | ✓ | Cycles stills, 6 styles | — | |
 | ◐ | Lightmap bake | 3–4 | API + worker exist, **no UI** |
-| ✗ | **360° panoramas** | 2–3 | The single most-requested client deliverable. Cycles renders equirectangular natively; the cameras exist. |
+| ✓ | **360° panoramas** | — | Built: 4096×2048 equirectangular Cycles preset, persistent scene panorama, shared drag/zoom viewer in Studio and published walkthrough, access-code gating, and removal. Real 512×256 Blender output is verified; full browser-flow and production-size render checks remain. |
 | ✗ | AI finish (`finish_ai.py`) | 5–8 | AOV passes are built and now Blender-5-correct |
 | ✗ | Film / orbit encode | 3–4 | `encode_film.py` exists in `tools/cad-to-3d` |
 | ✗ | VR | 6–10 | |
@@ -137,7 +137,7 @@ application for this.
 
 | | Item | Effort | Note |
 |---|---|---|---|
-| ◐ | Published walkthrough | — | `apps/visualisation` publishes; no authoring console |
+| ◐ | Published walkthrough | — | Public viewer now includes persistent, access-code-gated 360 panoramas with removal parity; a broader authoring console is still absent. |
 | ✓ | Hotspots | — | `apps/planviewer`, master plans only |
 | ✗ | **Publisher app** | 15–20 | bake console, named views, checkpoints, autoplay |
 | ✗ | **Configurator (object + material switching)** | 8–12 | "Show me the oak floor instead." **This is the feature that closes the sale**, and the catalogue + material library make it reachable. |
@@ -177,7 +177,9 @@ Ranked by *value per day*, not by size.
 2. **Poché as the studio's front door** (2–3 d) — the differentiator is unreachable from the product.
 3. **Schedules + BOQ** (5–8 d) — a report over data you already have; nobody else offers it.
 4. **Queue persistence + idempotency** (3–4 d) — stops silently losing work and double-charging.
-5. **360° panoramas** (2–3 d) — most-requested deliverable, cameras already solved.
+5. ~~**360° panoramas**~~ — built, including persistence, public viewing,
+   access-code gating, and removal; browser-flow and production-size render
+   verification remain.
 
 **Tier 2 — the structural gap.**
 6. **Multi-storey + stairs + roof** (22–32 d) — a house has floors. Nothing in Stage 7 or 8 is really sellable until this is true.
@@ -276,7 +278,8 @@ what kind of work it is — useful when planning a sprint rather than a product.
 - Cost estimate (needs a rate library) — 5–8 d
 
 **Visualise**
-- 360° panoramas — 2–3 d
+- ~~360° panoramas — 2–3 d~~ — built; browser-flow and production-size render
+  verification remain
 - AI finish (`finish_ai.py`) — 5–8 d
 - Film / orbit encode — 3–4 d
 - VR — 6–10 d
@@ -320,9 +323,12 @@ what kind of work it is — useful when planning a sprint rather than a product.
 ### FIX — known defects
 
 - Black pockets in lit renders — six hypotheses eliminated, see `HANDOFF-POCHE.md` §3
-- 6 of 18 doors unhosted on the villa
-- `LATEST DRAWINGS` yields only small rooms (a frame problem)
-- ~44% wall pairing on the villa
+- ~~6 of 18 doors unhosted on the villa~~ — current auto-layer, multi-storey
+  run reports zero unassigned openings; exact targets are retained if it regresses
+- ~~`LATEST DRAWINGS` yields only small rooms (a frame problem)~~ — fixed; it was
+  a unit problem, not a frame problem
+- Villa wall fidelity: 202/298 paired (67.8%), but wall run remains 3.48 m per
+  m² of indoor floor, indicating duplicate walls or rooms that are not closing
 
 ---
 

@@ -74,12 +74,90 @@ DERIVED_PERIMETER = "<derived:perimeter>"
 RING_INSET = 0.002
 
 
+def side_classes(walls, spaces) -> dict[int, tuple[bool, bool]]:
+    """
+    For each wall, whether its RIGHT and LEFT faces look into a room.
+
+    ── Why the poché has to be split at all ─────────────────────────────────
+    Every wall solid lands in one mesh, so the outside face of the envelope
+    and the inside face of every room arrive on the same triangles. Those are
+    different materials in every library — sand-faced plaster outside, putty
+    and emulsion inside — so a renderer handed that mesh cannot dress the
+    building correctly, and tagging the mesh either way would be a guess it
+    could not tell was a guess.
+
+    The test is the same one `quantify/areas.py` uses to decide whether a wall
+    is an internal partition, applied per FACE instead of per wall: step half
+    a thickness past the face at the wall's midpoint and ask whether that
+    point lands inside a room. A face with a room in front of it is internal;
+    a face with nothing is looking outdoors.
+
+    Returns {wall_index: (right_faces_room, left_faces_room)} where RIGHT is
+    the +n side of a->b, matching `MeshBuilder.add_box_from_segment`'s own
+    right-hand normal convention. Walls absent from the map were not
+    classified and should be left whole.
+    """
+    from shapely.geometry import Point, Polygon
+
+    polys = []
+    for space in spaces or ():
+        loop = getattr(space, "loop", None) or []
+        if len(loop) < 3:
+            continue
+        poly = Polygon([(float(p[0]), float(p[1])) for p in loop])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if not poly.is_empty:
+            polys.append(poly)
+    if not polys:
+        return {}
+
+    out: dict[int, tuple[bool, bool]] = {}
+    for index, wall in enumerate(walls):
+        dx, dy = wall.bx - wall.ax, wall.by - wall.ay
+        length = math.hypot(dx, dy)
+        if length < 1e-9 or wall.thickness <= 0:
+            continue
+        dx, dy = dx / length, dy / length
+        nx, ny = dy, -dx                       # RIGHT-hand normal, as the box uses
+        offset = getattr(wall, "offset", 0.0) or 0.0
+        # Probe from the BODY's centre, not the axis: a composite wall's solid
+        # is displaced by `offset` (see hypothesise/pair.py Wall.offset), and
+        # probing from the axis would step out of the wrong face.
+        cx = (wall.ax + wall.bx) / 2 - dy * offset
+        cy = (wall.ay + wall.by) / 2 + dx * offset
+        reach = wall.thickness / 2 + 0.05
+        right = Point(cx + nx * reach, cy + ny * reach)
+        left = Point(cx - nx * reach, cy - ny * reach)
+        out[index] = (
+            any(p.contains(right) for p in polys),
+            any(p.contains(left) for p in polys),
+        )
+    return out
+
+
+#: How far a plinth band rises above finished ground, metres.
+#:
+#: The band where an Indian building meets the ground is faced differently
+#: from the wall above it — flamed granite or a harder plaster — and doc 18 §5
+#: records it as a strong regional cue: get it wrong and a Kerala villa reads
+#: as a generic box. 450-600 mm is the range; 0.45 is the low end, chosen
+#: because a band that is too SHORT reads as a skirting and a band that is too
+#: tall reads as a half-height wall, and only the second is obviously wrong.
+PLINTH_HEIGHT = 0.45
+
+
 def build_walls(
     mesh: MeshBuilder,
     walls,
     openings,
     height: float,
     base_z: float = 0.0,
+    internal_mesh: MeshBuilder | None = None,
+    external_mesh: MeshBuilder | None = None,
+    reveal_mesh: MeshBuilder | None = None,
+    plinth_mesh: MeshBuilder | None = None,
+    spaces=None,
 ) -> dict:
     """
     Extrude walls, splitting each around the openings it hosts.
@@ -87,6 +165,11 @@ def build_walls(
     Unpaired walls are skipped. A single unpaired line is usually a railing, and
     extruding one to ceiling height turns a balcony into a sealed box that
     blacks out the rooms behind it.
+
+    When `spaces` and both face meshes are supplied, each wall's two long faces
+    are routed by whether a room lies in front of them — see `side_classes`.
+    Everything else (ends, tops, bottoms) stays in `mesh`, because an end cap
+    is a reveal rather than a wall surface and belongs to neither class.
     """
     by_wall: dict[int, list] = {}
     for opening in openings:
@@ -98,10 +181,46 @@ def build_walls(
     aprons = 0
     skipped = 0
 
+    sides = (side_classes(walls, spaces)
+             if spaces is not None and internal_mesh is not None
+             and external_mesh is not None else {})
+
     for index, wall in enumerate(walls):
         if not wall.paired:
             skipped += 1
             continue
+
+        # Route each long face by what stands in front of it. Unclassified
+        # walls pass None and land whole in `mesh`, exactly as before.
+        right_face = left_face = None
+        end_face = reveal_mesh
+        if index in sides:
+            right_room, left_room = sides[index]
+            right_face = internal_mesh if right_room else external_mesh
+            left_face = internal_mesh if left_room else external_mesh
+
+        # ── The plinth band ────────────────────────────────────────────────
+        # An external wall is faced differently for its first 450 mm. Slicing
+        # is safe here for a measured reason: two boxes stacked at a butt
+        # joint present OPPOSED faces, and this module's own black-pixel study
+        # puts that at zero — it is COINCIDENT boxes that z-fight, not
+        # touching ones.
+        def emit(a, b, z, h, _wall=wall, _r=right_face, _l=left_face,
+                 _e=end_face):
+            band = PLINTH_HEIGHT
+            wants = plinth_mesh is not None and external_mesh is not None and (
+                _r is external_mesh or _l is external_mesh
+            )
+            if not wants or z > base_z + 1e-6 or h <= band + 1e-6:
+                _segment(mesh, _wall, a, b, z, h, _r, _l, _e)
+                return
+            # Lower slice: only the OUTWARD faces become plinth. An internal
+            # face has no plinth — the band is a facade feature.
+            _segment(mesh, _wall, a, b, z, band,
+                     plinth_mesh if _r is external_mesh else _r,
+                     plinth_mesh if _l is external_mesh else _l,
+                     _e)
+            _segment(mesh, _wall, a, b, z + band, h - band, _r, _l, _e)
 
         length = wall.length
         holes = sorted(by_wall.get(index, []), key=lambda o: o.along)
@@ -115,25 +234,25 @@ def build_walls(
                 continue
 
             if start - cursor > 0.01:
-                _segment(mesh, wall, cursor, start, base_z, height)
+                emit(cursor, start, base_z, height)
                 pieces += 1
                 solids += 1
 
             head = hole.sill + hole.height
             if height - head > 0.01:
-                _segment(mesh, wall, start, end, base_z + head, height - head)
+                emit(start, end, base_z + head, height - head)
                 pieces += 1
                 lintels += 1
 
             if hole.sill > 0.01:
-                _segment(mesh, wall, start, end, base_z, hole.sill)
+                emit(start, end, base_z, hole.sill)
                 pieces += 1
                 aprons += 1
 
             cursor = end
 
         if length - cursor > 0.01:
-            _segment(mesh, wall, cursor, length, base_z, height)
+            emit(cursor, length, base_z, height)
             pieces += 1
             solids += 1
 
@@ -147,7 +266,10 @@ def build_walls(
 
 
 def _segment(mesh: MeshBuilder, wall, start: float, end: float,
-             base: float, height: float) -> None:
+             base: float, height: float,
+             right_face: MeshBuilder | None = None,
+             left_face: MeshBuilder | None = None,
+             end_face: MeshBuilder | None = None) -> None:
     """One box, from `start` to `end` along the wall, `base` to `base+height`."""
     dx, dy = wall.bx - wall.ax, wall.by - wall.ay
     length = (dx * dx + dy * dy) ** 0.5
@@ -162,10 +284,17 @@ def _segment(mesh: MeshBuilder, wall, start: float, end: float,
         if thickness <= 0 or height <= 0:
             return
 
+    # A composite wall's body sits `offset` metres to the left of its axis
+    # (see Wall.offset). Applied here — where the axis becomes a solid — and
+    # nowhere upstream, so the room graph never learns the body moved.
+    offset = getattr(wall, "offset", 0.0) or 0.0
+    ox, oy = -dy * offset, dx * offset
+
     mesh.add_box_from_segment(
-        wall.ax + dx * start, wall.ay + dy * start,
-        wall.ax + dx * end, wall.ay + dy * end,
+        wall.ax + dx * start + ox, wall.ay + dy * start + oy,
+        wall.ax + dx * end + ox, wall.ay + dy * end + oy,
         thickness, height, base_z=base,
+        right_face=right_face, left_face=left_face, end_face=end_face,
     )
 
 
@@ -548,3 +677,810 @@ def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
         built += 1
 
     return {"fixtures": built, "skipped": skipped, "planted": planted}
+
+
+#: A parapet's height above the roof slab, metres. Doc 29 §3's ASSUME default.
+#:
+#: Indian flat roofs are used — laundry, water tanks, sleeping out — so a
+#: parapet is near-universal and a roof without one reads as a slab someone
+#: could walk off. 1.0 m is the common built height and it is also what the
+#: bye-laws expect for a usable terrace.
+PARAPET_HEIGHT = 1.0
+
+#: How far the roof oversails the walls it covers, metres. A flat RCC roof is
+#: poured past the wall face to throw water clear; without it the roof edge
+#: sits exactly on the wall plane and z-fights it.
+ROOF_OVERHANG = 0.05
+
+
+STAIR_MAX_RISER = 0.18
+STAIR_MIN_GOING = 0.25
+STAIR_MAX_GOING = 0.30
+STAIR_MIN_WIDTH = 0.80
+STAIR_EDGE_CLEARANCE = 0.10
+STAIR_FLIGHT_GAP = 0.10
+STAIR_OVERLAP_MIN = 0.25
+STAIR_RECTANGULARITY_MIN = 0.85
+STAIR_RISER_LINE_MIN = 5
+STAIR_RISER_SPACING = (0.20, 0.35)
+STAIR_MARKER_CLEARANCE = 0.80
+STAIR_LANDING_EDGE_RANGE = (0.70, 1.60)
+
+
+def _marked_riser_runs(faces, shift=(0.0, 0.0)):
+    """Repeated, evenly spaced parallel segments that can be tread/riser marks."""
+    buckets = {}
+    seen = set()
+    projected = []
+    for face in faces or ():
+        ax = float(face.ax) + shift[0]
+        ay = float(face.ay) + shift[1]
+        bx = float(face.bx) + shift[0]
+        by = float(face.by) + shift[1]
+        key = tuple(sorted(((round(ax, 3), round(ay, 3)),
+                            (round(bx, 3), round(by, 3)))))
+        if key in seen:
+            continue
+        seen.add(key)
+        length = math.hypot(bx - ax, by - ay)
+        if not 0.80 <= length <= 3.00:
+            continue
+        ux, uy = (bx - ax) / length, (by - ay) / length
+        if ux < -1e-6 or (abs(ux) <= 1e-6 and uy < 0):
+            ux, uy = -ux, -uy
+        nx, ny = -uy, ux
+        u0, u1 = ax * ux + ay * uy, bx * ux + by * uy
+        v0, v1 = ax * nx + ay * ny, bx * nx + by * ny
+        ulo, uhi = sorted((u0, u1))
+        v = (v0 + v1) / 2
+        angle = math.atan2(uy, ux)
+        item = {
+            "axis": (ux, uy), "normal": (nx, ny),
+            "ulo": ulo, "uhi": uhi, "v": v, "length": length,
+        }
+        projected.append(item)
+        bucket = (
+            round(angle / math.radians(2)),
+            # CAD wall faces around one flight vary by roughly 0.1 m at their
+            # ends. A 0.30 m bin keeps those fragments together; the later
+            # even-spacing, paired-flight, marker, landing, and upper-floor
+            # checks still decide whether the group is stair evidence.
+            round(length / 0.30),
+            round(((ulo + uhi) / 2) / 0.30),
+        )
+        buckets.setdefault(bucket, []).append(item)
+
+    runs = []
+    for items in buckets.values():
+        items = sorted(items, key=lambda item: item["v"])
+        sequence = []
+        for item in items:
+            if not sequence:
+                sequence = [item]
+                continue
+            gap = item["v"] - sequence[-1]["v"]
+            expected = (
+                sum(sequence[i + 1]["v"] - sequence[i]["v"]
+                    for i in range(len(sequence) - 1)) / (len(sequence) - 1)
+                if len(sequence) > 1 else None
+            )
+            minimum = (max(STAIR_RISER_SPACING[0], expected - 0.035)
+                       if expected is not None else STAIR_RISER_SPACING[0])
+            maximum = (min(STAIR_RISER_SPACING[1], expected + 0.035)
+                       if expected is not None else STAIR_RISER_SPACING[1])
+            if gap < minimum:
+                # Paired wall faces and duplicated ceiling linework can put a
+                # second segment 100-190 mm beside a true riser. It is too
+                # close to the run's measured going; ignore it without
+                # breaking the evenly spaced sequence already in progress.
+                continue
+            if gap <= maximum:
+                sequence.append(item)
+            else:
+                if len(sequence) >= STAIR_RISER_LINE_MIN:
+                    runs.append(sequence)
+                sequence = [item]
+        if len(sequence) >= STAIR_RISER_LINE_MIN:
+            runs.append(sequence)
+
+    result = []
+    for sequence in runs:
+        gaps = [sequence[i + 1]["v"] - sequence[i]["v"]
+                for i in range(len(sequence) - 1)]
+        going = sum(gaps) / len(gaps)
+        if max(abs(gap - going) for gap in gaps) > 0.035:
+            continue
+        result.append({
+            "axis": sequence[0]["axis"],
+            "normal": sequence[0]["normal"],
+            "ulo": sum(item["ulo"] for item in sequence) / len(sequence),
+            "uhi": sum(item["uhi"] for item in sequence) / len(sequence),
+            "vmin": sequence[0]["v"],
+            "vmax": sequence[-1]["v"],
+            "going": going,
+            "count": len(sequence),
+            "positions": [item["v"] for item in sequence],
+        })
+    return result, projected
+
+
+def _marker_projection(marker, run, shift=(0.0, 0.0)):
+    x = float(marker.x) + shift[0]
+    y = float(marker.y) + shift[1]
+    ux, uy = run["axis"]
+    nx, ny = run["normal"]
+    return x * ux + y * uy, x * nx + y * ny
+
+
+def _point_from_projection(axis, normal, u, v):
+    return (u * axis[0] + v * normal[0],
+            u * axis[1] + v * normal[1])
+
+
+def _measured_dogleg_evidence(
+    lower_faces, upper_faces, lower_markers, upper_markers,
+    lower_shift=(0.0, 0.0), upper_shift=(0.0, 0.0),
+):
+    """One dog-leg core proven by paired riser runs, UP/DOWN, and a landing edge."""
+    lower_runs, lower_segments = _marked_riser_runs(lower_faces, lower_shift)
+    upper_runs, _upper_segments = _marked_riser_runs(upper_faces, upper_shift)
+    lower_up = [marker for marker in lower_markers or ()
+                if float(getattr(marker, "level", -1)) == 0.0]
+    upper_down = [marker for marker in upper_markers or ()
+                  if float(getattr(marker, "level", -1)) == 1.0]
+
+    candidates = []
+    for first_index, first in enumerate(lower_runs):
+        for second in lower_runs[first_index + 1:]:
+            if abs(first["axis"][0] * second["axis"][0]
+                   + first["axis"][1] * second["axis"][1]) < 0.995:
+                continue
+            if (abs(first["going"] - second["going"]) > 0.035
+                    or abs(first["vmin"] - second["vmin"]) > 0.08
+                    or abs(first["vmax"] - second["vmax"]) > 0.08):
+                continue
+            bands = sorted((first, second), key=lambda run: run["ulo"])
+            gap = bands[1]["ulo"] - bands[0]["uhi"]
+            if not 0.0 <= gap <= 0.25:
+                continue
+            umin, umax = bands[0]["ulo"], bands[1]["uhi"]
+            nearby = []
+            for marker in lower_up:
+                mu, mv = _marker_projection(marker, first, lower_shift)
+                if (umin - STAIR_MARKER_CLEARANCE <= mu <= umax + STAIR_MARKER_CLEARANCE
+                        and first["vmin"] - STAIR_MARKER_CLEARANCE <= mv
+                        <= first["vmax"] + STAIR_MARKER_CLEARANCE):
+                    nearby.append((marker, mu, mv))
+            if not nearby:
+                continue
+            marker, _mu, marker_v = min(
+                nearby,
+                key=lambda item: min(abs(item[2] - first["vmin"]),
+                                     abs(item[2] - first["vmax"])),
+            )
+            marker_at_min = abs(marker_v - first["vmin"]) < abs(marker_v - first["vmax"])
+            landing_side = 1 if marker_at_min else -1
+            landing_edges = []
+            for segment in lower_segments:
+                if abs(segment["axis"][0] * first["axis"][0]
+                       + segment["axis"][1] * first["axis"][1]) < 0.995:
+                    continue
+                overlap = max(0.0, min(segment["uhi"], umax)
+                              - max(segment["ulo"], umin))
+                if overlap < (umax - umin) * 0.70:
+                    continue
+                edge_gap = ((segment["v"] - first["vmax"])
+                            if landing_side > 0
+                            else (first["vmin"] - segment["v"]))
+                if STAIR_LANDING_EDGE_RANGE[0] <= edge_gap <= STAIR_LANDING_EDGE_RANGE[1]:
+                    landing_edges.append((edge_gap, segment["v"]))
+            if not landing_edges:
+                continue
+            landing_depth, landing_far_v = min(landing_edges)
+            if landing_side > 0:
+                start_v = first["vmin"] - first["going"]
+                landing_near_v = first["vmax"]
+            else:
+                start_v = first["vmax"] + first["going"]
+                landing_near_v = first["vmin"]
+            candidates.append({
+                "axis": first["axis"], "normal": first["normal"],
+                "bands": bands, "umin": umin, "umax": umax,
+                "startV": start_v, "landingNearV": landing_near_v,
+                "landingFarV": landing_far_v,
+                "riserVmin": first["vmin"], "riserVmax": first["vmax"],
+                "going": (first["going"] + second["going"]) / 2,
+                "riserLines": min(first["count"], second["count"]),
+                "flightWidths": [band["uhi"] - band["ulo"] for band in bands],
+                "flightGap": gap, "landingDepth": landing_depth,
+            })
+
+    confirmed = []
+    for candidate in candidates:
+        for run in upper_runs:
+            if abs(run["axis"][0] * candidate["axis"][0]
+                   + run["axis"][1] * candidate["axis"][1]) < 0.995:
+                continue
+            if (abs(run["going"] - candidate["going"]) > 0.035
+                    or run["count"] < candidate["riserLines"]):
+                continue
+            if (abs(run["vmin"] - candidate["riserVmin"]) > 0.15
+                    or abs(run["vmax"] - candidate["riserVmax"]) > 0.15):
+                continue
+            for marker in upper_down:
+                mu, mv = _marker_projection(marker, run, upper_shift)
+                vlo = min(candidate["startV"], candidate["landingFarV"])
+                vhi = max(candidate["startV"], candidate["landingFarV"])
+                if (candidate["umin"] - STAIR_MARKER_CLEARANCE <= mu
+                        <= candidate["umax"] + STAIR_MARKER_CLEARANCE
+                        and vlo - STAIR_MARKER_CLEARANCE <= mv
+                        <= vhi + STAIR_MARKER_CLEARANCE):
+                    confirmed.append(candidate)
+                    break
+            if candidate in confirmed:
+                break
+    return confirmed
+
+
+def build_marked_stairs(
+    lower_faces, upper_faces, lower_markers, upper_markers, rise: float,
+    base_z: float = 0.0, lower_shift=(0.0, 0.0), upper_shift=(0.0, 0.0),
+):
+    """Build a measured dog-leg only when both floors corroborate its riser marks."""
+    evidence = _measured_dogleg_evidence(
+        lower_faces, upper_faces, lower_markers, upper_markers,
+        lower_shift, upper_shift,
+    )
+    if len(evidence) != 1:
+        reason = ("no unique paired UP/DOWN riser-line core"
+                  if not evidence else
+                  f"{len(evidence)} paired UP/DOWN riser-line cores are ambiguous")
+        return {}, {"stairs": 0, "refused": [reason], "layouts": [],
+                    "verticalOpenings": [], "assumed": None}
+    item = evidence[0]
+    per_flight = item["riserLines"]
+    risers = per_flight * 2
+    if rise <= 0 or rise / risers > STAIR_MAX_RISER:
+        return {}, {"stairs": 0,
+                    "refused": [f"measured {risers}-riser stair exceeds {STAIR_MAX_RISER:.2f} m maximum riser"],
+                    "layouts": [], "verticalOpenings": [], "assumed": None}
+
+    axis, normal = item["axis"], item["normal"]
+    direction = 1.0 if item["landingNearV"] > item["startV"] else -1.0
+    px, py = normal[0] * direction, normal[1] * direction
+    centres = [(band["ulo"] + band["uhi"]) / 2 for band in item["bands"]]
+    mesh = MeshBuilder()
+    first_start = _point_from_projection(axis, normal, centres[0], item["startV"])
+    for step in range(per_flight):
+        ax = first_start[0] + px * item["going"] * step
+        ay = first_start[1] + py * item["going"] * step
+        mesh.add_box_from_segment(
+            ax, ay, ax + px * item["going"], ay + py * item["going"],
+            item["flightWidths"][0], rise * (step + 1) / risers,
+            base_z=base_z,
+        )
+    landing_near = _point_from_projection(
+        axis, normal, (item["umin"] + item["umax"]) / 2,
+        item["landingNearV"],
+    )
+    landing_far = _point_from_projection(
+        axis, normal, (item["umin"] + item["umax"]) / 2,
+        item["landingFarV"],
+    )
+    mesh.add_box_from_segment(
+        *landing_near, *landing_far, item["umax"] - item["umin"],
+        rise / 2, base_z=base_z,
+    )
+    second_start = _point_from_projection(
+        axis, normal, centres[1], item["landingNearV"],
+    )
+    for step in range(per_flight):
+        ax = second_start[0] - px * item["going"] * step
+        ay = second_start[1] - py * item["going"] * step
+        mesh.add_box_from_segment(
+            ax, ay, ax - px * item["going"], ay - py * item["going"],
+            item["flightWidths"][1],
+            rise * (per_flight + step + 1) / risers,
+            base_z=base_z,
+        )
+    v0, v1 = sorted((item["startV"], item["landingFarV"]))
+    loop = [
+        _point_from_projection(axis, normal, item["umin"], v0),
+        _point_from_projection(axis, normal, item["umax"], v0),
+        _point_from_projection(axis, normal, item["umax"], v1),
+        _point_from_projection(axis, normal, item["umin"], v1),
+    ]
+    layout = {
+        "type": "dog-leg-u", "source": "measured-riser-lines",
+        "risers": [per_flight, per_flight], "going": round(item["going"], 3),
+        "flightWidths": [round(value, 3) for value in item["flightWidths"]],
+        "flightGap": round(item["flightGap"], 3),
+        "landingDepth": round(item["landingDepth"], 3),
+        "landingHeight": round(base_z + rise / 2, 3),
+    }
+    return {"stair_marked_riser_core": mesh}, {
+        "stairs": 1, "refused": [], "layouts": [layout],
+        "verticalOpenings": [{"loop": [[round(x, 4), round(y, 4)] for x, y in loop],
+                              "source": "measured-riser-lines"}],
+        "assumed": "opposing flight direction and tread solids are inferred; riser spacing, flight widths, landing edge, and core position are measured",
+    }
+
+
+def _named_stair_polygons(spaces, shift=(0.0, 0.0)):
+    """Stair-labelled room polygons in registered plan coordinates."""
+    from shapely.affinity import translate
+    from shapely.geometry import Polygon
+
+    found = []
+    for space in spaces or ():
+        name = str(getattr(space, "name", None) or "")
+        if not re.search(r"\bstairs?(?:\s*(?:case|well))?\b", name, re.I):
+            continue
+        loop = getattr(space, "loop", None) or []
+        if len(loop) < 3:
+            continue
+        poly = Polygon(loop)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if not poly.is_empty:
+            found.append((space, translate(poly, xoff=shift[0], yoff=shift[1])))
+    return found
+
+
+def _straight_stair(
+    rectangle,
+    run_edge: int,
+    run_length: float,
+    width: float,
+    risers: int,
+    rise: float,
+    base_z: float,
+):
+    """One inferred straight flight, or None when the core cannot contain it."""
+    usable_run = run_length - 2 * STAIR_EDGE_CLEARANCE
+    usable_width = width - 2 * STAIR_EDGE_CLEARANCE
+    if (
+        usable_width < STAIR_MIN_WIDTH
+        or usable_run < risers * STAIR_MIN_GOING
+    ):
+        return None
+
+    going = min(STAIR_MAX_GOING, usable_run / risers)
+    flight_run = going * risers
+    a = rectangle[run_edge]
+    b = rectangle[(run_edge + 1) % 4]
+    dx, dy = (b[0] - a[0]) / run_length, (b[1] - a[1]) / run_length
+    cx = sum(point[0] for point in rectangle) / 4
+    cy = sum(point[1] for point in rectangle) / 4
+    start_x = cx - dx * flight_run / 2
+    start_y = cy - dy * flight_run / 2
+
+    mesh = MeshBuilder()
+    for step in range(risers):
+        ax = start_x + dx * going * step
+        ay = start_y + dy * going * step
+        bx = ax + dx * going
+        by = ay + dy * going
+        mesh.add_box_from_segment(
+            ax, ay, bx, by, usable_width, rise * (step + 1) / risers,
+            base_z=base_z,
+        )
+    return mesh, {
+        "type": "straight",
+        "risers": risers,
+        "going": round(going, 3),
+        "flightWidth": round(usable_width, 3),
+    }
+
+
+def _dogleg_stair(
+    rectangle,
+    run_edge: int,
+    run_length: float,
+    width: float,
+    risers: int,
+    rise: float,
+    base_z: float,
+):
+    """Two parallel opposing flights and a half-height landing, or None."""
+    first_risers = risers // 2
+    second_risers = risers - first_risers
+    if first_risers < 1:
+        return None
+
+    usable_run = run_length - 2 * STAIR_EDGE_CLEARANCE
+    usable_width = width - 2 * STAIR_EDGE_CLEARANCE
+    flight_width = STAIR_MIN_WIDTH
+    landing_depth = flight_width
+    landing_width = 2 * flight_width + STAIR_FLIGHT_GAP
+    flight_run_available = usable_run - landing_depth
+    if (
+        usable_width < landing_width
+        or flight_run_available
+        < max(first_risers, second_risers) * STAIR_MIN_GOING
+    ):
+        return None
+
+    first_going = min(
+        STAIR_MAX_GOING, flight_run_available / first_risers,
+    )
+    second_going = min(
+        STAIR_MAX_GOING, flight_run_available / second_risers,
+    )
+    first_run = first_going * first_risers
+    second_run = second_going * second_risers
+
+    a = rectangle[run_edge]
+    b = rectangle[(run_edge + 1) % 4]
+    dx, dy = (b[0] - a[0]) / run_length, (b[1] - a[1]) / run_length
+    nx, ny = -dy, dx
+    cx = sum(point[0] for point in rectangle) / 4
+    cy = sum(point[1] for point in rectangle) / 4
+    landing_near_x = cx + dx * (usable_run / 2 - landing_depth)
+    landing_near_y = cy + dy * (usable_run / 2 - landing_depth)
+    landing_far_x = landing_near_x + dx * landing_depth
+    landing_far_y = landing_near_y + dy * landing_depth
+    side_offset = (STAIR_FLIGHT_GAP + flight_width) / 2
+    landing_height = rise * first_risers / risers
+
+    mesh = MeshBuilder()
+    first_start_x = landing_near_x - dx * first_run - nx * side_offset
+    first_start_y = landing_near_y - dy * first_run - ny * side_offset
+    for step in range(first_risers):
+        ax = first_start_x + dx * first_going * step
+        ay = first_start_y + dy * first_going * step
+        bx = ax + dx * first_going
+        by = ay + dy * first_going
+        mesh.add_box_from_segment(
+            ax, ay, bx, by, flight_width,
+            rise * (step + 1) / risers,
+            base_z=base_z,
+        )
+
+    mesh.add_box_from_segment(
+        landing_near_x, landing_near_y,
+        landing_far_x, landing_far_y,
+        landing_width, landing_height,
+        base_z=base_z,
+    )
+
+    second_start_x = landing_near_x + nx * side_offset
+    second_start_y = landing_near_y + ny * side_offset
+    for step in range(second_risers):
+        ax = second_start_x - dx * second_going * step
+        ay = second_start_y - dy * second_going * step
+        bx = ax - dx * second_going
+        by = ay - dy * second_going
+        mesh.add_box_from_segment(
+            ax, ay, bx, by, flight_width,
+            rise * (first_risers + step + 1) / risers,
+            base_z=base_z,
+        )
+
+    return mesh, {
+        "type": "dog-leg-u",
+        "risers": [first_risers, second_risers],
+        "goings": [round(first_going, 3), round(second_going, 3)],
+        "flightWidth": flight_width,
+        "flightGap": STAIR_FLIGHT_GAP,
+        "landingDepth": landing_depth,
+        "landingHeight": round(base_z + landing_height, 3),
+    }
+
+
+def build_stairs(
+    lower_spaces,
+    upper_spaces,
+    rise: float,
+    base_z: float = 0.0,
+    lower_shift=(0.0, 0.0),
+    upper_shift=(0.0, 0.0),
+) -> tuple[dict[str, MeshBuilder], dict]:
+    """Straight or dog-leg flights where adjacent plans prove one stair core."""
+    lower = _named_stair_polygons(lower_spaces, lower_shift)
+    upper = _named_stair_polygons(upper_spaces, upper_shift)
+    meshes: dict[str, MeshBuilder] = {}
+    refused = []
+    vertical_openings = []
+    layouts = []
+
+    if rise <= 0:
+        return {}, {
+            "stairs": 0,
+            "refused": ["storey rise is not positive"],
+            "layouts": [],
+            "verticalOpenings": [],
+            "assumed": None,
+        }
+
+    # Absence is evidence too. A connection with zero stairs and zero refusals
+    # reads as though stair recovery was never attempted, which hid the real
+    # villa's unpaired `DOWN` marker. Direction words alone do not prove a
+    # physical stair core; report the missing named room instead of guessing.
+    if not lower or not upper:
+        if not lower and not upper:
+            reason = (
+                "neither adjacent storey has an explicitly named stair room"
+            )
+        elif not lower:
+            reason = "lower storey has no explicitly named stair room"
+        else:
+            reason = "upper storey has no explicitly named stair room"
+        return {}, {
+            "stairs": 0,
+            "refused": [reason],
+            "layouts": [],
+            "verticalOpenings": [],
+            "assumed": None,
+        }
+
+    candidates = []
+    upper_claimants: dict[int, int] = {}
+    for space, lower_poly in lower:
+        matches = []
+        for upper_space, upper_poly in upper:
+            shared = lower_poly.intersection(upper_poly)
+            smaller = min(lower_poly.area, upper_poly.area)
+            overlap = shared.area / smaller if smaller > 1e-9 else 0.0
+            if overlap >= STAIR_OVERLAP_MIN and not shared.is_empty:
+                matches.append((overlap, upper_space, shared))
+                key = id(upper_space)
+                upper_claimants[key] = upper_claimants.get(key, 0) + 1
+        candidates.append((space, lower_poly, matches))
+
+    for space, lower_poly, matches in candidates:
+        if not matches:
+            refused.append(f"{space.name or 'STAIR'} has no aligned stair above")
+            continue
+
+        if len(matches) > 1:
+            names = ", ".join(
+                str(candidate.name or "STAIR")
+                for _overlap, candidate, _shared in
+                sorted(matches, key=lambda item: item[0], reverse=True)
+            )
+            refused.append(
+                f"{space.name or 'STAIR'} matches multiple aligned stair rooms "
+                f"above ({names}); connection is ambiguous"
+            )
+            continue
+
+        _overlap, upper_space, shared = matches[0]
+        if upper_claimants.get(id(upper_space), 0) > 1:
+            refused.append(
+                f"{space.name or 'STAIR'} shares {upper_space.name or 'STAIR'} "
+                "above with multiple lower stair rooms; connection is ambiguous"
+            )
+            continue
+        if shared.geom_type == "MultiPolygon":
+            shared = max(shared.geoms, key=lambda geom: geom.area)
+        rotated_rectangle = shared.minimum_rotated_rectangle
+        rectangularity = (
+            shared.area / rotated_rectangle.area
+            if rotated_rectangle.area > 1e-9 else 0.0
+        )
+        if rectangularity < STAIR_RECTANGULARITY_MIN:
+            refused.append(
+                f"{space.name or 'STAIR'} needs a shaped or turning flight: "
+                f"shared core is only {rectangularity:.0%} rectangular"
+            )
+            continue
+        rectangle = list(rotated_rectangle.exterior.coords)[:4]
+        edges = [
+            (math.dist(rectangle[i], rectangle[(i + 1) % 4]), i)
+            for i in range(4)
+        ]
+        run_length, run_edge = max(edges)
+        width = min(length for length, _index in edges)
+        risers = max(1, math.ceil(rise / STAIR_MAX_RISER))
+        built = _straight_stair(
+            rectangle, run_edge, run_length, width, risers, rise, base_z,
+        )
+        if built is None:
+            built = _dogleg_stair(
+                rectangle, run_edge, run_length, width, risers, rise, base_z,
+            )
+        if built is None:
+            longest_flight = risers - risers // 2
+            dogleg_run = (
+                2 * STAIR_EDGE_CLEARANCE
+                + STAIR_MIN_WIDTH
+                + longest_flight * STAIR_MIN_GOING
+            )
+            dogleg_width = (
+                2 * STAIR_EDGE_CLEARANCE
+                + 2 * STAIR_MIN_WIDTH
+                + STAIR_FLIGHT_GAP
+            )
+            refused.append(
+                f"{space.name or 'STAIR'} cannot fit a straight or dog-leg/U "
+                f"stair: shared core {run_length:.2f} x {width:.2f} m; "
+                f"dog-leg minimum is {dogleg_run:.2f} x {dogleg_width:.2f} m "
+                f"for {risers} risers"
+            )
+            continue
+
+        mesh, layout = built
+        meshes[f"stair_room{space.index}_{_room_mesh_slug(space)}"] = mesh
+        layouts.append({
+            "lowerRoom": space.index,
+            "upperRoom": upper_space.index,
+            **layout,
+        })
+        vertical_openings.append({
+            "lowerRoom": space.index,
+            "upperRoom": upper_space.index,
+        })
+
+    return meshes, {
+        "stairs": len(meshes),
+        "refused": refused,
+        "layouts": layouts,
+        "verticalOpenings": vertical_openings,
+        "assumed": (
+            "flight form, direction, tread layout, and any intermediate "
+            "landing are inferred inside two measured, registered stair-room "
+            "footprints"
+        ) if meshes else None,
+    }
+
+
+def open_stair_cores(
+    lower_meshes: dict[str, MeshBuilder],
+    upper_meshes: dict[str, MeshBuilder],
+    stair_report: dict,
+    *, lower_spaces=None, upper_spaces=None,
+    lower_shift=(0.0, 0.0), upper_shift=(0.0, 0.0),
+    lower_ceiling_z=None, upper_base_z=None,
+) -> list[str]:
+    """Remove generated horizontal caps only for stair pairs actually built."""
+    removed = []
+    for opening in stair_report.get("verticalOpenings", ()):
+        if opening.get("loop"):
+            if (lower_spaces is None or upper_spaces is None
+                    or lower_ceiling_z is None or upper_base_z is None):
+                continue
+            from shapely.affinity import translate
+            from shapely.geometry import Polygon
+
+            core = Polygon(opening["loop"])
+
+            def parts(geometry):
+                if geometry.is_empty:
+                    return []
+                return ([geometry] if geometry.geom_type == "Polygon"
+                        else list(geometry.geoms))
+
+            def cut(spaces, meshes, shift, ceiling):
+                for space in spaces:
+                    poly = Polygon(space.loop)
+                    if not poly.is_valid:
+                        poly = poly.buffer(0)
+                    poly = translate(poly, xoff=shift[0], yoff=shift[1])
+                    if poly.intersection(core).area <= 0.01:
+                        continue
+                    prefix = ((f"ceiling_room{space.index}_",)
+                              if ceiling else
+                              (f"floor_room{space.index}_", f"paving_room{space.index}_",
+                               f"water_room{space.index}_", f"lawn_room{space.index}_"))
+                    key = next((name for name in list(meshes)
+                                if name.startswith(prefix)), None)
+                    if key is None:
+                        continue
+                    replacement = MeshBuilder()
+                    for polygon in parts(poly.difference(core)):
+                        exterior = list(polygon.exterior.coords)[:-1]
+                        holes = [list(ring.coords)[:-1] for ring in polygon.interiors]
+                        if ceiling:
+                            replacement.add_polygon_face(
+                                exterior, lower_ceiling_z, up=False, holes=holes,
+                            )
+                        else:
+                            replacement.add_polygon_slab(
+                                exterior, upper_base_z - SLAB_THICKNESS,
+                                SLAB_THICKNESS, holes=holes,
+                            )
+                    if replacement.indices:
+                        meshes[key] = replacement
+                    else:
+                        meshes.pop(key, None)
+                    removed.append(f"{key}: measured partial opening")
+
+            cut(lower_spaces, lower_meshes, lower_shift, True)
+            cut(upper_spaces, upper_meshes, upper_shift, False)
+            continue
+        lower_prefix = f"ceiling_room{opening['lowerRoom']}_"
+        upper_prefix = f"floor_room{opening['upperRoom']}_"
+        for meshes, prefix in (
+            (lower_meshes, lower_prefix),
+            (upper_meshes, upper_prefix),
+        ):
+            for name in list(meshes):
+                if name.startswith(prefix):
+                    meshes.pop(name)
+                    removed.append(name)
+    return removed
+
+
+def build_roof(spaces, height: float, base_z: float = 0.0,
+               parapet: bool = True) -> tuple[dict, dict]:
+    """
+    A flat roof over the indoor footprint, with a parapet.
+
+    ── Why this is an ASSUMPTION, and says so ───────────────────────────────
+    A floor plan does not draw the roof. What it gives is the footprint, and
+    everything above the wall head — flat or pitched, parapet or eave, tile or
+    RCC — is inference. Most Indian residential IS flat RCC with a parapet
+    (doc 18's `roof_rcc_coba_screed`), so that is both the honest fallback and
+    the common case, but it is still a guess: the meshes are tagged
+    `surfaceClassSource: assumed` and a pitched-roof building will be wrong
+    until form recovery exists. Being wrong LOUDLY is the point — a model with
+    no roof at all is silently wrong in a way no reviewer can see.
+
+    ── Why it is OFF by default ─────────────────────────────────────────────
+    `render/cameras.py::isometric_view` is a cutaway: it works because there
+    has never been a roof to look through. Adding one unconditionally would
+    put a lid on every existing isometric and the renders would quietly become
+    useless. So the caller asks for it, and a renderer that wants an interior
+    view hides the `roof*` meshes rather than never having them.
+
+    Returns ({mesh name: MeshBuilder}, report).
+    """
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    indoor = []
+    for space in spaces or ():
+        if _space_is_outdoor(space):
+            continue
+        loop = getattr(space, "loop", None) or []
+        if len(loop) < 3:
+            continue
+        poly = Polygon([(float(p[0]), float(p[1])) for p in loop])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if not poly.is_empty:
+            indoor.append(poly)
+
+    if not indoor:
+        return {}, {"roof": 0, "reason": "no indoor rooms to cover"}
+
+    # Rooms meet ON wall centrelines, so their union already covers half of
+    # every wall. Growing it by a wall's half-thickness plus the oversail
+    # closes the gap over the envelope and throws water clear of the face.
+    footprint = unary_union(indoor).buffer(0.15 + ROOF_OVERHANG,
+                                           join_style=2).buffer(0)
+    if footprint.geom_type == "MultiPolygon":
+        footprint = max(footprint.geoms, key=lambda g: g.area)
+    if footprint.is_empty:
+        return {}, {"roof": 0, "reason": "footprint did not resolve"}
+
+    ring = list(footprint.exterior.coords)[:-1]
+    top = base_z + height
+
+    meshes: dict[str, MeshBuilder] = {}
+    slab = MeshBuilder()
+    slab.add_polygon_slab(ring, top, SLAB_THICKNESS)
+    meshes["roof"] = slab
+
+    built_parapet = 0
+    if parapet:
+        wall_mesh = MeshBuilder()
+        for (ax, ay), (bx, by) in zip(ring, ring[1:] + ring[:1]):
+            if math.hypot(bx - ax, by - ay) < 1e-6:
+                continue
+            wall_mesh.add_box_from_segment(
+                ax, ay, bx, by, 0.115, PARAPET_HEIGHT,
+                base_z=top + SLAB_THICKNESS,
+            )
+            built_parapet += 1
+        if wall_mesh.indices:
+            meshes["parapet"] = wall_mesh
+
+    return meshes, {
+        "roof": 1,
+        "parapet": built_parapet,
+        "area": round(footprint.area, 2),
+        "height": round(top, 3),
+        "assumed": "flat RCC roof with a parapet; the plan does not draw one",
+    }

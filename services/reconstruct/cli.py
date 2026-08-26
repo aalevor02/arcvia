@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from classify.elements import classify_footprint, classify_room  # noqa: E402
+from classify.elements import classify_footprint, classify_layer, classify_room  # noqa: E402
 from ingest import blocks as blk  # noqa: E402
 from vendor import cad_kernel as kernel  # noqa: E402
 
@@ -75,7 +75,11 @@ def survey(input_path: str, work_dir: str, unit: str | None = None) -> dict:
 
     dxf_path, converter = _as_dxf(source, work)
 
-    reading = kernel.read(str(dxf_path))
+    # Recover once. On a 100k-entity real sheet, DXF recovery is the dominant
+    # cost; reading geometry, annotations, and INSERTs through three separately
+    # recovered documents consumed 48.5 of 62.1 profiled seconds.
+    doc, auditor = blk.open_dxf(str(dxf_path))
+    reading = kernel.read(str(dxf_path), doc=doc, auditor=auditor)
 
     # An override rescales everything the reader measured. The reader's own
     # numbers stay on the report as `headerUnit`, because the disagreement
@@ -93,8 +97,6 @@ def survey(input_path: str, work_dir: str, unit: str | None = None) -> dict:
     scale = reading["scale"]
     origin = reading["_origin"]
 
-    doc, auditor = blk.open_dxf(str(dxf_path))
-
     footprints = blk.block_footprints(doc, scale)
 
     # Only text that actually names a room can act as room context. The nearest
@@ -109,7 +111,7 @@ def survey(input_path: str, work_dir: str, unit: str | None = None) -> dict:
     wall_layers = {r["name"] for r in reading["layers"] if r["guess"] == "wall"}
     wall_segments = [s for s in reading["_segments"] if s.layer in wall_layers]
 
-    placed = kernel.furniture(str(dxf_path), reading)
+    placed = kernel.furniture(str(dxf_path), reading, doc=doc)
 
     results = []
     for placement in placed["placements"]:
@@ -198,6 +200,8 @@ def reconstruct(
     auto_layers: bool = False,
     with_perimeter: bool = True,
     with_storeys: bool = False,
+    with_roof: bool = False,
+    building_index: int | None = None,
 ) -> dict:
     """
     Drawing -> walls, rooms, openings, fixtures -> GLB.
@@ -208,11 +212,15 @@ def reconstruct(
     """
     from build.glb import MeshBuilder, write_glb
     from build.solidify import (
-        build_fixtures, build_room_finishes, build_room_slabs, build_walls,
+        build_fixtures, build_room_finishes, build_room_slabs, build_roof,
+        build_marked_stairs, build_stairs, build_walls, open_stair_cores,
     )
     from classify.catalogue_dims import CATALOGUE_DIMS
     from hypothesise import openings as op
-    from hypothesise.pair import Face, join_corners, pair_faces, summarise
+    from hypothesise.pair import (
+        Face, join_corners, pair_faces, summarise, summarise_by_layer,
+    )
+    from solve import site
     from solve import spaces as sp
     from solve.frames import MIN_WALLS, segment_frames
     from hypothesise.perimeter import add_perimeter
@@ -224,7 +232,11 @@ def reconstruct(
     out.mkdir(parents=True, exist_ok=True)
 
     dxf_path, converter = _as_dxf(source, work)
-    reading = kernel.read(str(dxf_path))
+    # One recovered document feeds geometry, text, titles, and block INSERTs.
+    # Re-opening the same malformed-but-readable DXF at each stage dominated
+    # end-to-end runtime on the corpus and produced no independent evidence.
+    doc, auditor = blk.open_dxf(str(dxf_path))
+    reading = kernel.read(str(dxf_path), doc=doc, auditor=auditor)
 
     header_unit, header_scale = reading["unit"], reading["scale"]
     if unit:
@@ -308,8 +320,6 @@ def reconstruct(
 
     # The pick itself happens BELOW, after the ranking pass — which needs the
     # titles and labels read first. Nothing between here and there consumes it.
-    doc, _auditor = blk.open_dxf(str(dxf_path))
-
     # ---- What the drawing calls each frame ---------------------------------
     # The sheet usually says which storey each plan is, in plain TEXT, and until
     # now this file threw every one of them away: the label filter below keeps
@@ -372,7 +382,8 @@ def reconstruct(
             if a - 2 <= lb.x <= c + 2 and b - 2 <= lb.y <= d + 2
         ]
 
-    placed = kernel.furniture(str(dxf_path), reading)
+    placed = kernel.furniture(str(dxf_path), reading, doc=doc)
+    frame_layer_cache: dict[tuple[float, float, float, float], tuple] = {}
 
     def _blocks_in(a, b, c, d):
         return [
@@ -393,6 +404,10 @@ def reconstruct(
         """
         from solve import layerscan
 
+        cache_key = (a, b, c, d)
+        if cache_key in frame_layer_cache:
+            return frame_layer_cache[cache_key]
+
         within: dict[str, list] = {}
         for seg in reading["_segments"]:
             face = Face(
@@ -403,7 +418,15 @@ def reconstruct(
                     and min(face.ay, face.by) >= b - 1 and max(face.ay, face.by) <= d + 1):
                 within.setdefault(seg.layer, []).append(face)
 
-        shortlist = layerscan.recommended(layerscan.scan(within)) | (set(chosen) & set(within))
+        scores = layerscan.scan(within)
+        score_by_name = {score.name: score for score in scores}
+        measured = layerscan.recommended(scores)
+        shortlist = {
+            name for name in measured
+            if fallback_wall_layer_candidate(
+                name, len(within[name]), score_by_name.get(name),
+            )
+        } | (set(chosen) & set(within))
         # A partitions layer may carry centrelines rather than paired wall
         # faces. Scored alone it has no wall thickness and never reaches the
         # shortlist, even though adding it to the exterior wall layer is what
@@ -412,7 +435,10 @@ def reconstruct(
         # enough real linework to matter.
         shortlist.update(
             name for name, layer_faces in within.items()
-            if len(layer_faces) >= 4 and kernel.classify(name) != "ignore"
+            if len(layer_faces) >= 4
+            and fallback_wall_layer_candidate(
+                name, len(layer_faces), score_by_name.get(name),
+            )
         )
         selected, trace = layerscan.select_within_frame(
             within, shortlist, labels, in_frame, classify_room, kernel.guess_item,
@@ -434,7 +460,9 @@ def reconstruct(
         # cannot change WHICH layers were chosen, only the order they are read
         # in.
         pool = [f for name in sorted(selected) for f in within[name]]
-        return join_corners(pair_faces(pool)), selected, trace
+        result = (join_corners(pair_faces(pool)), selected, trace)
+        frame_layer_cache[cache_key] = result
+        return result
 
     # ---- Which frame is the plan? Grade the candidates, then say so. --------
     # `frames[0]` used to be whichever cluster carried the most wall segments —
@@ -472,7 +500,7 @@ def reconstruct(
     # The compound-wall constraint that made wall count load-bearing still
     # holds: 8 walls over 28 m with 0 labels grades to 0 named and stays last.
     #
-    # Cost: at most six per-frame layer scans per import, only on multi-frame
+    # Cost: at most eight per-frame layer scans per import, only on multi-frame
     # sheets, only when the layers are not a human's explicit choice.
     frame_ranking = None
     if auto_layers and not layers and len(frames) > 1:
@@ -485,16 +513,51 @@ def reconstruct(
         by_walls = sorted(frames, key=lambda f: -len(f.wall_indices))[:4]
         by_labels = sorted(
             frames, key=lambda f: (-_plan_evidence(f), -len(f.wall_indices)),
+        )[:2]
+        # Raw label count favours a generous bbox that covers several stacked
+        # plans. Preserve a lane for compact, explicitly titled floor plans:
+        # on ALL PLANS the six-candidate cap contained four fused regions while
+        # omitting the individually framed FIRST FLOOR PLAN beside them.
+        def _frame_area(frame) -> float:
+            fa, fb, fc, fd = frame.bbox
+            return max(0.0, fc - fa) * max(0.0, fd - fb)
+
+        def _floor_title_priority(frame) -> int:
+            title = frame.title.upper()
+            if "FIRST FLOOR" in title:
+                return 0
+            if "GROUND FLOOR" in title:
+                return 1
+            if "SECOND FLOOR" in title:
+                return 2
+            if "STILT FLOOR" in title:
+                return 3
+            return 4
+
+        by_titled = sorted(
+            (
+                f for f in frames
+                if f.title and "FLOOR" in f.title.upper()
+                and "ROOF" not in f.title.upper()
+            ),
+            key=lambda f: (
+                _floor_title_priority(f), _frame_area(f), -_plan_evidence(f),
+            ),
         )[:4]
+        # Each lane has a real budget. Appending four candidates from every
+        # lane and truncating once at the end let the wall/label lanes consume
+        # seven of eight slots, so the compact-title lane existed in code but
+        # its actual floor-plan candidates were never graded.
+        #
         # Order-stable dedupe (by identity — Frame is an eq-dataclass and
         # unhashable), wall-count candidates first: ties in the grade below
         # resolve toward the incumbent rule, so a sheet where grading cannot
         # separate the candidates behaves exactly as it always did.
         shortlist: list = []
-        for f in [*by_walls, *by_labels]:
+        for f in [*by_walls, *by_labels, *by_titled]:
             if all(f is not g for g in shortlist):
                 shortlist.append(f)
-        shortlist = shortlist[:6]
+        shortlist = shortlist[:8]
 
         lo_area, hi_area = layerscan.ROOM_AREA
         graded: list[tuple] = []  # (frame, named, rooms, area, labels, error)
@@ -503,6 +566,14 @@ def reconstruct(
             labs = _labels_in(fa, fb, fc, fd)
             opening_labs = _opening_labels_in(fa, fb, fc, fd)
             blocks = _blocks_in(fa, fb, fc, fd)
+            contained = contained_frame_count(frame, frames)
+            if contained:
+                graded.append((
+                    frame, 0, 0, 0.0, len(labs),
+                    f"scope contains {contained} independently framed drawing"
+                    + ("" if contained == 1 else "s"),
+                ))
+                continue
             try:
                 scanned = _choose_frame_layers(
                     fa, fb, fc, fd, labs, blocks, opening_labs,
@@ -531,11 +602,41 @@ def reconstruct(
                     ))
                     continue
                 if with_perimeter:
-                    frame_walls = add_perimeter(frame_walls)
+                    frame_walls = join_corners(add_perimeter(frame_walls))
+                rooms_all = sp.detect_spaces(
+                    frame_walls, labels=labs, classify_room=classify_room,
+                )
+                separated = vf.separated_room_groups(rooms_all)
+                if separated is not None:
+                    gap, _extent = separated
+                    graded.append((
+                        frame, 0, 0, 0.0, len(labs),
+                        f"reconstructed rooms split across a {gap:.2f} m gap",
+                    ))
+                    continue
+                preflight = vf.check(
+                    input_segments=len(frame_walls),
+                    walls=frame_walls,
+                    spaces=rooms_all,
+                    openings=[],
+                    unhosted=0,
+                )
+                rejected = next(
+                    (
+                        c for c in preflight.checks
+                        if c.level == "blocking"
+                        or (c.name == "envelope-coverage" and c.level != "info")
+                    ),
+                    None,
+                )
+                if rejected is not None:
+                    graded.append((
+                        frame, 0, 0, 0.0, len(labs),
+                        f"preflight {rejected.name}: {rejected.message}",
+                    ))
+                    continue
                 rooms_g = [
-                    s for s in sp.detect_spaces(
-                        frame_walls, labels=labs, classify_room=classify_room,
-                    )
+                    s for s in rooms_all
                     if lo_area <= s.area <= hi_area
                 ]
                 graded.append((
@@ -549,7 +650,10 @@ def reconstruct(
             except Exception as exc:  # noqa: BLE001 — an ungradable frame loses, loudly
                 graded.append((frame, 0, 0, 0.0, len(labs), str(exc)))
 
-        best = best_graded_index([(g[1], g[2], g[3]) for g in graded])
+        best = best_eligible_graded_index(
+            [(g[1], g[2], g[3]) for g in graded],
+            [g[5] for g in graded],
+        )
         winner = graded[best][0]
         promoted = winner is not frames[0]
         if promoted:
@@ -578,6 +682,29 @@ def reconstruct(
                     f"({err}) — the model may contain more than one building"
                 )
                 break
+
+        # ── When NOTHING graded cleanly, the pick is not a judgement --------
+        # `best_eligible_graded_index` falls back to the wall-count incumbent
+        # when no candidate is error-free, and that fallback is deliberate: a
+        # broken grade is no basis for promoting anything. What was missing is
+        # that the operator was never told it had happened, so a fallback read
+        # exactly like a decision.
+        #
+        # Measured on `SITE PLAN FOR 3D`. All four candidates errored. The
+        # incumbent was frame 0, the 833 m `REVISED SITE PLAN` — a site layout,
+        # which has no doors by nature and BLOCKS on two checks. Frame 2 was
+        # rejected for the mildest of the four reasons ("rooms split across a
+        # 10.82 m gap") and builds a model that PASSES, with 15 hosted doors.
+        # A whole day was spent reading that as missing opening detection.
+        #
+        # This does not change the pick. Choosing between four broken grades by
+        # ranking their errors would need a severity order invented here, and
+        # the rejected candidate is not reliably the better one. It states what
+        # happened and names the alternatives, which is what the operator needs
+        # to type `--frame N` and see for themselves.
+        fallback = fallback_frame_note(graded, frames[0])
+        if fallback:
+            framing_note = (framing_note + "; " if framing_note else "") + fallback
 
         # Materialised AFTER any re-index, so the frame numbers here are the
         # ones the rest of the report uses.
@@ -628,10 +755,18 @@ def reconstruct(
     # identical is a refactor that has silently changed the building — and every
     # failure in this engine produces a building rather than an error.
     #
+    # What the frame's rooms turned out to be — one building, or a site holding
+    # several. Filled by `_solve_frame` because that is where the rooms exist,
+    # read by the model assembly below. A list rather than a single slot so a
+    # multi-storey stack records one entry per storey instead of the last one
+    # quietly overwriting the rest.
+    site_reports: list[dict] = []
+
     # Nested rather than top-level on purpose: it closes over the reading, the
     # document, the block placements and the scale, all of which are per-SHEET.
     # Only the walls, the bbox and the base are per-storey.
     def _solve_frame(frame_walls, bbox, base_z: float = 0.0) -> dict:
+        frame_bbox = bbox
         x0, y0, x1, y1 = bbox
         walls = frame_walls
         chosen_here = set(chosen)
@@ -685,6 +820,32 @@ def reconstruct(
         walls, labelled_holes, labelled_unhosted = op.from_text_labels(
             text_openings, walls,
         )
+
+        # ---- Gaps that opening LINEWORK is sitting in ----------------------
+        # Beside the labelled-gap bridge above, and before the rooms, for the
+        # same reason it is: this changes geometry, and `detect_spaces`, the
+        # wall statistics and the bill all read that geometry afterwards.
+        #
+        # The opening-layer segments are gathered here rather than at the
+        # emitter further down, because by the time the emitter runs the rooms
+        # are already solved and a bridge would leave them describing a wall
+        # run that no longer exists.
+        opening_faces = [
+            face
+            for segment in reading["_segments"]
+            if op.is_opening_layer(segment.layer)
+            for face in [Face(
+                ax=(segment.x1 - ox) * scale, ay=(segment.y1 - oy) * scale,
+                bx=(segment.x2 - ox) * scale, by=(segment.y2 - oy) * scale,
+                layer=segment.layer,
+            )]
+            if x0 - 1 <= min(face.ax, face.bx) and max(face.ax, face.bx) <= x1 + 1
+            and y0 - 1 <= min(face.ay, face.by) and max(face.ay, face.by) <= y1 + 1
+        ]
+        bridge_issues: list[dict] = []
+        walls, opening_bridges = op.bridge_opening_runs(
+            opening_faces, walls, issues=bridge_issues,
+        )
         if with_perimeter:
             walls = add_perimeter(walls)
             # Derived rings and labelled gap bridges are added after the first
@@ -697,6 +858,87 @@ def reconstruct(
 
         # ---- Rooms -------------------------------------------------------------
         rooms = sp.detect_spaces(walls, labels=labels, classify_room=classify_room)
+
+        # ---- One building, or a site holding several? ----------------------
+        # Only now can this be asked. A site plan's villas are joined by roads,
+        # plot lines and the compound wall, so framing correctly returns ONE
+        # frame spanning the estate; what separates the buildings is which
+        # rooms share a wall, and rooms do not exist until the line above.
+        #
+        # Recorded on EVERY build, not only when narrowing. The whole-site
+        # figures are the evidence a reviewer needs to choose a building, and
+        # they are also what makes a later regression visible: a villa that
+        # starts reporting two buildings has broken its own wall pairing.
+        segmentation = site.segment_site(walls, rooms)
+        report = segmentation.as_dict()
+
+        if building_index is not None:
+            if not segmentation.buildings:
+                raise SystemExit(
+                    "--building was given but this frame contains no closed "
+                    "rooms, so it holds no buildings to choose between."
+                )
+            if not 0 <= building_index < segmentation.count:
+                raise SystemExit(
+                    f"--building {building_index} does not exist: this frame "
+                    f"holds {segmentation.count} building(s), numbered 0 to "
+                    f"{segmentation.count - 1}."
+                )
+            picked = segmentation.buildings[building_index]
+
+            # Narrow the WALLS and solve the rooms again, rather than filtering
+            # the rooms that were just found. Everything downstream — openings,
+            # fixtures, the perimeter, the meshes, the bill — is derived from
+            # this wall list, so narrowing here is the one edit that reaches all
+            # of them consistently. Filtering the room list instead would leave
+            # every one of those still describing the whole site while the room
+            # schedule described one villa, and each artefact would look right
+            # on its own.
+            walls = [walls[i] for i in picked.wall_indices]
+            rooms = sp.detect_spaces(
+                walls, labels=labels, classify_room=classify_room
+            )
+
+            # Every wall statistic above was computed against the WHOLE frame,
+            # a few lines before the narrowing could be known. Recompute them,
+            # or `elements.walls` carries one building's 102 walls while the
+            # summary — and the bill of quantities that reads it — still prices
+            # the site's 106. Caught by measurement, not by reasoning: both
+            # numbers are individually plausible and nothing downstream
+            # compares them.
+            wall_stats = summarise(walls)
+            wall_stats["perimeter"] = perimeter_summary(walls)
+            report["picked"] = {
+                "index": building_index,
+                "of": segmentation.count,
+                "rooms": len(rooms),
+                "roomsBefore": len(picked.space_indices),
+                "walls": len(walls),
+                "area": round(picked.area, 2),
+                "span": round(picked.span, 2),
+                "bbox": [round(v, 3) for v in picked.bbox],
+            }
+            # Re-solving can legitimately find a different room count — the
+            # narrowed wall set no longer closes faces against its neighbours —
+            # so the before/after pair is kept rather than one number that
+            # silently changed meaning.
+
+            # The per-building index lists describe the WHOLE frame, and the
+            # model no longer contains that frame: `elements.walls` now holds
+            # this building's walls renumbered from zero. Indices pointing into
+            # a list nobody carries are worse than absent, because they resolve
+            # to real entries and quietly name the wrong walls. The counts stay,
+            # since a reviewer choosing a building needs them; the pointers go.
+            for entry in report["buildings"]:
+                entry.pop("spaceIndices", None)
+                entry.pop("wallIndices", None)
+            report["indicesDropped"] = (
+                "counts describe the whole frame; the index lists were removed "
+                "because --building renumbered elements.walls and "
+                "elements.spaces from zero"
+            )
+
+        site_reports.append(report)
         room_stats = sp.summarise(rooms)
 
         # ---- Which of that run is actually indoor -------------------------
@@ -738,12 +980,24 @@ def reconstruct(
             "roomsIndoor": sum(1 for r in rooms if not _is_outdoor(r.as_dict())),
             "roomsOutdoor": sum(1 for r in rooms if _is_outdoor(r.as_dict())),
         }
+        wall_stats["layers"] = summarise_by_layer(walls, indoor_walls)
 
+        opening_issues: list[dict] = []
         block_holes, block_unhosted = op.from_sized_blocks(
-            in_frame, walls, kernel.guess_item,
+            in_frame, walls, kernel.guess_item, issues=opening_issues,
         )
-        holes = op.dedupe(labelled_holes + block_holes)
-        unhosted = labelled_unhosted + block_unhosted
+
+        # ---- Openings the drawing DRAWS rather than blocks ------------------
+        # `opening_faces` was gathered before the rooms were solved, because
+        # bridging had to happen up there. The same list is emitted from here,
+        # against the walls those bridges produced.
+        opening_issues.extend(bridge_issues)
+        layer_holes, layer_unhosted = op.from_opening_layers(
+            opening_faces, walls, issues=opening_issues,
+        )
+
+        holes = op.dedupe(labelled_holes + block_holes + layer_holes)
+        unhosted = labelled_unhosted + block_unhosted + layer_unhosted
         opening_stats = op.summarise(holes, unhosted)
 
         fixtures: list[dict] = []
@@ -803,7 +1057,19 @@ def reconstruct(
         # build put both floors at z=0 — the report said "storey0 z -3.0",
         # the geometry interpenetrated, and only measuring the GLB's actual
         # mesh heights caught it. The builders all supported it already.
-        wall_build = build_walls(wall_mesh, walls, holes, height, base_z=base_z)
+        # The poché's two long faces go to their own meshes so each can carry
+        # its own surface class — the outside of the envelope and the inside of
+        # a room are different materials, and they used to arrive on the same
+        # triangles. Ends, tops and bottoms stay in `wall_mesh`: an end cap is
+        # a reveal, not a wall surface, and claims neither class.
+        wall_inner_mesh, wall_outer_mesh = MeshBuilder(), MeshBuilder()
+        wall_reveal_mesh, wall_plinth_mesh = MeshBuilder(), MeshBuilder()
+        wall_build = build_walls(
+            wall_mesh, walls, holes, height, base_z=base_z,
+            internal_mesh=wall_inner_mesh, external_mesh=wall_outer_mesh,
+            reveal_mesh=wall_reveal_mesh, plinth_mesh=wall_plinth_mesh,
+            spaces=rooms,
+        )
         room_meshes, slab_build = build_room_slabs(rooms, base_z=base_z)
         finish_meshes, finish_build = build_room_finishes(
             rooms, walls, holes, height, base_z=base_z,
@@ -814,6 +1080,22 @@ def reconstruct(
         )
 
         meshes = {"walls": wall_mesh, **room_meshes, **finish_meshes}
+        # Only when the split actually produced faces. A model whose rooms did
+        # not close classifies nothing, and an empty node in the GLB is worse
+        # than an absent one — it reads as "the engine found no external wall".
+        if wall_outer_mesh.indices:
+            meshes["wallface_external"] = wall_outer_mesh
+        if wall_inner_mesh.indices:
+            meshes["wallface_internal"] = wall_inner_mesh
+        if wall_reveal_mesh.indices:
+            meshes["wallface_reveal"] = wall_reveal_mesh
+        if wall_plinth_mesh.indices:
+            meshes["wallface_plinth"] = wall_plinth_mesh
+        # Inferred, never drawn, and off unless asked for — a roof lids
+        # the cutaway isometric. See build/solidify.build_roof.
+        if with_roof:
+            roof_meshes, roof_build = build_roof(rooms, height, base_z=base_z)
+            meshes.update(roof_meshes)
         if fixture_build["fixtures"]:
             meshes["fixtures"] = fixture_mesh
         if plant_mesh.indices:
@@ -821,14 +1103,38 @@ def reconstruct(
         if trunk_mesh.indices:
             meshes["trunks"] = trunk_mesh
 
+        # Raw selected linework for cross-storey evidence such as measured
+        # riser sequences. The bootstrap `faces` list uses the name heuristic;
+        # auto-layer selection can add the actual stair layer only here.
+        fx0, fy0, fx1, fy1 = frame_bbox
+        stair_faces = []
+        for segment in reading["_segments"]:
+            if segment.layer not in chosen_here:
+                continue
+            ax = (segment.x1 - ox) * scale
+            ay = (segment.y1 - oy) * scale
+            bx = (segment.x2 - ox) * scale
+            by = (segment.y2 - oy) * scale
+            if not (fx0 <= (ax + bx) / 2 <= fx1
+                    and fy0 <= (ay + by) / 2 <= fy1):
+                continue
+            stair_faces.append(Face(ax, ay, bx, by, segment.layer))
+
         return {
             "walls": walls, "rooms": rooms, "holes": holes,
             "labels": labels,
-            "unhosted": unhosted, "fixtures": fixtures,
+            "unhosted": unhosted, "openingIssues": opening_issues,
+            # Reported, not just done. A bridge MERGES two walls the drawing
+            # drew separately, which changes wall count, wall run and the bill;
+            # a reviewer looking at a wall that is not in the drawing has to be
+            # able to find out why it is there.
+            "openingBridges": opening_bridges,
+            "fixtures": fixtures,
             "chosen": chosen_here, "layerChoice": layer_choice,
             "wallStats": wall_stats, "roomStats": room_stats,
             "openingStats": opening_stats,
             "meshes": meshes,
+            "stairFaces": stair_faces,
             "builds": (wall_build, slab_build, finish_build, fixture_build),
         }
 
@@ -851,7 +1157,29 @@ def reconstruct(
     # so a wrong stack can be SEEN rather than merely looked at — a
     # mis-registered building renders perfectly plausibly.
     solved: list[tuple] = []
+    stair_builds: list[dict] = []
     stack = storeys.stacks[0] if (with_storeys and storeys.stacks) else []
+
+    # ── Why a multi-storey stack refuses a building pick ────────────────────
+    # `--building N` is an index into ONE frame's segmentation, ordered by floor
+    # area. Nothing carries that identity between storeys: building 2 on the
+    # ground floor and building 2 upstairs are separate orderings of separate
+    # frames, and a site sheet is exactly where they diverge, because the
+    # buildings on it need not all have the same number of floors.
+    #
+    # Refusing is the honest answer. Silently picking index N per storey would
+    # stack one villa's ground floor under another villa's first floor and the
+    # result renders perfectly plausibly — the same failure mode the storey
+    # registration datum above is careful to make visible rather than hide.
+    # The flag is present on the API path by default, so this gates on the
+    # stack actually having more than one storey, not on the flag being set.
+    if building_index is not None and len(stack) > 1:
+        raise SystemExit(
+            f"--building {building_index} cannot be combined with a "
+            f"{len(stack)}-storey stack: the building numbering is per frame, "
+            "so the same index need not mean the same building on each floor. "
+            "Rebuild one storey at a time with --frame."
+        )
 
     if stack:
         datum = frames[min(stack, key=lambda s: abs(s.level)).frame_index].bbox
@@ -864,6 +1192,62 @@ def reconstruct(
                 mesh.translate_plan(*shift)
             solved.append((level, result, shift))
 
+        # A stair is a relationship between two storeys, so it cannot be built
+        # inside the single-frame solver. Add it only after both plans have been
+        # solved and registered to the same datum. The builder is deliberately
+        # narrow: it accepts uniquely matched named, overlapping stair rooms
+        # that fit either a straight flight or a conservative dog-leg/U layout,
+        # and records every refusal instead of guessing through ambiguity.
+        ordered_solved = sorted(solved, key=lambda item: item[0].level)
+        for n, (lower, upper) in enumerate(
+            zip(ordered_solved, ordered_solved[1:])
+        ):
+            lower_level, lower_result, lower_shift = lower
+            upper_level, upper_result, upper_shift = upper
+            stair_meshes, stair_report = build_stairs(
+                lower_result["rooms"],
+                upper_result["rooms"],
+                rise=upper_level.base_z - lower_level.base_z,
+                base_z=lower_level.base_z,
+                lower_shift=lower_shift,
+                upper_shift=upper_shift,
+            )
+            if not stair_meshes:
+                lower_bbox = frames[lower_level.frame_index].bbox
+                upper_bbox = frames[upper_level.frame_index].bbox
+
+                def markers_in(bbox):
+                    a, b, c, d = bbox
+                    return [marker for marker in stair_markers
+                            if a <= marker.x <= c and b <= marker.y <= d]
+
+                marked_meshes, marked_report = build_marked_stairs(
+                    lower_result["stairFaces"], upper_result["stairFaces"],
+                    markers_in(lower_bbox), markers_in(upper_bbox),
+                    rise=upper_level.base_z - lower_level.base_z,
+                    base_z=lower_level.base_z,
+                    lower_shift=lower_shift, upper_shift=upper_shift,
+                )
+                if marked_meshes:
+                    marked_report["labelRefusals"] = stair_report["refused"]
+                    stair_meshes, stair_report = marked_meshes, marked_report
+            stair_report["removedCaps"] = open_stair_cores(
+                lower_result["meshes"], upper_result["meshes"], stair_report,
+                lower_spaces=lower_result["rooms"],
+                upper_spaces=upper_result["rooms"],
+                lower_shift=lower_shift, upper_shift=upper_shift,
+                lower_ceiling_z=upper_level.base_z,
+                upper_base_z=upper_level.base_z,
+            )
+            lower_result["meshes"].update(stair_meshes)
+            stair_builds.append({
+                "fromStorey": n,
+                "toStorey": n + 1,
+                "fromTitle": lower_level.title,
+                "toTitle": upper_level.title,
+                **stair_report,
+            })
+
         # The ground floor is the storey whose statistics stand for the
         # building — it is what a person means by "the plan" and what the site
         # is measured from.
@@ -875,6 +1259,8 @@ def reconstruct(
     rooms = storey["rooms"]
     holes = storey["holes"]
     unhosted = storey["unhosted"]
+    opening_issues = storey["openingIssues"]
+    opening_bridges = storey.get("openingBridges") or []
     fixtures = storey["fixtures"]
     chosen = storey["chosen"]
     layer_choice = storey["layerChoice"]
@@ -911,6 +1297,7 @@ def reconstruct(
     # different floors are not an overlap and a checker with no storey index
     # cannot tell that.
     all_fixtures: list[dict] = []
+    all_opening_issues: list[dict] = []
     #: Per-storey element blocks — the whole building, for consumers that can
     #: read more than one floor. Empty on single-storey builds.
     storey_elements: list[dict] = []
@@ -929,6 +1316,15 @@ def reconstruct(
             for name, mesh in result["meshes"].items():
                 meshes[f"storey{n}_{name}"] = mesh
             all_fixtures.extend({**f, "storey": n} for f in result["fixtures"])
+            all_opening_issues.extend({
+                **issue,
+                "storey": n,
+                "storeyTitle": level.title,
+                "registeredPosition": {
+                    "x": round(issue["position"]["x"] + shift[0], 4),
+                    "y": round(issue["position"]["y"] + shift[1], 4),
+                },
+            } for issue in result["openingIssues"])
             if result is storey:
                 primary_storey = n
             # The whole building's elements, one block per storey, in FRAME
@@ -945,6 +1341,7 @@ def reconstruct(
                 "walls": [w.as_dict() for w in result["walls"]],
                 "spaces": [r.as_dict() for r in result["rooms"]],
                 "openings": [o.as_dict() for o in result["holes"]],
+                "openingIssues": result["openingIssues"],
             })
             storey_report.append({
                 "storey": n,
@@ -959,6 +1356,22 @@ def reconstruct(
                 "rooms": result["roomStats"]["count"],
                 "area": result["roomStats"]["totalArea"],
             })
+
+    if not solved:
+        all_opening_issues = [{
+            **issue,
+            "storey": 0,
+            "storeyTitle": None,
+            # `.get`, not `[...]`. Every emitter is supposed to give each issue
+            # a position and they all now do — but this is the REVIEW payload
+            # for advisory findings, and an advisory that cannot be displayed
+            # must not end a build that otherwise succeeded. It did exactly
+            # that once: a refusal raised against a merged run, which has no
+            # single segment to point at, took down a villa that had already
+            # reconstructed. Same rule the clearance and codecheck blocks below
+            # follow — a model is still a model without one of its reports.
+            "registeredPosition": issue.get("position"),
+        } for issue in opening_issues]
 
     # The gate. Every failure mode here produces *a building* rather than an
     # error, so the only defence is checking the result against its own input
@@ -987,23 +1400,78 @@ def reconstruct(
                 "rooms-from-labels",
                 "blocking",
                 f"{title} contains {label_count} room labels but the reconstructed "
-                "walls enclose zero rooms. Review the wall layers before building 3D.",
+                "walls enclose zero rooms. "
+                + unresolved_unit_guidance(unit_verdict, scale),
                 0,
             ))
         if len(result["rooms"]) >= 2 and not result["holes"]:
+            # Still blocking, and the wording of the finding is unchanged. What
+            # is added is WHY, when the drawing's own title already answers it.
+            #
+            # A site layout draws footprints, plots, roads and levels; it
+            # carries no doors because doors are not what it is for. So this
+            # finding on such a frame is about the FRAME, not about opening
+            # detection — and on `SITE PLAN FOR 3D` a full day went into
+            # reading it the other way while the title said `REVISED SITE PLAN`
+            # the whole time. The gate is not weakened by explaining itself.
+            frame_title = (level.title if level is not None else None) or (
+                frames[0].title if frames else None
+            )
+            aside = ""
+            if vf.is_site_layout_title(frame_title):
+                aside = (
+                    f" The frame is titled {frame_title!r} — a site layout, not "
+                    "a construction plan. A site layout carries no doors by "
+                    "nature, so this is about which frame was built rather than "
+                    "about opening detection; build a detail frame instead, and "
+                    "see the framing note for the candidates."
+                )
             verdict.checks.append(vf.Check(
                 "openings-present",
                 "blocking",
                 f"{title} contains {len(result['rooms'])} rooms but no hosted doors "
-                "or windows. The reconstruction is incomplete.",
+                "or windows. The reconstruction is incomplete." + aside,
                 0,
             ))
 
-    manifest = write_glb(meshes, out / f"{source.stem}.glb")
+    # Which room each mesh belongs to, so a floor is tagged for what it IS
+    # (`floor_bath`, not a generic floor). Mesh names carry `room<N>` by
+    # construction — build/solidify.py `_room_mesh_slug` — and the index is
+    # per storey, so a two-storey building has two `room0`s and the storey
+    # prefix is what tells them apart.
+    room_kinds: dict[str, str] = {}
+    blocks = storey_elements or [{"spaces": [r.as_dict() for r in rooms]}]
+    for n, block in enumerate(blocks):
+        by_index = {
+            s.get("index"): (s.get("kind") or "unknown")
+            for s in block.get("spaces", [])
+            if s.get("index") is not None
+        }
+        prefix = f"storey{n}_"
+        for mesh_name in meshes:
+            if len(blocks) > 1 and not mesh_name.startswith(prefix):
+                continue
+            for index, kind in by_index.items():
+                if f"_room{index}_" in mesh_name:
+                    room_kinds[mesh_name] = kind
+                    break
+
+    manifest = write_glb(meshes, out / f"{source.stem}.glb", room_kinds=room_kinds)
 
     model = {
         "source": str(source),
         "converter": converter,
+        # One building, or a site holding several. Always the PRIMARY storey's
+        # answer, with the rest under `storeys` when there is more than one —
+        # the same shape rule `elements.*` follows, so a consumer reading
+        # `site.count` gets a number on every model instead of a number on
+        # single-storey builds and a list on multi-storey ones.
+        "site": _site_summary(site_reports),
+        # Walls this build MERGED because an opening's own linework proved the
+        # gap between them was a doorway, not a break. Empty on most drawings;
+        # never absent, so "none were made" and "never attempted" stay
+        # different states.
+        "openingBridges": opening_bridges,
         "unit": unit or reading["unit"],
         "headerUnit": header_unit,
         # What the WALLS said, alongside what the header said. Kept even when
@@ -1037,12 +1505,20 @@ def reconstruct(
         # client drew. This is the number that moves when that happens.
         "storeys": {**storeys.as_dict(), "built": storey_report,
                     "primary": primary_storey},
+        "stairs": {
+            "built": sum(report["stairs"] for report in stair_builds),
+            "connections": stair_builds,
+        },
         "wallsTotal": len(all_walls),
         "wallsUnframed": len(all_walls) - sum(len(f.wall_indices) for f in frames),
         "framingNote": framing_note or None,
         "walls": wall_stats,
         "rooms": room_stats,
         "openings": opening_stats,
+        # Exact evidence for every sized door/window block that could not be
+        # hosted. The aggregate warning is useful, but cannot highlight or fix
+        # a missing wall without these targets.
+        "openingIssues": all_opening_issues,
         "build": {**wall_build, **slab_build, **finish_build, **fixture_build},
         "verify": verdict.as_dict(),
         "glb": manifest,
@@ -1160,9 +1636,29 @@ def _print_build(model: dict) -> None:
     if model.get("frames"):
         used = (model.get("frameUsed") or {}).get("index")
         print(f"FRAMES   {len(model['frames'])} separate drawings on this sheet")
-        for f in model["frames"][:6]:
+        # Print the drawing's OWN title where it has one. The engine already
+        # reads it — `frameUsed.title` was "Ground Floor Plan" on a real client
+        # master file whose frame 1 was the "Lower Ground Floor Plan", i.e. the
+        # other half of the same house — and printing only "50 walls, span
+        # 20.82 m" left the operator no way to know that, or that `--frame 1`
+        # would build it. One-shot import is a decision; hiding what was not
+        # imported is not part of it.
+        shown = model["frames"][:8]
+        for f in shown:
             mark = "->" if f["index"] == used else "  "
-            print(f"      {mark} frame {f['index']}: {f['walls']:>4} walls, span {f['span']} m")
+            label = f.get("title") or f.get("levelLabel") or ""
+            print(f"      {mark} frame {f['index']}: {f['walls']:>4} walls, "
+                  f"span {f['span']} m" + (f"   {label}" if label else ""))
+        if len(model["frames"]) > len(shown):
+            print(f"         ... and {len(model['frames']) - len(shown)} more")
+        others = [f for f in model["frames"] if f["index"] != used]
+        if others:
+            named = [f for f in others if f.get("title") or f.get("levelLabel")]
+            nxt = (named or others)[0]
+            print(f"         build another with --frame N, e.g. --frame "
+                  f"{nxt['index']}"
+                  + (f" ({nxt.get('title') or nxt.get('levelLabel')})"
+                     if (nxt.get("title") or nxt.get("levelLabel")) else ""))
 
     # Printed whatever happened, INCLUDING when there are no frames at all —
     # `if model["frames"]` skipped this block entirely on an empty list, so a
@@ -1187,6 +1683,22 @@ def _print_build(model: dict) -> None:
         print(f"         storey{built['storey']}  z {built['baseZ']:+.1f}  "
               f"{built['walls']:>4} walls  {built['rooms']:>3} rooms  "
               f"{built['area']:>7.1f} m2   {built['title']}{moved}")
+
+    stairs = model.get("stairs") or {}
+    for connection in stairs.get("connections", []):
+        route = (
+            f"storey{connection['fromStorey']} -> "
+            f"storey{connection['toStorey']}"
+        )
+        if connection.get("stairs"):
+            forms = ", ".join(
+                layout.get("type", "unknown")
+                for layout in connection.get("layouts", [])
+            )
+            suffix = f" ({forms})" if forms else ""
+            print(f"STAIRS   {route}: {connection['stairs']} stair built{suffix}")
+        for refusal in connection.get("refused", []):
+            print(f"STAIRS   ? {route}: {refusal}")
 
     if model.get("framingNote"):
         print(f"       ! {model['framingNote']}")
@@ -1303,9 +1815,17 @@ def layer_report(input_path: str, work_dir: str, unit: str | None = None) -> dic
     chosen, trace = layerscan.select_wall_layers(by_layer, shortlist)
 
     hinted = default_wall_layers(reading)
+    # Rooms each layer closes ALONE. The pairing verdict alone is not enough —
+    # on a real client upload the layer verdicted WALLS enclosed nothing and
+    # the one dismissed as "not at wall thicknesses" enclosed twenty-one
+    # rooms. See solve/layerscan.encloses.
+    enclosed = layerscan.encloses(by_layer)
     return {
         "source": str(source),
-        "scores": [s.as_dict() for s in scores],
+        "scores": [
+            {**s.as_dict(), "encloses": enclosed.get(s.as_dict()["name"], 0)}
+            for s in scores
+        ],
         "byName": sorted(hinted),
         "byNameRooms": layerscan._rooms_from([f for n in hinted for f in by_layer.get(n, [])]),
         "byEvidence": sorted(chosen),
@@ -1318,11 +1838,29 @@ def _print_layers(report: dict) -> None:
     print("")
     print(f"SOURCE   {report['source']}")
     print("")
-    print(f"{'layer':<26}{'segs':>6}{'pairs':>7}{'median':>9}{'spread':>8}  verdict")
+    print(f"{'layer':<26}{'segs':>6}{'pairs':>7}{'median':>9}{'rooms':>7}  verdict")
     for s in report["scores"][:18]:
         m = f"{s['medianThickness']:.3f}" if s["medianThickness"] else "-"
-        sp = f"{s['spread']:.3f}" if s["spread"] is not None else "-"
-        print(f"{s['name'][:25]:<26}{s['segments']:>6}{s['paired']:>7}{m:>9}{sp:>8}  {s['verdict']}")
+        print(f"{s['name'][:25]:<26}{s['segments']:>6}{s['paired']:>7}{m:>9}"
+              f"{s.get('encloses', 0):>7}  {s['verdict']}")
+
+    # THE line that would have saved a real drawing. A layer the pairing
+    # verdict dismisses can be the only one that closes the building, because
+    # a drawing may split a wall's two faces across two layers.
+    dismissed = [s for s in report["scores"]
+                 if s["verdict"] != "WALLS" and s.get("encloses", 0) > 0]
+    endorsed = max((s.get("encloses", 0) for s in report["scores"]
+                    if s["verdict"] == "WALLS"), default=0)
+    for s in sorted(dismissed, key=lambda r: -r.get("encloses", 0))[:3]:
+        if s["encloses"] > endorsed:
+            print("")
+            print(f"  !! {s['name']} is NOT verdicted a wall layer, yet it closes "
+                  f"{s['encloses']} rooms on its own — more than every layer that is "
+                  f"({endorsed}).")
+            print("     A drawing may put a wall's two faces on two layers, and each "
+                  "then pairs\n     at ink thickness alone. Try --layers with it "
+                  "included before believing\n     the verdict column.")
+            break
 
     print("")
     print(f"BY NAME      {report['byNameRooms']:>3} rooms   {', '.join(report['byName'])}")
@@ -1393,11 +1931,22 @@ def deliverables(model_path: str, out_dir: str) -> dict:
         json.dumps([v.as_dict() for v in views], indent=2), encoding="utf-8"
     )
 
+    # The statutory area statement — RERA §2(k) and IS 3861 carpet, every
+    # figure tagged with its definition. This is a deliverable clients pay a
+    # surveyor to produce, and it is pure arithmetic over the stored model;
+    # see quantify/areas.py for why the two figures must never be conflated.
+    from quantify import areas as qa
+
+    statement = qa.area_statement(model)
+    areas_path = out / f"{stem}.areas.json"
+    areas_path.write_text(json.dumps(statement, indent=2), encoding="utf-8")
+
     return {
         "plan": plan,
         "views": {"path": str(views_path), **cameras.summarise(views)},
         "surface": styles.catalogue(),
         "viewList": [v.as_dict() for v in views],
+        "areas": {"path": str(areas_path), "statement": statement},
     }
 
 
@@ -1423,6 +1972,13 @@ def _print_deliverables(report: dict) -> None:
     print(f"SURFACE  {len(s['engines'])} engines, {len(s['experts'])} experts, "
           f"{len(s['styles'])} styles")
     print("         Geometry is deterministic. The seed affects only the finish.")
+
+    if report.get("areas"):
+        from quantify import areas as qa
+
+        print("")
+        print(qa.as_text(report["areas"]["statement"]))
+        print(f"         -> {report['areas']['path']}")
 
 
 def clearance_report(model_path: str) -> dict:
@@ -1576,6 +2132,249 @@ def best_graded_index(rows: list[tuple]) -> int:
         range(len(rows)),
         key=lambda i: (rows[i][0], rows[i][1], rows[i][2], -i),
     )
+
+
+def _enclosure_seed(input_path: str, work_dir: str,
+                    unit: str | None = None, limit: int = 4) -> list[str] | None:
+    """
+    The layers that actually CLOSE rooms, best first — a re-seed for a blocked build.
+
+    Ranked by enclosure rather than by pairing verdict, for the reason
+    `solve/layerscan.encloses` records at length: on a real client drawing the
+    layer verdicted WALLS enclosed nothing and the layer dismissed as "not at
+    wall thicknesses" enclosed eleven rooms, because that drawing puts a
+    wall's two faces on two different layers.
+
+    Returns None when nothing encloses anything — there is then no better seed
+    to offer and the caller should keep the blocked build and its diagnosis
+    rather than substitute a differently-wrong one.
+    """
+    report = layer_report(input_path, work_dir, unit=unit)
+    ranked = [
+        row for row in sorted(
+            report.get("scores", []),
+            key=lambda r: (-r.get("encloses", 0), -r.get("paired", 0)),
+        )
+        if row.get("encloses", 0) > 0
+        and automatic_wall_layer_candidate(row["name"])
+    ]
+    if not ranked:
+        return None
+    # Keep the endorsed wall layers too: the enclosing layer is often only
+    # half of each wall, and dropping its partner would trade one wrong
+    # answer for another.
+    seed = [row["name"] for row in ranked[:limit]]
+    for row in report.get("scores", []):
+        if (row.get("verdict") == "WALLS" and row["name"] not in seed
+                and automatic_wall_layer_candidate(row["name"])):
+            seed.append(row["name"])
+    return seed
+
+
+def automatic_wall_layer_candidate(name: str) -> bool:
+    """Whether an inferred layer may enter wall fitting."""
+    return (
+        kernel.classify(name) != "ignore"
+        and classify_layer(name) in ("wall", "other")
+    )
+
+
+MAX_UNMEASURED_OTHER_SEGMENTS = 400
+MIN_LARGE_OTHER_PAIRED_FRACTION = 0.10
+
+
+def fallback_wall_layer_candidate(name: str, segments: int, score) -> bool:
+    """
+    Admit useful centreline fallbacks without fitting enormous noise layers.
+
+    Explicit wall semantics always survive. Unknown layers survive when small
+    enough to be a plausible partitions supplement, or when their own measured
+    pairing passes the wall scan. The 400-line safety net is above every useful
+    fallback measured on the villa and compact plan frames; pathological
+    ESMajor layers carry 1,211-15,922 lines with only 1-4% pairing coverage.
+    """
+    if not automatic_wall_layer_candidate(name):
+        return False
+    semantic = classify_layer(name)
+    if semantic == "wall":
+        return True
+    if segments <= MAX_UNMEASURED_OTHER_SEGMENTS:
+        return True
+    return (
+        score is not None
+        and score.verdict == "WALLS"
+        and getattr(score, "paired_fraction", 0.0)
+        >= MIN_LARGE_OTHER_PAIRED_FRACTION
+    )
+
+
+def enclosure_retry_improves(original: dict, retry: dict) -> bool:
+    """Whether an enclosure re-seed is safe to substitute for a blocked build."""
+    if not (original.get("verify") or {}).get("blocking"):
+        return False
+    if (retry.get("verify") or {}).get("blocking"):
+        return False
+
+    # A layer retry is not permission to revisit the drawing's units. Explicit
+    # retry layers change the evidence rank_units sees; on PLANS_FOR_3D that
+    # changed measured metres to the 0.001 header and replaced 106 walls / 28
+    # rooms with 4 / 1 merely because the tiny model happened not to block.
+    try:
+        if abs(float(retry["scale"]) - float(original["scale"])) > 1e-9:
+            return False
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    before_rooms = original.get("rooms") or {}
+    after_rooms = retry.get("rooms") or {}
+    return (
+        int(after_rooms.get("count", 0)) >= int(before_rooms.get("count", 0))
+        and int(after_rooms.get("named", 0)) >= int(before_rooms.get("named", 0))
+    )
+
+
+def _site_summary(reports: list[dict]) -> dict | None:
+    """The primary storey's segmentation, carrying the others when there are any."""
+    if not reports:
+        return None
+    summary = dict(reports[0])
+    if len(reports) > 1:
+        summary["storeys"] = reports
+    return summary
+
+
+def promote_build(model: dict, trial_dir: Path, out_dir: Path) -> dict:
+    """
+    Move an ACCEPTED trial build's artefacts into the real output directory.
+
+    ── The failure this exists to stop ────────────────────────────────────────
+    `enclosure_retry_improves` decides which model the caller keeps, and it
+    works: on `PLANS_FOR_3D` it correctly REFUSES the header-mm, `tx`-only
+    4-wall / 1-room retry and keeps the measured-metre 106-wall / 28-room
+    build. Measured 2026-08-26: the guard was defeated anyway, because
+    `reconstruct()` WRITES `<stem>.building.json` and `<stem>.glb` as its final
+    act. Both builds wrote to the same `--out`, so the rejected retry had
+    already overwritten the accepted model before the guard was ever consulted.
+
+    The console printed the 28-room build. The file on disk was the 4-wall one,
+    carrying `"ok": true` — a REJECTED build published as a clean pass. That is
+    the dangerous direction: `services/api/src/lib/cadEngine.js` reads the model
+    from disk and never sees stdout, and its own docstring says shipping a
+    blocking verdict to a viewer "is worse than failing". The worse the drawing,
+    the more likely the viewer got a tidy 2.49 m2 "building" instead of a
+    refusal.
+
+    So a trial build goes somewhere else and only a decision moves it. The guard
+    protects the decision; this protects the artefact.
+    """
+    import shutil
+
+    stem = None
+    glb = (model.get("glb") or {}).get("path") if isinstance(model.get("glb"), dict) else None
+    for candidate in trial_dir.glob("*.building.json"):
+        stem = candidate.name[: -len(".building.json")]
+        break
+    if stem is None:                      # nothing was written; nothing to promote
+        return model
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for suffix in (".building.json", ".glb"):
+        source = trial_dir / f"{stem}{suffix}"
+        if source.exists():
+            shutil.copy2(source, out_dir / f"{stem}{suffix}")
+
+    # The model records its own GLB's absolute path and the caller hands that
+    # straight to a renderer. Copying the bytes and leaving the path pointing
+    # into a scratch directory that is about to be reused would be the same
+    # class of bug one layer down.
+    if glb:
+        model.setdefault("glb", {})["path"] = str(out_dir / f"{stem}.glb")
+
+    (out_dir / f"{stem}.building.json").write_text(
+        json.dumps(model, indent=2), encoding="utf-8"
+    )
+    return model
+
+
+def unresolved_unit_guidance(unit_verdict, current_scale: float) -> str:
+    """Actionable review text when walls prefer, but cannot prove, another unit."""
+    if unit_verdict is None or unit_verdict.decided or unit_verdict.best is None:
+        return "Review the wall layers before building 3D."
+    best = unit_verdict.best
+    if abs(best.scale - current_scale) <= 1e-9:
+        return "Review the wall layers before building 3D."
+    return (
+        "Review the unit first: wall thickness weakly prefers "
+        f"{best.label} (scale {best.scale:g}) over the current scale "
+        f"{current_scale:g}. Re-solve with that unit, then review wall layers "
+        "if rooms still do not close."
+    )
+
+
+def contained_frame_count(frame, frames: list) -> int:
+    """How many independently segmented drawings lie wholly inside this bbox."""
+    x0, y0, x1, y1 = frame.bbox
+    return sum(
+        1 for other in frames
+        if other is not frame
+        and other.bbox[0] >= x0 and other.bbox[1] >= y0
+        and other.bbox[2] <= x1 and other.bbox[3] <= y1
+    )
+
+
+#: How much of a rejected candidate's error to quote in the note. Presentation
+#: only — the whole string is already in `frameRanking.graded`. One of these
+#: errors is a full envelope-coverage paragraph and would bury the frame
+#: numbers, which are the part the operator has to act on.
+REJECTED_ERROR_CHARS = 90
+
+
+def fallback_frame_note(graded: list[tuple], incumbent) -> str:
+    """
+    Say so when the frame was a fallback rather than a choice, and name the rest.
+
+    `best_eligible_graded_index` returns the wall-count incumbent when no
+    candidate grades cleanly, and that is the right conservative move: a broken
+    grade is no basis for promoting anything over anything else. What was
+    missing is that nobody was TOLD. A silent fallback reads exactly like a
+    decision, and the report says `promoted: false` in a JSON field no operator
+    reads mid-build.
+
+    Measured on `SITE PLAN FOR 3D`: all four candidates errored, the incumbent
+    was the 833 m `REVISED SITE PLAN` — a site layout, which has no doors by
+    nature and blocks on two checks — while frame 2, rejected for the mildest
+    of the four reasons, builds a model that PASSES with 15 hosted doors. A
+    full day went into reading that as missing opening detection.
+
+    This deliberately does not re-rank. Choosing between four broken grades
+    needs a severity order, that order would be invented here rather than
+    measured, and the rejected candidate is not reliably the better one — on
+    this sheet it was, on the next it need not be. Naming the alternatives lets
+    the operator type `--frame N` and settle it in one build.
+    """
+    if not graded or not all(row[5] for row in graded):
+        return ""
+    others = "; ".join(
+        f"--frame {frame.index} ({frame.title or 'untitled'}, "
+        f"{len(frame.wall_indices)} walls): "
+        f"{error.splitlines()[0][:REJECTED_ERROR_CHARS]}"
+        for frame, _named, _rooms, _area, _labels, error in graded
+        if frame is not incumbent
+    )
+    if not others:
+        return ""
+    return ("NO candidate graded cleanly, so this frame is the wall-count "
+            "fallback rather than a choice — the others were considered and "
+            f"rejected: {others}")
+
+
+def best_eligible_graded_index(rows: list[tuple], errors: list[str | None]) -> int:
+    """Pick the best coherent grade; fall back to the incumbent if none exist."""
+    eligible = [i for i, error in enumerate(errors) if error is None]
+    if not eligible:
+        return 0
+    local = best_graded_index([rows[i] for i in eligible])
+    return eligible[local]
 
 
 def _real_plan_titles(titles: list) -> list:
@@ -1747,12 +2546,19 @@ def main() -> int:
     b.add_argument("--input", required=True)
     b.add_argument("--work", default="A:/tmp/reconstruct")
     b.add_argument("--out", required=True)
+    b.add_argument("--with-roof", action="store_true",
+                   help="Infer a flat roof and parapet. OFF by default: "
+                        "the isometric view is a CUTAWAY and a roof lids it.")
     b.add_argument("--unit", default=None, help="Force a unit (mm|cm|m|in|ft).")
     b.add_argument("--layers", default=None,
                    help="Comma-separated wall layers. Defaults to the name heuristic.")
     b.add_argument("--height", type=float, default=DEFAULT_WALL_HEIGHT)
     b.add_argument("--frame", type=int, default=0,
                    help="Which drawing on the sheet (0 = largest).")
+    b.add_argument("--building", type=int, default=None,
+                   help="Which building within the frame (0 = largest by floor "
+                        "area). For a SITE plan, whose villas share no wall. "
+                        "The build reports its buildings either way.")
     b.add_argument("--no-fixtures", action="store_true",
                    help="Walls and rooms only.")
     b.add_argument("--auto-layers", action="store_true",
@@ -2023,14 +2829,74 @@ def main() -> int:
         return 0
 
     if ns.command == "reconstruct":
-        model = reconstruct(
-            ns.input, ns.work, ns.out, unit=ns.unit,
-            layers=[s.strip() for s in ns.layers.split(",")] if ns.layers else None,
-            height=ns.height, frame_index=ns.frame,
-            with_fixtures=not ns.no_fixtures, auto_layers=ns.auto_layers,
-            with_perimeter=not ns.no_perimeter,
-            with_storeys=ns.storeys,
-        )
+        def _build(chosen_layers, out_dir=None):
+            return reconstruct(
+                ns.input, ns.work, out_dir or ns.out, unit=ns.unit,
+                layers=chosen_layers,
+                height=ns.height, frame_index=ns.frame,
+                with_fixtures=not ns.no_fixtures, auto_layers=ns.auto_layers,
+                with_perimeter=not ns.no_perimeter,
+                with_storeys=ns.storeys, with_roof=ns.with_roof,
+                building_index=ns.building,
+            )
+
+        explicit = [s.strip() for s in ns.layers.split(",")] if ns.layers else None
+        model = _build(explicit)
+
+        # ── One retry, and ONLY out of a blocked build ──────────────────────
+        # The bootstrap frame is derived from the name-heuristic layer seed,
+        # and that seed only has to land in the right PLACE — except when it
+        # is a small minority of the plan's linework, and then it does not.
+        # Measured on a real client upload: seeding from `A-WALL` (a third of
+        # the drawing) framed the building as TWO drawings of 9.2 m where it
+        # is one of 28.66 m, and layer selection, scoped to a frame that was
+        # both too small and falsely split, could never recover — 3 rooms and
+        # a blocked verify against 33 rooms and a clean pass from the same
+        # file with the right layers.
+        #
+        # The fix is not a better seed heuristic; enclosure already knows the
+        # answer (`solve/layerscan.encloses`), it just is not consulted until
+        # after framing. So: if the build BLOCKED, re-seed from the layers
+        # that actually close rooms and try once more. Gating on failure is
+        # what makes this safe — a drawing that verifies is never re-run, so
+        # nothing that works today can change — and it costs time only where
+        # the alternative was an unusable model.
+        blocked = bool((model.get("verify") or {}).get("blocking"))
+        if blocked and not explicit:
+            try:
+                widened = _enclosure_seed(ns.input, ns.work, unit=ns.unit)
+            except Exception as error:  # noqa: BLE001 — never fail a build for this
+                # The comment here used to say "a retry must not mask the
+                # error" while doing precisely that: the reason went into a
+                # bare `None` and the operator saw a build that simply did not
+                # retry, with nothing to say why. A status without its reason
+                # is not a record.
+                widened = None
+                print(f"\nRETRY    could not re-seed from the enclosing layers: "
+                      f"{type(error).__name__}: {error}")
+            if widened:
+                # Into a scratch directory, NOT `--out`. `reconstruct()` writes the
+                # model and the GLB itself, so a retry aimed at the real output
+                # overwrites the accepted build before anything gets to judge it —
+                # measured 2026-08-26; see `promote_build`.
+                trial = Path(ns.work) / "enclosure-retry"
+                retry = _build(widened, str(trial))
+                if enclosure_retry_improves(model, retry):
+                    retry["layerRetry"] = {
+                        "reason": "first build blocked; re-seeded from the "
+                                  "layers that enclose rooms",
+                        "layers": widened,
+                    }
+                    print("\nRETRY    the first build was BLOCKED. Re-seeded from "
+                          f"the layers that enclose rooms: {', '.join(widened)}")
+                    model = promote_build(retry, trial, Path(ns.out))
+                else:
+                    # Say so. A refused retry that vanished silently is how this went
+                    # unnoticed for so long: the operator saw one summary and had no
+                    # way to know a second build had been run and rejected.
+                    print("\nRETRY    re-seeded from the enclosing layers and "
+                          "REFUSED the result; keeping the first build.")
+
         _print_build(model)
         return 0
 

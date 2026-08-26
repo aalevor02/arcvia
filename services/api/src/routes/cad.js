@@ -315,6 +315,13 @@ export async function registerCadRoutes(app) {
       request.body?.autoLayers !== false,
       request.body?.height ?? null,
       request.body?.frame ?? null,
+      // In the fingerprint because it changes the OUTPUT, which is the stated
+      // rule above and not a formality here: building 0 and building 1 of one
+      // site plan are the same drawing, the same layers, the same frame and
+      // the same height. Left out, the second request would be deduplicated
+      // against the first and the reviewer would be handed the wrong villa
+      // with a cheerful "not charged again".
+      request.body?.building ?? null,
     ])
 
     if (existing) {
@@ -361,6 +368,10 @@ export async function registerCadRoutes(app) {
         autoLayers: request.body?.autoLayers !== false,
         height: request.body?.height ?? null,
         frame: request.body?.frame ?? null,
+        // Which building within the frame, when the engine reported the scope
+        // as a site. Absent on every ordinary job, and the engine then builds
+        // the whole scope exactly as before.
+        building: request.body?.building ?? null,
       },
       outputUrl: null,
       error: null,

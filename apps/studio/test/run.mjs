@@ -48,6 +48,7 @@ const targets = entries.length
       'test/furnish.test.ts',
       'test/cadFurnish.test.ts',
       'test/cadPlan.test.ts',
+      'test/cadReview.test.ts',
       'test/deckDesign.test.ts',
       'test/designFurnish.test.ts',
       'test/hubFurniture.test.ts',

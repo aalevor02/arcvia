@@ -6,7 +6,7 @@
  * head of the queue held every preview hostage behind it — the user watching
  * the viewport paid the waiting cost of someone else's overnight job. Lanes
  * split the work by shape: `fast` (preview, isometric, ai) and `heavy`
- * (full, bake, cad), each with its own concurrency.
+ * (full, panorama, bake, cad), each with its own concurrency.
  *
  * ── How this proves it without a GPU ────────────────────────────────────────
  * Same instrument as render-concurrency.mjs: remote mode against a stub
@@ -152,26 +152,26 @@ try {
      `arrivals: ${arrivals.length}`)
 
   // A second heavy job waits for the heavy lane.
-  const full2 = await submit('full', 4)
+  const panorama1 = await submit('panorama', 4)
   await settle()
-  ok('a second full render waits its lane turn',
-     !arrivals.includes(full2) && arrivals.length === 2)
+  ok('a panorama waits for the occupied heavy lane',
+     !arrivals.includes(panorama1) && arrivals.length === 2)
 
   const j = async (id) => (await call(`/render/jobs/${id}`, { token })).payload.status
-  ok('statuses agree: full1 and prev1 rendering, prev2 and full2 queued',
+  ok('statuses agree: full1 and prev1 rendering, prev2 and panorama queued',
      (await j(full1)) === 'rendering' && (await j(prev1)) === 'rendering'
-       && (await j(prev2)) === 'queued' && (await j(full2)) === 'queued')
+       && (await j(prev2)) === 'queued' && (await j(panorama1)) === 'queued')
 
   // A freed fast slot serves the fast lane...
   await call(`/render/jobs/${prev1}/cancel`, { method: 'POST', token })
   ok('cancelling the running preview starts the queued preview',
      await until(() => arrivals.includes(prev2)), `arrivals: ${arrivals.length}`)
-  ok('...and not the queued full render', !arrivals.includes(full2))
+  ok('...and not the queued panorama', !arrivals.includes(panorama1))
 
   // ...and a freed heavy slot serves the heavy lane.
   await call(`/render/jobs/${full1}/cancel`, { method: 'POST', token })
-  ok('cancelling the running full render starts the queued one',
-     await until(() => arrivals.includes(full2)), `arrivals: ${arrivals.length}`)
+  ok('cancelling the running full render starts the queued panorama',
+     await until(() => arrivals.includes(panorama1)), `arrivals: ${arrivals.length}`)
 
   ok('four starts in total — no lane ever ran two at once',
      arrivals.length === 4, `arrivals: ${arrivals.join(', ')}`)

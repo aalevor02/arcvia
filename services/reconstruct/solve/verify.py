@@ -26,7 +26,10 @@ and everything else is reported as measurement.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+from solve.site import segment_site
 
 #: A building that yields fewer walls than this from real wall linework has not
 #: been reconstructed, whatever else it has done. Four is the floor because four
@@ -127,9 +130,76 @@ FRAMING_COVERAGE_MIN = 0.70
 #: generous rather than fitted.
 MIN_BUILDING_GAP = 1.0
 
+
+def separated_room_groups(spaces) -> tuple[float, float] | None:
+    """Largest empty projection band separating rooms, as (gap, extent)."""
+    if len(spaces) < 2:
+        return None
+
+    for axis in (0, 1):
+        spans = sorted(
+            (min(p[axis] for p in s.loop), max(p[axis] for p in s.loop))
+            for s in spaces if len(s.loop) >= 3
+        )
+        if len(spans) < 2:
+            continue
+        merged: list[list[float]] = []
+        for lo_, hi_ in spans:
+            if merged and lo_ <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi_)
+            else:
+                merged.append([lo_, hi_])
+
+        extent = merged[-1][1] - merged[0][0]
+        gap = max(
+            (merged[i + 1][0] - merged[i][1] for i in range(len(merged) - 1)),
+            default=0.0,
+        )
+        if gap > MIN_BUILDING_GAP and extent > 0:
+            return gap, extent
+    return None
+
 #: Interior walls in residential construction. Outside this, the unit is wrong
 #: or the pairing matched two unrelated lines.
 PLAUSIBLE_THICKNESS = (0.05, 0.60)
+
+#: A title that says the drawing is a SITE LAYOUT rather than a building.
+#:
+#: The qualifier carries the meaning, not the word "plan": `GROUND FLOOR PLAN`
+#: and `SITE PLAN` differ only in what precedes it. `BLOCK - A FINAL CONCEPT
+#: PLANS` is a real title in this corpus and must NOT match — hence the
+#: requirement that the qualifier be immediately followed by plan/layout, which
+#: it is not there.
+#:
+#: Names only. This decides nothing and changes no verdict; it explains one.
+_SITE_TITLE = re.compile(
+    r"\b(site|master|layout|key|location|block)\s+(plan|layout)\b", re.I,
+)
+
+
+def is_site_layout_title(title: str | None) -> bool:
+    """
+    Does this drawing's own title say it is a site layout, not a building?
+
+    Used to EXPLAIN a finding, never to produce one. A site layout draws
+    building footprints, plots, roads and levels; it carries no doors, because
+    doors are not what it is for. So `openings-present` firing on one is a
+    statement about which FRAME was chosen, not about opening detection — and a
+    day went into reading it the other way on `SITE PLAN FOR 3D` while the
+    title said `REVISED SITE PLAN` throughout.
+
+    Deliberately NOT wired into frame ranking. Demoting a frame for its title
+    would change frame selection across the whole corpus on the strength of one
+    sheet, and a title is evidence rather than an answer — the same rule walls
+    and plan titles already follow in this engine.
+    """
+    return bool(_SITE_TITLE.search(title or ""))
+
+#: How many of a site's buildings to name in the finding before summarising the
+#: rest. Presentation only — the full list always reaches `building.json`, and
+#: nothing decides anything on this number. Six fits a terminal line-wrap; a
+#: site sheet that yields forty would otherwise print a finding nobody reads.
+BUILDINGS_LISTED = 6
 
 
 @dataclass
@@ -483,56 +553,111 @@ def check(
     # gap test that reasoning does not hold: rooms of one building tile, so two
     # that do not touch are already two drawings, and requiring four only made
     # the check unable to fire on the smallest case it should catch.
-    if len(spaces) >= 2:
-        for axis in (0, 1):
-            spans = sorted(
-                (min(p[axis] for p in s.loop), max(p[axis] for p in s.loop))
-                for s in spaces if len(s.loop) >= 3
-            )
-            if len(spans) < 2:
-                continue
-            merged: list[list[float]] = []
-            for lo_, hi_ in spans:
-                if merged and lo_ <= merged[-1][1]:
-                    merged[-1][1] = max(merged[-1][1], hi_)
-                else:
-                    merged.append([lo_, hi_])
+    separated = separated_room_groups(spaces)
+    if separated is not None:
+        gap, extent = separated
+        # An absolute gap, NOT a share of the extent. The first version of
+        # this required the gap to exceed a quarter of the plan's extent and
+        # missed the motivating case: 2.48 m across 32.67 m is only 7.6%.
+        # Polygonized rooms tile a real building, so its projection has no
+        # empty band; the metre threshold only clears floating-point noise.
+        v.checks.append(Check(
+            "one-building", "warning",
+            f"the rooms fall into two groups {gap:.2f} m apart across "
+            f"{extent:.2f} m of plan, with nothing between them. This is "
+            "usually two drawings on one sheet reconstructed as one "
+            "building — every quantity would then be for both.",
+            round(gap / extent, 3),
+        ))
 
-            extent = merged[-1][1] - merged[0][0]
-            gap = max(
-                (merged[i + 1][0] - merged[i][1] for i in range(len(merged) - 1)),
-                default=0.0,
+    # ---- One building, or a site holding several? --------------------------
+    # `one-building` above asks whether the rooms PROJECT into two groups, and
+    # that is the right question for a sheet: two plans drawn side by side leave
+    # a band no room crosses. It is the wrong question for a SITE, where the
+    # villas are spread across the plot on both axes and their projections
+    # interleave — so it stays silent on exactly the drawing that needs it most.
+    #
+    # `solve/site.py` asks a different question of the same model: which rooms
+    # share a wall. The rooms of one building tile and therefore share; two
+    # villas standing on a plot share nothing at all.
+    #
+    # Measured 2026-08-26 against four real drawings that verify clean today —
+    # PLANS_FOR_3D, DOWN VILLA and two client uploads — every one returns
+    # exactly ONE building. So this cannot fire on a model the engine already
+    # accepts, which is the property that makes it safe to make blocking.
+    #
+    # Blocking, because a model presented as a building that is really six is
+    # wrong in a way no downstream reader can detect: the floor area, the wall
+    # run and the priced bill are all summed across structures that were never
+    # one building, and each figure looks perfectly ordinary. Naming the
+    # buildings is what makes it actionable rather than merely correct.
+    #
+    # ── Which components COUNT, and why it is names rather than size ────────
+    # Measured 2026-08-26 on frame 2 of the site sheet, and it is the reason
+    # this clause exists at all: that frame segments into 13 components, and 12
+    # of them are the SAME repeated symbol — one room, exactly four walls, no
+    # name, 1.78-2.00 m2, 3.33 m across. Blocking a real drawing because a
+    # parking bay is stamped twelve times is a false positive, and it is the
+    # one this check would otherwise have shipped.
+    #
+    # The discriminator is the drawing's own labelling, not magnitude. A size
+    # or area floor would be a constant invented here, and `frames.py` is a long
+    # argument about why constants like that do not survive the next drawing;
+    # 3.33 m already clears `PLAUSIBLE_SPAN`, so span could not have done it.
+    # `solve/layerscan.py` learned the same lesson and states it as a rule:
+    # optimise NAMED rooms, not room count. A draughtsman names the rooms of
+    # the buildings; nobody names a hatch rectangle.
+    #
+    # This fails in the safe direction. A genuine second building whose rooms
+    # the drawing never names is a false NEGATIVE — the model verifies and the
+    # reviewer is not stopped — and every component is still reported in
+    # `model.site.buildings` for them to see. The opposite error stops real work
+    # on a real drawing, which is worse.
+    if spaces and walls:
+        seg = segment_site(walls, spaces)
+        named_buildings = [b for b in seg.buildings if b.named]
+        if len(named_buildings) >= 2:
+            listed = named_buildings[:BUILDINGS_LISTED]
+            listing = "; ".join(
+                f"#{b.index} {len(b.space_indices)} rooms, {b.area:.1f} m2, "
+                f"{b.span:.1f} m across"
+                for b in listed
             )
-            # ── An absolute gap, NOT a share of the extent ──────────────────
-            # The first version of this required the gap to exceed a quarter of
-            # the plan's extent, on the reasoning that a courtyard is a small
-            # hole and a sheet gutter is a large one. Measured, that is simply
-            # wrong and it missed the case it was written for: the merged villa's
-            # two storeys are 2.48 m apart across 32.67 m — **7.6%** — and the
-            # check stayed silent on the exact model that motivated it.
+            rest = len(named_buildings) - len(listed)
+            unnamed = seg.count - len(named_buildings)
+            v.checks.append(Check(
+                "site-scope", "blocking",
+                f"This scope holds {len(named_buildings)} separate buildings — "
+                "no two of them share a wall, so it is a site, not a building, "
+                "and every quantity here is summed across all of them. Rebuild "
+                f"one with --building N. {listing}"
+                + (f"; and {rest} more" if rest > 0 else "")
+                + (f". A further {unnamed} unnamed fragment(s) were found and "
+                   "are not counted as buildings" if unnamed else "") + ".",
+                len(named_buildings),
+            ))
+        else:
+            # Said on the way past even when it passes, and it carries two
+            # quantities rather than a bare "fine".
             #
-            # What the measurement shows instead is that the room projection of a
-            # real building has NO gap at all:
+            # The linework bounding NO room is the first: on a villa that is a
+            # few stray metres, on a site sheet it is the roads, the plot lines
+            # and the compound wall, and watching it grow is the earliest sign
+            # that a scope has stopped being one building.
             #
-            #     merged villa (two storeys)   y: 2 islands, gap 2.48 m
-            #     correct villa (one storey)   y: 1 island,  gap 0.00 m
-            #
-            # Room faces come from `polygonize` and are interior-disjoint,
-            # sharing edges exactly, so they tile whatever they cover. A
-            # courtyard is bounded by rooms on both sides at the same
-            # coordinate, so it closes in projection. **Any** gap is therefore a
-            # real separation, and the only job of the threshold is to clear
-            # floating-point noise — hence a metre against a measured 0.00.
-            if gap > MIN_BUILDING_GAP:
-                v.checks.append(Check(
-                    "one-building", "warning",
-                    f"the rooms fall into two groups {gap:.2f} m apart across "
-                    f"{extent:.2f} m of plan, with nothing between them. This is "
-                    "usually two drawings on one sheet reconstructed as one "
-                    "building — every quantity would then be for both.",
-                    round(gap / extent, 3),
-                ))
-                break
+            # The unnamed fragments are the second, and they are reported
+            # precisely BECAUSE they were discounted above. A check that
+            # silently drops what it decided not to count teaches the reader
+            # that nothing was there.
+            fragments = seg.count - len(named_buildings)
+            v.checks.append(Check(
+                "site-scope", "info",
+                f"one building; {len(seg.site_wall_indices)} walls "
+                f"({seg.site_wall_length:.1f} m) bound no room"
+                + (f"; {fragments} unnamed fragment(s) not counted as buildings"
+                   if fragments else ""),
+                max(len(named_buildings), 1),
+            ))
 
     # ---- How much linework never reached a frame ---------------------------
     # This check cannot compute its own quantity, and that is the point.

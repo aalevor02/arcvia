@@ -46,6 +46,13 @@ MAX_AREA_M2 = 400.0
 #: Faces thinner than this are slivers thrown off by near-collinear walls.
 MIN_WIDTH_M = 0.6
 
+#: A face containing more islands than this is the building outline, not a
+#: room around a core. Two is the most any real room in the ground-truth set
+#: surrounds (a stair core plus a duct); the envelope of even the smallest
+#: fixture contains a dozen. The gap between the two populations is wide, so
+#: this is not a fine judgement.
+MAX_ISLANDS = 2
+
 
 @dataclass
 class Space:
@@ -143,25 +150,45 @@ def detect_spaces(walls, labels=None, classify_room=None) -> list[Space]:
     # sees a pile of segments that merely touch and finds nothing.
     faces = list(polygonize(unary_union(lines)))
 
-    # ── Drop the envelopes ──────────────────────────────────────────────────
+    # ── Drop the envelopes, keep the rooms that surround a core ─────────────
     # polygonize returns every bounded face, and the outline of the building is
     # one of them — a single face containing all the rooms. Left in, it becomes
     # the largest "room" in the model, and whichever label happens to fall
     # inside it gets the name. That is how a toilet ends up at 283 m2.
     #
     # A threshold cannot separate these, because a large envelope and a large
-    # hall are the same number. Containment can: a room contains no other face,
-    # an envelope contains many. Exact, and no parameter to tune.
+    # hall are the same number. Containment can — but "contains ANY face" is
+    # too blunt, and it cost real rooms: a stair core or a duct cluster whose
+    # walls close into a freestanding ring is an ISLAND, and the room around
+    # it then contains a face. Measured on the Revit-22 ground truth with a
+    # properly closed envelope, the old rule silently deleted the entire band
+    # of rooms around the stair core — 8 rooms, 88 m2 — and only a wandering
+    # derived-perimeter ring had been hiding it, by happening to wire the
+    # island into the room boundary.
+    #
+    # So the question is HOW MANY faces this one contains. A room surrounds a
+    # core or a courtyard — one or two islands. The building outline surrounds
+    # everything. In between does not occur in a plan that solved at all.
+    # Contained islands are SUBTRACTED (the core is not floor), and the
+    # remainder then faces the same area and sliver filters as any room.
     interior: list[Polygon] = []
     for poly in faces:
-        points = [
-            other.representative_point()
+        contained = [
+            other
             for other in faces
-            if other is not poly
+            if other is not poly and poly.contains(other.representative_point())
         ]
-        if any(poly.contains(p) for p in points):
+        if len(contained) > MAX_ISLANDS:
             continue
-        interior.append(poly)
+        if contained:
+            remainder = poly.difference(unary_union(contained))
+            if remainder.is_empty:
+                continue
+            if remainder.geom_type == "MultiPolygon":
+                remainder = max(remainder.geoms, key=lambda g: g.area)
+            interior.append(remainder)
+        else:
+            interior.append(poly)
 
     mean_thickness = (
         sum(w.thickness for w in walls) / len(walls) if walls else 0.115

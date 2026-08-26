@@ -233,7 +233,7 @@ def _explode(entity, layer: str) -> list[Segment]:
     return []
 
 
-def read(path: str) -> dict:
+def read(path: str, doc=None, auditor=None) -> dict:
     """
     Open a DXF and report what it contains.
 
@@ -242,10 +242,11 @@ def read(path: str) -> dict:
     a strict reader does not, and refusing a file the architect can open in
     their own software is not a defensible answer.
     """
-    try:
-        doc, auditor = recover.readfile(path)
-    except (IOError, ezdxf.DXFStructureError) as exc:
-        raise ValueError(f"That file could not be read as a DXF: {exc}") from exc
+    if doc is None:
+        try:
+            doc, auditor = recover.readfile(path)
+        except (IOError, ezdxf.DXFStructureError) as exc:
+            raise ValueError(f"That file could not be read as a DXF: {exc}") from exc
 
     msp = doc.modelspace()
 
@@ -339,7 +340,7 @@ def read(path: str) -> dict:
         "unit": unit,
         "extent": round(extent_raw * scale, 2),
         "scaleCandidates": candidates,
-        "audit": len(auditor.errors),
+        "audit": len(auditor.errors) if auditor is not None else 0,
         "_segments": segments,
         "_origin": (min(xs), min(ys)),
     }
@@ -474,7 +475,7 @@ def guess_item(block: str) -> str | None:
     return None
 
 
-def furniture(path: str, reading: dict, ignore_layers: list | None = None) -> dict:
+def furniture(path: str, reading: dict, ignore_layers: list | None = None, doc=None) -> dict:
     """
     Every block placement in the drawing, positioned and guessed at.
 
@@ -489,7 +490,8 @@ def furniture(path: str, reading: dict, ignore_layers: list | None = None) -> di
     decisions places hundreds of objects, and anything unmapped stays out of the
     scene rather than becoming a wrong object.
     """
-    doc, _ = recover.readfile(path)
+    if doc is None:
+        doc, _auditor = recover.readfile(path)
     msp = doc.modelspace()
 
     scale = reading["scale"]

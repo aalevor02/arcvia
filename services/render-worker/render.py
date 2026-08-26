@@ -254,20 +254,25 @@ def apply_lights(lights: list[dict]) -> None:
 
 def setup_camera(camera_spec: dict | None) -> None:
     data = bpy.data.cameras.new("ArcviaCamera")
-    data.lens = float((camera_spec or {}).get("focalLength", 35.0))
+    camera_spec = camera_spec or {}
+    if camera_spec.get("projection") == "equirectangular":
+        data.type = "PANO"
+        data.panorama_type = "EQUIRECTANGULAR"
+    else:
+        data.lens = float(camera_spec.get("focalLength", 35.0))
 
     obj = bpy.data.objects.new("ArcviaCamera", data)
     bpy.context.collection.objects.link(obj)
     bpy.context.scene.camera = obj
 
-    position = (camera_spec or {}).get("position") or {}
+    position = camera_spec.get("position") or {}
     obj.location = (
         float(position.get("x", 6.0)),
         float(position.get("y", -6.0)),
         float(position.get("z", 4.0)),
     )
 
-    rotation = (camera_spec or {}).get("rotation")
+    rotation = camera_spec.get("rotation")
     if rotation:
         # Quaternion from the browser: (x, y, z, w). Blender orders it (w, x, y, z).
         obj.rotation_mode = "QUATERNION"

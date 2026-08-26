@@ -204,6 +204,21 @@ def refresh(
         stamped = page_date(html)
 
         for rate in rates:
+            # Freshness is monotonic. A source page can lag behind a library
+            # row assembled from a newer market snapshot (measured live on
+            # 2026-08-26: a 6 Aug timber page replaced three 12 Aug rows).
+            # The price move was small enough to pass TRUST_BAND, so the old
+            # page silently made both the rate and its provenance older. A
+            # refresh may confirm or advance a row; it may never rewind one.
+            if stamped and rate.rate_date and stamped < rate.rate_date:
+                report.untrusted.append({
+                    "id": rate.id,
+                    "url": url,
+                    "reason": f"page date {stamped.isoformat()} is older than "
+                              f"stored rate date {rate.rate_date.isoformat()}",
+                })
+                continue
+
             # EVERY match, not the first one.
             #
             # ── The brand substitution this closes ──────────────────────────

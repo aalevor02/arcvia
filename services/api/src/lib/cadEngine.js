@@ -131,18 +131,45 @@ export function runEngine(command, args, { onProgress, signal } = {}) {
  * not believe, and shipping that to a viewer is worse than failing.
  */
 export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers = true,
-                                    height, frame, storeys = true, onProgress, signal }) {
+                                    height, frame, building, storeys = true,
+                                    onProgress, signal }) {
   const args = ['--input', inputPath, '--out', outDir]
   if (unit) args.push('--unit', unit)
   if (layers?.length) args.push('--layers', layers.join(','))
   else if (autoLayers) args.push('--auto-layers')
   if (height) args.push('--height', String(height))
   if (frame !== undefined && frame !== null) args.push('--frame', String(frame))
+  // Which BUILDING within the frame, for a site plan whose villas share no
+  // wall. The engine reports its buildings on every build in `model.site`, so
+  // a reviewer who gets a blocking `site-scope` finding can come straight back
+  // with the index they want. Only passed when asked for: omitted, the engine
+  // builds the whole scope exactly as it always has.
+  if (building !== undefined && building !== null) {
+    args.push('--building', String(building))
+    // The engine refuses `--building` on a multi-storey stack, because the
+    // numbering is per frame and index 2 downstairs need not be index 2
+    // upstairs. Asking for both would fail the job rather than the request, so
+    // the narrower intent wins here and the reason travels with it.
+    if (storeys) {
+      onProgress?.({
+        note: 'building selected, so storeys are off for this job: the '
+            + 'building numbering is per frame and cannot be carried between '
+            + 'floors',
+      })
+    }
+  }
   // On by default: a sheet drawing two floors of one house should build both.
   // Safe by the engine's own rule — geometry may propose a stack but only the
   // drawing's TEXT confirms one, and an unconfirmed group builds exactly as a
   // single-frame job does. The engine had this finished; nothing called it.
-  if (storeys) args.push('--storeys')
+  //
+  // Suppressed by an explicit building pick, per the note above: the engine
+  // REFUSES the pair, so passing both would fail the job instead of honouring
+  // the narrower request. Written as one condition rather than two so the
+  // behaviour and the message the caller was just given cannot drift apart.
+  if (storeys && (building === undefined || building === null)) {
+    args.push('--storeys')
+  }
 
   await runEngine('reconstruct', args, { onProgress, signal })
 

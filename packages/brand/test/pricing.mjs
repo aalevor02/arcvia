@@ -53,6 +53,11 @@ ok('cadReconstruct is on the price list', Boolean(cad))
 ok('at the price it actually charges', cad?.cost === creditCost.cadReconstruct,
   `${cad?.cost} vs ${creditCost.cadReconstruct}`)
 
+const panorama = rows.find((r) => r.action === 'panoramaRender')
+ok('360 panorama is on the price list', Boolean(panorama))
+ok('at its API tariff', panorama?.cost === 8, String(panorama?.cost))
+ok('and is named as a 360 deliverable', panorama?.label.includes('360'), panorama?.label)
+
 console.log('\n-- every row carries the price the code charges --')
 for (const row of rows) {
   ok(`${row.action} is listed at its tariff`, row.cost === creditCost[row.action],

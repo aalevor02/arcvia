@@ -37,9 +37,28 @@ const post = (path, token, body) =>
   })
 
 // ---- Is the engine even here? ----------------------------------------------
+// Two different answers hide behind one failed fetch, and collapsing them cost
+// a real misreading: with no server running at all this file printed
+// "0 passed, 0 failed" and exited 0, which is indistinguishable at a glance
+// from a suite that ran. The same run with a server up reports 54. A test that
+// succeeds without asserting anything is worse than one that fails.
+//
+//   no response at all  -> the HARNESS is wrong. Nobody started the server, so
+//                          nothing here was tested and saying "0 failed" is a
+//                          false green. Exit non-zero.
+//   a reply saying the
+//   engine is missing   -> a real skip. The Python engine is a separate
+//                          install and a machine without it genuinely cannot
+//                          run this. Exit zero, but say so loudly.
 const health = await fetch(`${BASE}/cad/health`).then((r) => r.json()).catch(() => null)
-if (!health?.ok) {
-  console.log(`SKIP  the reconstruction engine is not available (${health?.reason ?? 'no response'})`)
+if (health === null) {
+  console.error(`FAIL  no API is listening on ${BASE} — start one before this suite:`)
+  console.error('        cd services/api && node src/server.js')
+  console.error('\n0 passed, 1 failed (nothing was tested)')
+  process.exit(1)
+}
+if (!health.ok) {
+  console.log(`SKIP  the reconstruction engine is not available (${health.reason ?? 'unknown reason'})`)
   console.log('\n0 passed, 0 failed')
   process.exit(0)
 }
@@ -142,6 +161,40 @@ const different = await post('/cad/jobs', account.token, { key, autoLayers: fals
 ok('different settings still get their own job',
   different.status === 201, String(different.status))
 
+// `building` is the newest of those settings and the easiest to leave out of
+// the fingerprint, because every other field is identical between the two
+// requests: same drawing, same layers, same frame, same height. Left out, the
+// second request deduplicates against the first and the reviewer is handed the
+// WRONG VILLA along with a cheerful "not charged again" — a silent swap of one
+// building for another, which is exactly the class of failure the fingerprint
+// exists to prevent.
+const buildingA = await post('/cad/jobs', account.token,
+  { key, autoLayers: true, building: 0 })
+const buildingB = await post('/cad/jobs', account.token,
+  { key, autoLayers: true, building: 1 })
+const pickedA = await buildingA.json()
+const pickedB = await buildingB.json()
+
+ok('asking for a building is a new job, not the whole-scope one',
+  buildingA.status === 201 && pickedA.jobId !== created.jobId,
+  `${buildingA.status} ${pickedA.jobId}`)
+ok('and a DIFFERENT building is a different job again',
+  buildingB.status === 201 && pickedB.jobId !== pickedA.jobId,
+  `${buildingB.status} ${pickedA.jobId} vs ${pickedB.jobId}`)
+ok('neither is reported as a duplicate',
+  pickedA.deduplicated !== true && pickedB.deduplicated !== true)
+
+// The mirror: the SAME building twice is still one submission. A fingerprint
+// that separates everything is no fingerprint at all.
+const buildingAgain = await post('/cad/jobs', account.token,
+  { key, autoLayers: true, building: 0 })
+const repeated = await buildingAgain.json()
+ok('the same building twice deduplicates as any repeat does',
+  buildingAgain.status === 200 && repeated.jobId === pickedA.jobId,
+  `${buildingAgain.status} ${repeated.jobId} vs ${pickedA.jobId}`)
+ok('and charges nothing the second time',
+  repeated.creditsCharged === 0, String(repeated.creditsCharged))
+
 let job = null
 const deadline = Date.now() + 300_000
 while (Date.now() < deadline) {
@@ -172,9 +225,44 @@ if (job?.status === 'done') {
   ok('it enclosed rooms', (job.summary?.rooms ?? 0) > 0, String(job.summary?.rooms))
   ok('some of them are named', (job.summary?.named ?? 0) > 0, String(job.summary?.named))
   ok('it built walls', (job.summary?.walls ?? 0) > 0, String(job.summary?.walls))
+  ok('and exposes the measured wall-pairing fraction',
+    job.summary?.wallPairing === job.summary?.wallsPaired / job.summary?.walls,
+    `${job.summary?.wallsPaired}/${job.summary?.walls} = ${job.summary?.wallPairing}`)
   ok('and settled on a unit', Boolean(job.summary?.unit), job.summary?.unit)
   ok('and recorded which layers it used', Array.isArray(job.summary?.layers),
     String(job.summary?.layers))
+  ok('automatic selection refuses disproportionate and non-wall fallback layers',
+    !job.summary?.layers?.includes('0') &&
+      !job.summary?.layers?.includes('A6 SANITARY WARE'),
+    String(job.summary?.layers))
+  ok('and attributes billable and indoor wall run to source layers',
+    Array.isArray(job.summary?.wallLayers) &&
+      job.summary.wallLayers.length > 0 &&
+      job.summary.wallLayers.every((layer) =>
+        typeof layer.layer === 'string' &&
+        Number.isFinite(layer.billableLength) &&
+        Number.isFinite(layer.indoorLength)),
+    JSON.stringify(job.summary?.wallLayers))
+  ok('and exposes the verification findings for review',
+    Array.isArray(job.summary?.verifyChecks), String(job.summary?.verifyChecks))
+  ok('with a warning count consistent with those findings',
+    job.summary?.verifyWarnings === job.summary?.verifyChecks?.filter((c) => c.level === 'warning').length,
+    `${job.summary?.verifyWarnings}/${job.summary?.verifyChecks?.length}`)
+  const wallRun = job.summary?.verifyChecks?.find((c) => c.name === 'wall-run-per-area')
+  ok('and keeps the villa wall run inside the measured building band',
+    wallRun?.level === 'info' && wallRun.value >= 0.6 && wallRun.value <= 1.6,
+    JSON.stringify(wallRun))
+  ok('and preserves every unhosted opening as a review target',
+    Array.isArray(job.summary?.openingIssues) &&
+      job.summary.openingIssues.length === job.summary.openingsUnassigned,
+    `${job.summary?.openingIssues?.length}/${job.summary?.openingsUnassigned}`)
+  ok('each target carries its source position and nearest modeled wall distance',
+    job.summary?.openingIssues?.every((issue) =>
+      typeof issue.block === 'string' &&
+      Number.isFinite(issue.registeredPosition?.x) &&
+      Number.isFinite(issue.registeredPosition?.y) &&
+      Number.isFinite(issue.nearestWallDistance)),
+    JSON.stringify(job.summary?.openingIssues))
   ok('a successful job is not refunded', !job.refunded, String(job.refunded))
 
   // The plan is the artefact a reviewer can actually read. It comes out of the

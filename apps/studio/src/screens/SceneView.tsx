@@ -38,6 +38,7 @@ import OptionsPanel from '../components/OptionsPanel'
 import CommentsPanel from '../components/CommentsPanel'
 import SunPanel, { type Site } from '../components/SunPanel'
 import DeckDesignPanel from '../components/DeckDesignPanel'
+import PanoramaViewer from '../components/PanoramaViewer'
 import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
 import { setAccessCode } from '../lib/api'
@@ -57,6 +58,7 @@ const PRESETS: { id: RenderPreset; label: string; credits: number; note: string 
   { id: 'preview', label: 'Preview', credits: 1, note: '240px · 4 samples' },
   { id: 'isometric', label: 'Isometric', credits: 3, note: '1920×1080 · 32 samples' },
   { id: 'full', label: 'Full still', credits: 5, note: '2560×1440 · 128 samples' },
+  { id: 'panorama', label: '360 panorama', credits: 8, note: '4096Ã—2048 Â· equirectangular' },
   { id: 'bake', label: 'Lightmap bake', credits: 25, note: 'Whole scene · minutes' },
 ]
 
@@ -194,6 +196,13 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
   const [style, setStyle] = useState('daylight')
   /** The last photoreal render, shown beside the viewport. */
   const [aiImage, setAiImage] = useState<string | null>(null)
+  const [renderOutput, setRenderOutput] = useState<{
+    preset: RenderPreset
+    url: string
+  } | null>(null)
+  /** Durable 360 output, independent of whichever still was rendered last. */
+  const [panoramaUrl, setPanoramaUrl] = useState<string | null>(null)
+  const [showPanorama, setShowPanorama] = useState(false)
 
   // Styles come from the server so there is one definition of what the
   // renderer will accept, rather than a copy here that can drift out of step.
@@ -234,6 +243,7 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
               : designsOf(scene.design),
         )
         setSceneBakedUrl(scene.bakedUrl ?? null)
+        setPanoramaUrl(scene.panoramaUrl ? storedUrl(scene.panoramaUrl) : null)
       })
       .catch(() => {
         /* a scene that will not load is already reported by the editor */
@@ -926,11 +936,34 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
       const result = await pollRender(jobId, (update) =>
         setJob({ status: update.status, progress: update.progress }),
       )
-      setStatus(result.status === 'done' ? 'Render complete' : `Render ${result.status}`)
+      if (result.status === 'done' && result.outputUrl) {
+        const outputUrl = storedUrl(result.outputUrl)
+        if (preset === 'panorama') {
+          await updateScene(sceneId, { panoramaUrl: result.outputUrl })
+          setPanoramaUrl(outputUrl)
+        }
+        setRenderOutput({ preset, url: outputUrl })
+        setStatus(preset === 'panorama' ? '360 panorama ready.' : 'Render complete')
+      } else {
+        setStatus(result.error ?? 'Render ' + result.status)
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Render failed')
     } finally {
       setJob(null)
+    }
+  }
+
+  async function clearPanorama() {
+    setStatus('Removing panorama…')
+    try {
+      await updateScene(sceneId, { panoramaUrl: null })
+      setPanoramaUrl(null)
+      setRenderOutput((current) => current?.preset === 'panorama' ? null : current)
+      setShowPanorama(false)
+      setStatus('Panorama removed from this scene and its public link.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'The panorama could not be removed.')
     }
   }
 
@@ -1237,6 +1270,29 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
             </button>
           ))}
 
+          {(panoramaUrl || renderOutput) && (
+            <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+              {panoramaUrl && (
+                <>
+                  <button className="btn btn-primary" onClick={() => setShowPanorama(true)}>
+                    Preview 360
+                  </button>
+                  <a className="btn" href={panoramaUrl} target="_blank" rel="noreferrer">
+                    Open panorama image
+                  </a>
+                  <button className="btn" onClick={() => void clearPanorama()}>
+                    Remove panorama
+                  </button>
+                </>
+              )}
+              {renderOutput && renderOutput.preset !== 'panorama' && (
+                <a className="btn" href={renderOutput.url} target="_blank" rel="noreferrer">
+                  Open rendered image
+                </a>
+              )}
+            </div>
+          )}
+
           <button
             className="btn btn-primary"
             style={{ justifyContent: 'space-between', marginTop: 8 }}
@@ -1392,6 +1448,9 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
           )}
         </section>
       </aside>
+      {showPanorama && panoramaUrl && (
+        <PanoramaViewer src={panoramaUrl} onClose={() => setShowPanorama(false)} />
+      )}
     </div>
   )
 }

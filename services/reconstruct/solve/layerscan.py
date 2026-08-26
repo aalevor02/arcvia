@@ -26,7 +26,7 @@ whole point — this ranks candidates, and the caller passes `--layers`.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 #: Layers with less than this much linework cannot be a building's walls.
 MIN_SEGMENTS = 12
@@ -50,6 +50,7 @@ class LayerScore:
     median_thickness: float | None
     spread: float | None
     plausible_fraction: float
+    paired_fraction: float
     verdict: str
 
     def as_dict(self) -> dict:
@@ -64,8 +65,55 @@ class LayerScore:
             ),
             "spread": round(self.spread, 4) if self.spread is not None else None,
             "plausibleFraction": round(self.plausible_fraction, 3),
+            "pairedFraction": round(self.paired_fraction, 3),
             "verdict": self.verdict,
         }
+
+
+def encloses(faces_by_layer: dict[str, list]) -> dict[str, int]:
+    """
+    How many rooms each layer closes ON ITS OWN.
+
+    ── Why the pairing verdict is not enough, measured on a real upload ─────
+    `scan` asks how a layer's linework pairs with ITSELF. That is the right
+    question for a layer drawing whole walls and the WRONG one for a drawing
+    that splits a wall's two faces across two layers — and it then gives an
+    actively misleading answer. From a Norwegian residential DWG a client
+    actually uploaded:
+
+        layer        segs   self-pairs   verdict                        rooms
+        A-WALL        133   26 @ 0.150   WALLS                              0
+        inne_gulv     179   36 @ 0.050   pairs, not at wall thicknesses     21
+
+    The layer the report endorsed encloses NOTHING. The layer it dismissed as
+    floor-finish hatching ("inne_gulv" is Norwegian for inner floor) is the
+    inner face of the building's walls and closes twenty-one rooms. Selecting
+    on the verdict alone gave 3 rooms and a BLOCKED verify; adding the
+    dismissed layer gives 33 rooms, 10 named, and a clean pass.
+
+    Enclosure is the honest measure and `select_wall_layers` already says why:
+    *what only walls do is close*. It is reported per layer here so a human
+    reading the free `layers` table sees the same evidence the fitter uses.
+
+    Note what is NOT reported: a "gain" from pairing two layers together.
+    That was tried and refuted — pairing is greedy and exclusive, so combining
+    two layers yields FEWER pairs than the sum of their solos (measured 61
+    against 62 here) while producing far better ones. Pair counts cannot see
+    this; closed rooms can.
+    """
+    from hypothesise.pair import join_corners, pair_faces
+    from solve.spaces import detect_spaces
+
+    out: dict[str, int] = {}
+    for name, faces in faces_by_layer.items():
+        if len(faces) < MIN_SEGMENTS:
+            continue
+        pool = [replace(f, layer=name) for f in faces]
+        try:
+            out[name] = len(detect_spaces(join_corners(pair_faces(pool))))
+        except Exception:  # noqa: BLE001 — a diagnostic must not break a report
+            out[name] = 0
+    return out
 
 
 def scan(faces_by_layer: dict[str, list]) -> list[LayerScore]:
@@ -74,6 +122,10 @@ def scan(faces_by_layer: dict[str, list]) -> list[LayerScore]:
 
     Sorted best-first: the layers most likely to hold walls come out on top,
     with the evidence for that ranking attached to each one.
+
+    A layer that scores badly here may still be half of a wall — see
+    `cross_partners`, and do not read a poor verdict as "not a wall layer"
+    without checking it.
     """
     from hypothesise.pair import pair_faces
 
@@ -96,6 +148,7 @@ def scan(faces_by_layer: dict[str, list]) -> list[LayerScore]:
             plausible = sum(1 for t in thicknesses if lo <= t <= hi) / len(thicknesses)
         else:
             median, spread, plausible = None, None, 0.0
+        paired_fraction = len(paired) / len(walls) if walls else 0.0
 
         # A wall layer pairs a lot, at one thickness, in a buildable range.
         if not paired:
@@ -119,6 +172,7 @@ def scan(faces_by_layer: dict[str, list]) -> list[LayerScore]:
                 median_thickness=median,
                 spread=spread,
                 plausible_fraction=plausible,
+                paired_fraction=paired_fraction,
                 verdict=verdict,
             )
         )
@@ -142,6 +196,16 @@ ROOM_AREA = (2.0, 150.0)
 
 #: Stop adding layers once the best candidate adds fewer rooms than this.
 MIN_GAIN = 1
+
+#: Maximum new walls a candidate may add for each new piece of annotation it
+#: explains.  The annotation objective still decides *which* candidate wins;
+#: this only refuses a candidate that buys a tiny score increase with a large
+#: amount of unrelated linework.  Measured on the villa's ground-floor frame,
+#: the useful false-ceiling layer adds 92 walls for nine new pieces of evidence,
+#: while generic layer ``0`` adds 137 walls for one named room.  The latter is
+#: exactly how a greedy annotation score turns one extra label into 102.55 m of
+#: spurious indoor wall run.
+MAX_WALLS_PER_EVIDENCE_GAIN = 40
 
 
 def _rooms_from(faces) -> int:
@@ -177,6 +241,23 @@ class Fit:
             "walls": self.walls, "rooms": self.rooms, "named": self.named,
             "doors": self.doors, "unhosted": self.unhosted,
         }
+
+
+def efficient_improvement(before: Fit, after: Fit) -> bool:
+    """Whether a better annotation fit is proportionate to its wall growth."""
+    if after.score <= before.score:
+        return False
+
+    opening_gain = max(
+        max(0, after.doors - before.doors),
+        max(0, before.unhosted - after.unhosted),
+    )
+    evidence_gain = max(0, after.named - before.named) + opening_gain
+    if evidence_gain == 0:
+        return False
+
+    wall_gain = max(0, after.walls - before.walls)
+    return wall_gain <= MAX_WALLS_PER_EVIDENCE_GAIN * evidence_gain
 
 
 def fit_of(faces, labels, placements, classify_room, guess_item,
@@ -323,7 +404,7 @@ def select_within_frame(
                 trial, labels, placements, classify_room, guess_item,
                 opening_labels=opening_labels,
             )
-            if fit.score > winner_fit.score:
+            if efficient_improvement(best, fit) and fit.score > winner_fit.score:
                 winner, winner_fit, winner_pool = name, fit, trial
 
         if winner is None:

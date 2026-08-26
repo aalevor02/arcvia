@@ -73,6 +73,10 @@ def parse():
     p.add_argument("--kind", default=None, help="Render only this kind of view.")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--aov", action="store_true", help="Write conditioning passes.")
+    p.add_argument("--materials", default=None,
+                   help="Material bridge JSON: dress meshes by their "
+                        "extras.surfaceClass. Only meaningful with a style "
+                        "that keeps materials.")
     p.add_argument("--skip-tight", action="store_true", default=True)
     return p.parse_args(argv())
 
@@ -333,6 +337,27 @@ def main():
     if applied["materials"] in ("keep", "clay"):
         style.add_sun(bpy)
 
+    # Surface-class materials. Deliberately AFTER apply_style, because a
+    # style that overrides materials (clay, flat, paper) is a deliberate
+    # request for one uniform surface and must win — dressing the model
+    # and then claying it would be wasted work, and dressing it after
+    # claying would silently defeat the style the caller asked for.
+    surfaces = None
+    if args.materials and applied["materials"] == "keep":
+        bridge = style.load_material_bridge(args.materials)
+        surfaces = style.apply_surface_materials(bpy, bridge)
+        print("ARCVIA_MATERIALS:" + ", ".join(
+            f"{k}={v}" for k, v in sorted(surfaces["applied"].items())))
+        audit = style.audit_materials(bpy)
+        surfaces["audit"] = audit
+        for finding in audit["findings"]:
+            print(f"ARCVIA_MATERIAL_WARNING:{finding}")
+        if surfaces["untouched"]:
+            print(f"ARCVIA_MATERIALS_UNTOUCHED:{len(surfaces['untouched'])} "
+                  "meshes carry no surface class or no material for it")
+    elif args.materials:
+        print(f"ARCVIA_MATERIALS_SKIPPED:style {args.style} overrides materials")
+
     stem = Path(args.glb).stem
     print(f"ARCVIA_SCENE:{meshes} meshes, style={args.style}, "
           f"engine={args.engine} ({samples} samples, {width}x{height})")
@@ -351,7 +376,8 @@ def main():
     manifest.write_text(
         json.dumps(
             {"style": applied, "engine": args.engine, "samples": samples,
-             "resolution": [width, height], "renders": done},
+             "resolution": [width, height], "renders": done,
+             **({"surfaces": surfaces} if surfaces else {})},
             indent=2,
         ),
         encoding="utf-8",

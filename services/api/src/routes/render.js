@@ -53,6 +53,16 @@ const PRESETS = {
     maxBounces: 8,
     diffuseBounces: 4,
   },
+  // Bounded equirectangular deliverable for interactive 360 viewers.
+  panorama: {
+    action: 'panoramaRender',
+    width: 4096,
+    height: 2048,
+    samples: 64,
+    maxBounces: 6,
+    diffuseBounces: 4,
+    projection: 'equirectangular',
+  },
   // Photoreal stills from a viewport capture. Priced like a full still: it
   // costs an API call rather than GPU-seconds, but it is the same thing to a
   // user — one finished image of one camera.
@@ -400,6 +410,7 @@ export async function registerRenderRoutes(app) {
           // orientation must take the identical turn or the camera faces the
           // wrong way. See toBlenderQuat.
           rotation: toBlenderQuat(cameraRotation),
+          projection: config.projection ?? 'perspective',
         },
         width: config.width,
         height: config.height,

@@ -39,6 +39,7 @@ export async function registerSceneRoutes(app) {
       ownerId: request.auth.userId,
       organisationId: request.auth.orgId,
       modelUrl: null,
+      panoramaUrl: null,
       lightsUrl: null,
       hdriUrl: null,
       floorPlanUrl: null,
@@ -108,6 +109,10 @@ export async function registerSceneRoutes(app) {
       // on every reload until the user gave in.
       'designFurnitureReviewed',
       'bakedUrl',
+      // The latest completed equirectangular render. Unlike an ordinary render
+      // result, this is part of the presentation: Studio restores it after a
+      // reload and published viewers can offer the same 360 experience.
+      'panoramaUrl',
       'plan',
       // What turns a model into a presentation. All three are authored in the
       // studio and consumed by the published page, and none of them is worth a
@@ -507,6 +512,7 @@ function publicPayload(scene) {
     // light; one without falls back to the real-time rig, which is worse but
     // still a walkthrough — so this is optional rather than required.
     bakedUrl: scene.bakedUrl ?? null,
+    panoramaUrl: scene.panoramaUrl ?? null,
     // Empty arrays rather than null: the page iterates these, and a null would
     // make every consumer write the same guard.
     views: scene.views ?? [],

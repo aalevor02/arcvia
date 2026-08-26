@@ -77,7 +77,7 @@ const LANES = {
   heavy: { limit: Number(process.env.RENDER_HEAVY_CONCURRENCY ?? 1) },
 }
 
-const LANE_OF_PRESET = { full: 'heavy', cad: 'heavy', bake: 'heavy' }
+const LANE_OF_PRESET = { full: 'heavy', panorama: 'heavy', cad: 'heavy', bake: 'heavy' }
 
 /** Which lane a job queues in. Unknown presets ride fast — they always did. */
 export const laneOf = (job) => LANE_OF_PRESET[job.preset] ?? 'fast'
@@ -424,6 +424,7 @@ async function runJob(job) {
               autoLayers: job.spec.autoLayers !== false,
               height: job.spec.height,
               frame: job.spec.frame,
+              building: job.spec.building,
               storeys: job.spec.storeys !== false,
               signal: controller.signal,
               onProgress,
@@ -487,9 +488,16 @@ async function runJob(job) {
           rooms: model.rooms?.count ?? 0,
           named: model.rooms?.named ?? 0,
           walls: model.walls?.total ?? 0,
+          wallsPaired: model.walls?.paired ?? 0,
+          wallPairing: model.walls?.total
+            ? (model.walls.paired ?? 0) / model.walls.total
+            : null,
           openings: model.openings?.total ?? 0,
+          openingsUnassigned: model.openings?.unassigned ?? 0,
+          openingIssues: model.openingIssues ?? [],
           unit: model.unit,
           layers: model.layersUsed,
+          wallLayers: model.walls?.layers ?? [],
           verifyWarnings: verify.warnings ?? 0,
           verifyChecks: verify.checks ?? [],
           // Deck sheets carry scale evidence instead of a drawing unit; the

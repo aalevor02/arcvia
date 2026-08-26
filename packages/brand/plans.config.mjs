@@ -30,6 +30,7 @@ export const creditCost = {
   previewRender: 1, // 240x240 thumbnail, samples: 4
   isometricRender: 3, // 1920x1080, samples: 32
   fullRender: 5, // full-res still, samples: 128
+  panoramaRender: 8, // 4096x2048 equirectangular 360 deliverable
   lightmapBake: 25, // whole-scene bake — the single most expensive action
 
   // CAD reconstruction. Reading a drawing is free on purpose: a survey answers
@@ -66,6 +67,7 @@ export const creditLabel = {
   previewRender: 'Preview render (thumbnail)',
   isometricRender: 'Isometric render (1920×1080)',
   fullRender: 'Full-resolution still',
+  panoramaRender: '360 panorama (4096x2048)',
   lightmapBake: 'Full scene lightmap bake',
   cadSurvey: 'Read a CAD drawing (survey and layers)',
   cadReconstruct: 'Reconstruct a CAD drawing into 3D',

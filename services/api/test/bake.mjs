@@ -203,10 +203,36 @@ const plainStored = JSON.parse(await readFile(DB_PATH, 'utf8')).renderJobs.find(
 )
 ok('without the flag the worker unwraps its own', plainStored?.spec?.prebakedUv === false)
 
+// ---- 360 panorama contract -----------------------------------------------
+const panorama = await fetch(BASE + '/render/jobs', {
+  method: 'POST',
+  headers: auth,
+  body: JSON.stringify({
+    sceneId: scene.id,
+    preset: 'panorama',
+    cameraPosition: { x: 4, y: 5, z: 1.7 },
+  }),
+})
+const panoramaBody = await panorama.json()
+ok('panorama job accepted', panorama.status === 201, String(panorama.status))
+ok('panorama charges its published tariff', panoramaBody.creditsCharged === 8,
+  String(panoramaBody.creditsCharged))
+const panoramaStored = JSON.parse(await readFile(DB_PATH, 'utf8')).renderJobs.find(
+  (j) => j.id === panoramaBody.jobId,
+)
+ok('panorama is a 2:1 4096x2048 render',
+  panoramaStored?.spec?.width === 4096 && panoramaStored?.spec?.height === 2048,
+  String(panoramaStored?.spec?.width) + 'x' + String(panoramaStored?.spec?.height))
+ok('equirectangular projection reaches the nested worker camera',
+  panoramaStored?.spec?.camera?.projection === 'equirectangular',
+  String(panoramaStored?.spec?.camera?.projection))
+ok('projection is not stranded at the top level', panoramaStored?.spec?.projection === undefined)
+ok('panorama remains a render job, not a bake', panoramaStored?.spec?.type === 'render')
+
 // Tidy up. Both jobs are real, and a local worker will happily spend minutes
 // of CPU on them; a test suite should not leave Blender running behind it.
-for (const id of [jobBody.jobId, plain.jobId].filter(Boolean)) {
-  await fetch(`${BASE}/render/jobs/${id}/cancel`, { method: 'POST', headers: auth })
+for (const id of [jobBody.jobId, plain.jobId, panoramaBody.jobId].filter(Boolean)) {
+  await fetch(`${BASE}/render/jobs/${id}/cancel`, { method: 'POST', headers: { Authorization: auth.Authorization } })
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

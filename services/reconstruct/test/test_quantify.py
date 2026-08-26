@@ -266,6 +266,24 @@ ok("but the rate keeps its OLD date — freshness is never invented",
    lib.rates[0].rate_date == was, str(lib.rates[0].rate_date))
 ok("and the old date is not today", lib.rates[0].rate_date != TODAY)
 
+print("\n-- refresh: an older source may never rewind a newer library row --")
+lib = cement_library()
+lib.rates[0].rate_date = date(2026, 8, 20)
+before_value, before_date = lib.rates[0].base, lib.rates[0].rate_date
+older_page = PAGE_WITH_DATE.replace("20 August 2026", "6 August 2026")
+res = with_page(
+    older_page,
+    lambda: refresh_mod.refresh(lib, today=TODAY, only_older_than=0),
+)
+ok("an older source page is refused",
+   len(res.untrusted) == 1 and len(res.updated) == 0, str(res.as_dict()))
+ok("the newer stored value is preserved", lib.rates[0].base == before_value)
+ok("the newer stored date is preserved", lib.rates[0].rate_date == before_date)
+ok("the refusal reports both dates",
+   "2026-08-06" in res.untrusted[0]["reason"]
+   and "2026-08-20" in res.untrusted[0]["reason"],
+   res.untrusted[0]["reason"])
+
 print("\n-- refresh: a big move is a parse failure, not a market --")
 lib = cement_library()
 before_value, before_date = lib.rates[0].base, lib.rates[0].rate_date

@@ -50,11 +50,13 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from shapely import maximum_inscribed_circle
+from shapely.affinity import translate
 from shapely.geometry import Point, Polygon
 
 #: Metrics this engine can measure. A rulebook naming anything else is refused
@@ -76,6 +78,11 @@ PROBE_DEPTH = 0.15
 
 #: Fallback wall thickness where a model records none. One brick, plastered.
 DEFAULT_THICKNESS = 0.23
+
+#: Minimum shared footprint for two named stair spaces to form one vertical
+#: route. CHOSEN conservatively: registration drift can move a real core, while
+#: 25% still refuses two unrelated stair rooms that merely touch at an edge.
+STAIR_OVERLAP_MIN = 0.25
 
 
 @dataclass
@@ -321,7 +328,12 @@ def corridor_width(face: Polygon, door_points: list[tuple[float, float]]) -> flo
 # ---------------------------------------------------------------------------
 
 
-def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
+def check(
+    model: dict,
+    rulebook: dict,
+    *,
+    egress_seeds: set[int] | None = None,
+) -> tuple[list[Finding], list[dict]]:
     """
     Findings, and the coverage that makes them honest.
 
@@ -518,7 +530,7 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
 
         # ---- Egress: can every listed room reach the outside? ----------------
         elif metric == "egress-reach":
-            if not doors:
+            if not doors and not egress_seeds:
                 row["skipped"].append({
                     "subject": "every room",
                     "reason": "the model records no doors at all",
@@ -537,7 +549,8 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
                     adjacency.setdefault(a[0], set()).add(b[0])
                     adjacency.setdefault(b[0], set()).add(a[0])
 
-            if not exits:
+            seeds = egress_seeds or set()
+            if not exits and not seeds:
                 findings.append(Finding(
                     rule=rule["id"], cite=rule["cite"],
                     message=(
@@ -548,8 +561,8 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
                     ),
                 ))
 
-            reached = set(exits)
-            queue = deque(exits)
+            reached = set(exits) | seeds
+            queue = deque(reached)
             while queue:
                 here = queue.popleft()
                 for other in adjacency.get(here, ()):
@@ -557,6 +570,7 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
                         reached.add(other)
                         queue.append(other)
 
+            destination = "the entry-storey exit" if seeds else "a door to the outside"
             for space in spaces:
                 if applies and space.get("kind", "unknown") not in applies:
                     continue
@@ -572,7 +586,7 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
                 findings.append(Finding(
                     rule=rule["id"], cite=rule["cite"],
                     message=(
-                        f"{label(space)} cannot reach a door to the outside "
+                        f"{label(space)} cannot reach {destination} "
                         f"through the door openings on this storey — {why}."
                     ),
                     room=space["index"], room_name=space.get("name"),
@@ -642,16 +656,122 @@ def check(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
     return findings, coverage
 
 
+def _egress_network(elements: dict) -> tuple[set[int], dict[int, set[int]]]:
+    """Door graph and exterior seeds for one storey."""
+    openings, _lookup = map_openings({"elements": elements})
+    exits: set[int] = set()
+    adjacency: dict[int, set[int]] = {}
+    for door in (o for o in openings if o.get("kind") == "door"):
+        a, b = door["sides"]
+        if _is_outside(a) and _is_outside(b):
+            continue
+        if _is_outside(a) or _is_outside(b):
+            inside = b if _is_outside(a) else a
+            exits.add(inside[0])
+        else:
+            adjacency.setdefault(a[0], set()).add(b[0])
+            adjacency.setdefault(b[0], set()).add(a[0])
+    return exits, adjacency
+
+
+def _named_stairs(tag: dict, elements: dict) -> list[tuple[int, Polygon]]:
+    shift = tag.get("shift") or [0.0, 0.0]
+    xoff = float(shift[0]) if len(shift) > 0 else 0.0
+    yoff = float(shift[1]) if len(shift) > 1 else 0.0
+    result: list[tuple[int, Polygon]] = []
+    for space in elements.get("spaces", []):
+        name = space.get("name") or ""
+        if not re.search(r"\bstairs?(?:\s*(?:case|well))?\b", name, re.IGNORECASE):
+            continue
+        loop = space.get("loop") or []
+        if len(loop) < 3:
+            continue
+        try:
+            polygon = Polygon(loop)
+            if not polygon.is_valid:
+                polygon = polygon.buffer(0)
+            if not polygon.is_empty:
+                polygon = translate(polygon, xoff=xoff, yoff=yoff)
+                result.append((space["index"], polygon))
+        except Exception:
+            continue
+    return result
+
+
+def _aligned_stair_links(
+    blocks: list[tuple[dict, dict]],
+) -> set[tuple[tuple[int, int], tuple[int, int]]]:
+    ordered = sorted(
+        blocks,
+        key=lambda pair: (
+            pair[0].get("level", pair[0].get("storey", 0)),
+            pair[0].get("storey", 0),
+        ),
+    )
+    links: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+    for lower, upper in zip(ordered, ordered[1:]):
+        lower_tag, lower_elements = lower
+        upper_tag, upper_elements = upper
+        lower_level = lower_tag.get("level", lower_tag.get("storey", 0))
+        upper_level = upper_tag.get("level", upper_tag.get("storey", 0))
+        if upper_level <= lower_level or upper_level - lower_level > 1.01:
+            continue
+        for lower_index, lower_poly in _named_stairs(lower_tag, lower_elements):
+            for upper_index, upper_poly in _named_stairs(upper_tag, upper_elements):
+                smaller = min(lower_poly.area, upper_poly.area)
+                if smaller <= 1e-6:
+                    continue
+                overlap = lower_poly.intersection(upper_poly).area / smaller
+                if overlap < STAIR_OVERLAP_MIN:
+                    continue
+                a = (lower_tag.get("storey", 0), lower_index)
+                b = (upper_tag.get("storey", 0), upper_index)
+                links.add((a, b))
+    return links
+
+
+def _stair_egress_reach(
+    blocks: list[tuple[dict, dict]],
+    primary: int,
+) -> dict[int, set[int]]:
+    graph: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    seeds: set[tuple[int, int]] = set()
+    for tag, elements in blocks:
+        storey = tag.get("storey", 0)
+        exits, adjacency = _egress_network(elements)
+        if storey == primary:
+            seeds.update((storey, index) for index in exits)
+        for index, neighbours in adjacency.items():
+            node = (storey, index)
+            graph.setdefault(node, set()).update(
+                (storey, other) for other in neighbours
+            )
+    for a, b in _aligned_stair_links(blocks):
+        graph.setdefault(a, set()).add(b)
+        graph.setdefault(b, set()).add(a)
+
+    reached = set(seeds)
+    queue = deque(seeds)
+    while queue:
+        here = queue.popleft()
+        for other in graph.get(here, ()):
+            if other not in reached:
+                reached.add(other)
+                queue.append(other)
+    by_storey: dict[int, set[int]] = {}
+    for storey, index in reached:
+        by_storey.setdefault(storey, set()).add(index)
+    return by_storey
+
+
 def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dict]]:
     """
     Every storey of the building against the rulebook, merged honestly.
 
-    Room and door rules run per storey — a bedroom on the first floor answers
-    to the same figures as one on the ground. EGRESS runs only on the storey
-    the site is entered from (`storeys.primary`): the engine does not model
-    stairs, so asking an upper floor to reach an exterior door would flag every
-    upstairs bedroom of every house ever drawn. That is not a silent narrowing
-    — the skipped storeys appear in coverage with exactly that reason.
+    Room and door rules run per storey. Egress crosses floors only through
+    explicitly named stair spaces whose registered footprints overlap on
+    adjacent storeys. Without that evidence the upper floor remains a visible
+    coverage skip; a hall or a nearby room is never promoted to a stair.
 
     Coverage rows merge by rule across storeys (checked and short sum; skips
     concatenate, tagged with their floor). Findings carry storey and title.
@@ -669,6 +789,7 @@ def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dic
     upper = {**rulebook, "rules": [r for r in rulebook["rules"]
                                    if r["metric"] != "egress-reach"]}
 
+    reached_by_storey = _stair_egress_reach(blocks, primary)
     findings: list[Finding] = []
     merged: dict[str, dict] = {
         rule["id"]: {"rule": rule["id"], "checked": 0, "short": 0, "skipped": []}
@@ -679,9 +800,10 @@ def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dic
         storey = tag.get("storey", 0)
         title = tag.get("title") or f"storey {storey}"
         scoped = {"elements": elements, "storeys": {"primary": storey}}
-        book = grounded if storey == primary else upper
+        stair_seeds = reached_by_storey.get(storey, set())
+        book = grounded if storey == primary or stair_seeds else upper
 
-        found, coverage = check(scoped, book)
+        found, coverage = check(scoped, book, egress_seeds=stair_seeds)
         for finding in found:
             finding.storey = storey
             finding.storey_title = tag.get("title") or None
@@ -696,13 +818,13 @@ def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dic
                 for skip in row["skipped"]
             )
 
-        if storey != primary:
+        if storey != primary and not stair_seeds:
             for rule in egress_rules:
                 merged[rule["id"]]["skipped"].append({
                     "subject": title,
                     "reason": (
-                        "stairs are not modelled; egress is assessed on the "
-                        "storey the site is entered from"
+                        "no named, plan-aligned stair route reaches the "
+                        "entry-storey exit"
                     ),
                     "storey": storey,
                     "storeyTitle": tag.get("title"),

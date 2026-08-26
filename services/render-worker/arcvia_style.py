@@ -267,3 +267,307 @@ def add_sun(bpy, strength: float = 3.0):
     fill_obj.rotation_euler = (0.15, 0.0, 2.2 + 3.14159)
 
     return key_obj
+
+
+# ---------------------------------------------------------------------------
+# Surface-class materials — the bridge between what the geometry IS and how it
+# looks. Added 2026-08-26.
+# ---------------------------------------------------------------------------
+#
+# ── The channel, verified rather than assumed ──────────────────────────────
+# `build/glb.py` tags every mesh it can with `extras.surfaceClass` and gives
+# every vertex a UV in METRES. Blender's glTF importer carries both through:
+# measured on the villa, `surfaceClass` arrives as a custom property on
+# `obj.data` (the mesh, not the object) and the coordinates arrive as a
+# `UVMap` layer. This module reads exactly those two things, so nothing here
+# depends on mesh-name conventions.
+#
+# ── Why the UVs being in metres is what makes this simple ──────────────────
+# A material knows its own real tile size — a 0.6 m floor tile, a 0.23 m
+# brick course. With UVs in metres the tiling is one division: scale the UV by
+# 1 / tile_metres and the texture lands at its true physical size, on any
+# building, at any scale, with no per-model tuning. Had the mesh baked a tile
+# COUNT instead, that size would be unrecoverable here.
+
+def _srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _hex_to_linear(value: str) -> tuple:
+    raw = str(value).lstrip("#")
+    if len(raw) != 6:
+        return (0.8, 0.8, 0.8, 1.0)
+    rgb = [int(raw[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    return (*[_srgb_to_linear(c) for c in rgb], 1.0)
+
+
+def load_material_bridge(path, tier: str = "standard"):
+    """
+    Read a material bridge and flatten it to {surface_class: material entry}.
+
+    Consumes the bridge's own file rather than a bespoke format, so the
+    library stays the single source of truth for what a surface is made of.
+
+    ── Classes name a TIER, not always a single material ────────────────────
+    Walls and roofs carry a `default`; floors carry `economy` / `standard` /
+    `premium`, because the floor is where an Indian project's budget actually
+    shows — IPS, vitrified 600, vitrified 800. Reading only `default` dropped
+    all SIXTEEN floor classes, which is the largest surface area in any
+    interior view, and the render came back with dressed walls standing on
+    undressed floors.
+
+    `standard` is the default tier on purpose: `premium` would make every
+    unnamed room the most expensive floor in the catalogue, which is the same
+    unearned-authority failure the ASSUME provenance exists to expose.
+
+    A class whose material is missing from `materials` is dropped rather than
+    substituted — a wrong material that renders is worse than an untouched
+    surface a reviewer can see is untouched.
+    """
+    import json
+    from pathlib import Path
+
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    materials = doc.get("materials", {})
+    library = doc.get("asset_library") or {}
+    order = [tier, "standard", "economy", "premium"]
+    out = {}
+    for klass, spec in (doc.get("surface_classes") or {}).items():
+        if not isinstance(spec, dict):
+            entry = materials.get(spec)
+            if entry:
+                out[klass] = {"name": spec, **entry}
+            continue
+        name = spec.get("default")
+        if name is None:
+            for key in order:
+                if spec.get(key):
+                    name = spec[key]
+                    break
+        # `SAME_AS_FLOOR` is the library saying "reuse the floor's material",
+        # which is an instruction to the caller and not a material name.
+        if not name or str(name).isupper():
+            continue
+        entry = materials.get(name)
+        if entry:
+            out[klass] = {"name": name, "texture": _resolve_maps(entry, library),
+                          **entry}
+    return out
+
+
+def _resolve_maps(entry: dict, library: dict) -> dict:
+    """
+    Absolute paths to the map files this material actually has on disk.
+
+    ── Why resolution happens HERE and not in Blender ───────────────────────
+    The library names its assets as `<source>:<slug>` and the file naming
+    differs per source — ambientCG writes `_2K-JPG_Color.jpg`, Poly Haven
+    writes `_diff_2k.jpg` — so a renderer that guessed would silently find
+    nothing and fall back to flat colour, which looks like a lighting problem
+    rather than a missing file. The rule is data in the bridge
+    (`asset_library.map_suffixes`), so it is read, not assumed, and a map that
+    is NOT on disk simply does not appear in the result.
+    """
+    from pathlib import Path
+
+    root = Path(str(library.get("root") or "A:/Assets/Hub"))
+    rel = entry.get("path")
+    asset = entry.get("asset") or ""
+    if not rel or ":" not in asset:
+        return {}
+    source = asset.split(":", 1)[0]
+    suffixes = (library.get("map_suffixes") or {}).get(source) or {}
+    folder = root / rel
+    if not folder.is_dir():
+        return {}
+    slug = Path(rel).name
+    found = {}
+    for role in ("base_color", "roughness", "normal_gl"):
+        pattern = suffixes.get(role)
+        if not pattern:
+            continue
+        for res in ("2K", "2k", "1K", "1k", "4K", "4k"):
+            candidate = folder / (slug + pattern.replace("{RES}", res))
+            if candidate.is_file():
+                found[role] = str(candidate)
+                break
+    return found
+
+
+def apply_surface_materials(bpy, bridge: dict, aliases: dict | None = None) -> dict:
+    """
+    Give every tagged mesh the material its surface class calls for.
+
+    Returns a report of what was dressed and what was left alone, because
+    "which surfaces did not get a material" is the question a reviewer asks
+    first and the one a render cannot answer by looking.
+    """
+    aliases = {"wallface_reveal": "internal_wall", **(aliases or {})}
+    cache: dict[str, object] = {}
+    applied: dict[str, int] = {}
+    untouched: list[str] = []
+
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or obj.data is None:
+            continue
+        klass = obj.data.get("surfaceClass")
+        if not klass:
+            untouched.append(obj.name)
+            continue
+        klass = aliases.get(klass, klass)
+        entry = bridge.get(klass)
+        if not entry:
+            untouched.append(obj.name)
+            continue
+
+        if klass not in cache:
+            cache[klass] = _build_material(bpy, klass, entry)
+        obj.data.materials.clear()
+        obj.data.materials.append(cache[klass])
+        applied[klass] = applied.get(klass, 0) + 1
+
+    return {"applied": applied, "untouched": untouched,
+            "classes": sorted(applied)}
+
+
+def _build_material(bpy, klass: str, entry: dict):
+    """One Principled BSDF from a bridge entry, tiled at its real size."""
+    mat = bpy.data.materials.new(f"arcvia_{klass}")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is None:
+        return mat
+
+    colour = entry.get("base_color_linear")
+    if isinstance(colour, (list, tuple)) and len(colour) >= 3:
+        bsdf.inputs["Base Color"].default_value = (*colour[:3], 1.0)
+    elif entry.get("base_color_srgb"):
+        # The bridge's own note: never pass an sRGB hex into a linear socket.
+        bsdf.inputs["Base Color"].default_value = _hex_to_linear(
+            entry["base_color_srgb"]
+        )
+
+    if entry.get("roughness") is not None:
+        bsdf.inputs["Roughness"].default_value = float(entry["roughness"])
+    if entry.get("metallic") is not None and "Metallic" in bsdf.inputs:
+        bsdf.inputs["Metallic"].default_value = float(entry["metallic"])
+
+    # Glass and water are transmissive; a solid pane reads as a grey slab.
+    if "Transmission Weight" in bsdf.inputs and (
+        "glass" in klass or "glaz" in klass or entry.get("name", "").startswith("glass")
+    ):
+        bsdf.inputs["Transmission Weight"].default_value = 1.0
+
+    maps = entry.get("texture") or {}
+    tile = entry.get("tile_metres")
+    if maps.get("base_color"):
+        nodes, links = mat.node_tree.nodes, mat.node_tree.links
+        coord = nodes.new("ShaderNodeTexCoord")
+        mapping = nodes.new("ShaderNodeMapping")
+        # UVs are in METRES, so one division puts the texture at its real
+        # size: a 2 m plaster sheet repeats every 2 m of wall, on any
+        # building, with no per-model tuning. This is the whole reason the
+        # mesh emits metres rather than a tile count.
+        scale = 1.0 / float(tile) if tile else 1.0
+        mapping.inputs["Scale"].default_value = (scale, scale, scale)
+        links.new(coord.outputs["UV"], mapping.inputs["Vector"])
+
+        image = nodes.new("ShaderNodeTexImage")
+        image.image = bpy.data.images.load(maps["base_color"], check_existing=True)
+        # The role is recorded ON the image, because the FILENAME cannot
+        # carry it: `white_rough_plaster_diff_2K.jpg` is a diffuse map
+        # whose name contains "rough". Auditing on the name flagged it as
+        # a mis-loaded data map — the substring-matcher trap, inside the
+        # very check written to catch traps.
+        image.image["arcvia_role"] = "base_color"
+        links.new(mapping.outputs["Vector"], image.inputs["Vector"])
+        links.new(image.outputs["Color"], bsdf.inputs["Base Color"])
+
+        if maps.get("roughness"):
+            rough = nodes.new("ShaderNodeTexImage")
+            rough.image = bpy.data.images.load(maps["roughness"],
+                                               check_existing=True)
+            # A roughness map is DATA, not a colour: reading it through the
+            # sRGB transform lightens it and every surface comes out glossier
+            # than the material says.
+            rough.image.colorspace_settings.name = "Non-Color"
+            rough.image["arcvia_role"] = "roughness"
+            links.new(mapping.outputs["Vector"], rough.inputs["Vector"])
+            links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+        mat["arcvia_textured"] = True
+
+    if tile:
+        # Recorded on the material, not consumed here: with UVs already in
+        # metres, a texture node would divide by this. Kept so a later pass
+        # that adds image maps has the number without re-reading the bridge.
+        mat["tile_metres"] = float(tile)
+    mat["arcvia_surface_class"] = klass
+    mat["arcvia_material"] = entry.get("name", "")
+    return mat
+
+
+def audit_materials(bpy) -> dict:
+    """
+    Check the traps the material corpus documents, in code rather than prose.
+
+    ── Why this function exists at all ──────────────────────────────────────
+    The material library's own notes ALREADY said a roughness map must load
+    Non-Color, with the symptom spelled out — every surface too shiny, "fixed"
+    by raising roughness, which then breaks under different lighting. The rule
+    was written before this hook existed, and the hook still shipped the bug
+    and had to rediscover it from a render.
+
+    That is not a failure of the rule; it is a failure of where the rule
+    lived. A trap documented in prose defends nobody who writes the code
+    first and reads the prose afterwards — which is the normal order. So the
+    ones that can be MACHINE-CHECKED are checked here, and the render reports
+    them, because a check that runs is worth more than a paragraph that is
+    correct.
+
+    Returns findings; empty means nothing detectable is wrong.
+    """
+    findings: list[str] = []
+
+    #: Map roles that are DATA, not colour. Read through the sRGB transform
+    #: they come out wrong in a way that looks like a lighting problem rather
+    #: than a colour-space problem.
+    data_roles = {"roughness", "metallic", "normal_gl", "normal_dx",
+                  "displacement", "arm_packed"}
+
+    for image in bpy.data.images:
+        # The ROLE, never the filename. `white_rough_plaster_diff_2K.jpg` is a
+        # diffuse map containing the word "rough", and matching on the name
+        # flagged it as a mis-loaded data map — this audit's own instance of
+        # the species it exists to catch. Roles are stamped at load time.
+        role = image.get("arcvia_role")
+        if role is None or role not in data_roles:
+            continue
+        try:
+            space = image.colorspace_settings.name
+        except Exception:  # noqa: BLE001
+            continue
+        if space != "Non-Color":
+            findings.append(
+                f"{image.name}: a data map is loaded as {space!r}, not "
+                "'Non-Color' — every surface using it renders too shiny"
+            )
+
+    for mat in bpy.data.materials:
+        if not mat.get("arcvia_surface_class"):
+            continue
+        tile = mat.get("tile_metres")
+        textured = mat.get("arcvia_textured")
+        if textured and not tile:
+            findings.append(
+                f"{mat.name}: textured but carries no tile_metres, so its "
+                "texture is tiling at one repeat per METRE by accident"
+            )
+        if textured and tile:
+            mapping = [n for n in mat.node_tree.nodes if n.type == "MAPPING"]
+            if not mapping:
+                findings.append(
+                    f"{mat.name}: textured with tile_metres={tile} but no "
+                    "Mapping node — the physical size is being ignored"
+                )
+
+    return {"ok": not findings, "findings": findings}
