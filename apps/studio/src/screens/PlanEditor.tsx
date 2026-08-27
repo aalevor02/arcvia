@@ -707,15 +707,21 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     // One history entry for the whole import, so a single undo reverses it —
     // rather than forty, which would be unusable.
     apply((current) =>
-      proposal.reduce(
-        (next, wall) =>
-          addWall(next, wall.a, wall.b, {
-            thickness: wall.thickness,
-            height: WALL_DEFAULTS.interior.height,
-            snapRadius: 0.15,
-          }),
-        current,
-      ),
+      proposal.reduce((next, wall) => {
+        // A balcony parapet and an interior partition are the same two lines on
+        // the drawing, and this is where they used to become the same wall:
+        // every proposal took interior height regardless. The reader's verdict
+        // rides on `kind`, so a railing arrives as a railing and is built to
+        // guard height rather than boxing the balcony in.
+        const railing = wall.kind === 'railing' || wall.kind === 'boundary'
+        const build = railing ? wallTypeById('railing') : undefined
+        return addWall(next, wall.a, wall.b, {
+          thickness: build?.thickness ?? wall.thickness,
+          height: build?.height ?? WALL_DEFAULTS.interior.height,
+          type: build?.id,
+          snapRadius: 0.15,
+        })
+      }, current),
     )
     setProposal(null)
   }
@@ -1138,6 +1144,16 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             onStartCalibrate={() => setTool('calibrate')}
             detecting={detecting}
             onDetect={runDetection}
+            onDeck={({ url }) => {
+              // Keep the original PDF on the scene, not only its extracted
+              // plan page on the underlay. SceneView reads this field to find
+              // and analyse the render pages; without this callback a mixed
+              // plan/render deck became indistinguishable from a lone image.
+              setScene((current) => current ? { ...current, floorPlanUrl: url } : current)
+              void updateScene(sceneId, { floorPlanUrl: url }).catch(() =>
+                setError('The PDF was read, but its render pages could not be saved to this project.'),
+              )
+            }}
           />
 
           {furniture && (
@@ -1333,6 +1349,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                       updateWallIn(p, selectedWall.id, {
                         type: type?.id,
                         ...(type ? { thickness: type.thickness } : {}),
+                        // A type with its own height sets it for the same
+                        // reason: a railing is 1.1 m because that is what a
+                        // railing IS, not because of the storey it sits on.
+                        // Types without one leave the wall's height alone.
+                        ...(type?.height ? { height: type.height } : {}),
                       }),
                     )
                   }}

@@ -570,17 +570,29 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                     f"and {dropped} inner wall(s)"
                 )
         elif kind in ("railing", "boundary") and confidence >= MIN_CONFIDENCE:
-            # Say WHERE. This verdict is deliberately non-destructive (see
-            # _DROP), so the wall stays in the output as an ordinary wall and
-            # this note is its only trace. A note that cannot be located is a
-            # note nobody can act on: a reviewer told "there is a railing"
-            # has to re-find it by eye on a drawing carrying fifty walls.
+            # Mark the walls themselves, not just the transcript.
+            #
+            # This verdict is deliberately non-destructive (see _DROP): a
+            # balcony edge really does carry a parapet, so deleting it would
+            # open the balcony to the drop. But leaving it an ordinary wall
+            # builds it full height, which is how a client ends up on a
+            # balcony boxed in by masonry. Recording the KIND lets the
+            # builder raise it to parapet height instead of choosing between
+            # a wrong wall and no wall at all.
+            #
+            # Only cluster suspects name their members. A room-shaped
+            # railing verdict is left as a note rather than guessing which
+            # of its boundary walls the model meant.
+            for index in suspect.get("members", []):
+                if 0 <= index < len(walls):
+                    walls[index].kind = kind
+            marked = len([i for i in suspect.get("members", []) if 0 <= i < len(walls)])
             x0, y0, x1, y1 = suspect["box"]
             notes.append(
-                f"adjudicator: a proposed structure looks like {kind} "
-                f"({confidence:.0%}) near {((x0 + x1) / 2):.0%},"
-                f"{((y0 + y1) / 2):.0%} of the drawing \u2014 kept as a "
-                "wall, review it"
+                f"adjudicator: {marked or 1} proposed structure(s) look like "
+                f"{kind} ({confidence:.0%}) near {((x0 + x1) / 2):.0%},"
+                f"{((y0 + y1) / 2):.0%} of the drawing \u2014 kept, and marked "
+                f"{kind} so they are not built as full-height wall"
             )
 
     kept_walls = [w for w, k in zip(walls, keep) if k]

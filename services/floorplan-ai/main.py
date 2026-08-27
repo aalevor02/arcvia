@@ -84,6 +84,17 @@ class WallSegment(BaseModel):
     end: Point
     thickness: float  # normalised against image width
     confidence: float
+    #: What the adjudicator judged this line to be.
+    #:
+    #: A balcony parapet and an interior partition are the same two lines on
+    #: a drawing, and nothing downstream could tell them apart -- so a
+    #: railing was built as a full-height wall and a client walked onto a
+    #: balcony boxed in by masonry. The verdict used to live only in a note,
+    #: which no consumer could branch on. It rides on the wall now.
+    #:
+    #: "wall" is the default and the safe answer: an unjudged line is a
+    #: wall, exactly as before.
+    kind: Literal["wall", "railing", "boundary"] = "wall"
 
 
 class Detection(BaseModel):

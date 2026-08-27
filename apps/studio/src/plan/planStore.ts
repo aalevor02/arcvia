@@ -1,4 +1,4 @@
-import type { Floor, FloorFinish, Plan, Underlay, Vec2, Wall } from './types'
+import type { Floor, FloorFinish, Plan, Underlay, Vec2, Wall, WallTypeId } from './types'
 import { WALL_DEFAULTS } from './types'
 import { closestPointOnSegment, distance, segmentIntersection } from './geometry'
 import type { PlacedObject, Size } from '../catalogue/types'
@@ -258,6 +258,14 @@ function splitWall(floor: Floor, wallId: string, point: Vec2): { floor: Floor; i
 export interface AddWallOptions {
   thickness?: number
   height?: number
+  /**
+   * Build-up for every segment this call creates.
+   *
+   * Set at import so a reader's verdict survives the crossing: a balcony
+   * parapet arrives as `railing` and is built to guard height, instead of
+   * being flattened into an ordinary wall and boxing the balcony in.
+   */
+  type?: WallTypeId
   /** How close a click has to be to weld to a vertex or split a wall, in metres. */
   snapRadius?: number
   /** Native BIM element this wall was derived from. */
@@ -339,6 +347,7 @@ export function addWall(plan: Plan, from: Vec2, to: Vec2, options: AddWallOption
         b: ordered[i + 1],
         thickness,
         height,
+        type: options.type,
         bimSource: options.bimSource,
         bimData: options.bimData,
       }

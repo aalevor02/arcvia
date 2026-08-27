@@ -34,6 +34,12 @@ export interface DetectedWall {
   /** Normalised against image width. */
   thickness: number
   confidence: number
+  /**
+   * What the reader's adjudicator judged this line to be. Absent from an
+   * older reader, and absent means wall -- which is what every line was
+   * treated as before, so an old reader behaves exactly as it used to.
+   */
+  kind?: 'wall' | 'railing' | 'boundary'
 }
 
 export interface DetectedObject {
@@ -96,6 +102,8 @@ export interface ProposedWall {
   a: Vec2
   b: Vec2
   thickness: number
+  /** Carried from the reader so the builder can stop short of the ceiling. */
+  kind?: 'wall' | 'railing' | 'boundary'
   /** True when this came from a matched pair of drawn faces. */
   paired: boolean
   confidence: number

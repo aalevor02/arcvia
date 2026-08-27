@@ -126,6 +126,7 @@ export type WallTypeId =
   | 'brick-exposed'
   | 'concrete-fair'
   | 'glazed'
+  | 'railing'
 
 export interface WallType {
   id: WallTypeId
@@ -134,6 +135,15 @@ export interface WallType {
   thickness: number
   /** Which surface the faces are drawn with. */
   surface: 'wall' | 'brick' | 'concrete' | 'glass'
+  /**
+   * Metres, when this type is not full height. Applied when the type is
+   * chosen, then left alone, exactly as thickness is.
+   *
+   * Absent means the floor's wall height, which is every masonry type. Only
+   * a parapet has an inherent height: a balcony edge is 1.1 m because that
+   * is what stops someone going over it, not because of the storey it is on.
+   */
+  height?: number
   note: string
 }
 
@@ -186,6 +196,19 @@ export const WALL_TYPES: readonly WallType[] = [
     thickness: 0.05,
     surface: 'glass',
     note: 'A glass screen — divides the plan without dividing the light.',
+  },
+  {
+    id: 'railing',
+    name: 'Railing / parapet',
+    thickness: 0.1,
+    // 1.1 m is the guard height every residential code in this market
+    // converges on, and the reason this type exists at all: a balcony edge
+    // and an interior partition are the same two lines on a drawing, so
+    // without a type saying otherwise a parapet gets built full height and
+    // the client walks onto a balcony boxed in by masonry.
+    height: 1.1,
+    surface: 'wall',
+    note: 'A balcony or terrace edge. Built to guard height, not to the ceiling.',
   },
 ]
 
