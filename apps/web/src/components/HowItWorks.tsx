@@ -23,6 +23,16 @@ const STEPS = [
     title: 'Upload your drawings',
     body: 'CAD, SketchUp exports, PDF, JPG or PNG. The plan detector reads walls, doors, windows and fixtures — and tells you where it was unsure rather than guessing.',
     chips: ['DWG / DXF', 'PDF', 'PNG / JPG', 'GLB'],
+    image: '/how/upload.webp',
+    imageAlt: 'An architect’s drawing sheet with the storey plans Arcvia reads',
+    width: 2000,
+    height: 1000,
+    // CONTAIN, not cover. This is a 2:1 drawing sheet in a 4:3 frame, and
+    // object-cover crops to the centre - which lands in the white gap between
+    // two storey plans and renders as an empty box. Cropping a technical drawing
+    // also destroys the parts that make it one: the title block, the storey
+    // labels and the area schedule. A render survives a crop; a drawing does not.
+    fit: 'contain' as const,
   },
   {
     id: 'customise',
@@ -30,6 +40,11 @@ const STEPS = [
     title: 'Furnish, light and finish it',
     body: 'Place furniture from the catalogue, set materials per surface or per face, and light the scene. Everything happens live in the browser — nothing to install, nothing to re-import.',
     chips: ['Lighting', 'Furniture', 'Paint', 'Materials'],
+    image: '/how/customise.webp',
+    fit: 'cover' as const,
+    imageAlt: 'A furnished and lit living room, materials set per surface',
+    width: 1920,
+    height: 1080,
   },
   {
     id: 'share',
@@ -37,6 +52,11 @@ const STEPS = [
     title: 'Publish one link',
     body: 'Send a single URL. Clients explore on a phone, a laptop or a headset, reconfigure what you allow them to, and you see what they chose.',
     chips: ['Any device', 'No download', 'Configurable', 'VR ready'],
+    image: '/how/share.webp',
+    fit: 'cover' as const,
+    imageAlt: 'The published exterior view a client opens from a single link',
+    width: 1920,
+    height: 1080,
   },
 ] as const
 
@@ -125,101 +145,26 @@ export default function HowItWorks() {
           </ul>
         </div>
 
-        {/* Inline SVG rather than a bitmap: it is a few hundred bytes, it is
-            sharp at any density, and it recolours with the theme because it
-            paints in currentColor and the brand tokens. */}
+        {/* Real frames from a real project, not drawings of them. The previous
+            inline SVGs were chosen when there was nothing to show; there is now.
+            An illustration of a floor plan cannot demonstrate that the detector
+            reads a floor plan, which is the only claim this section makes.
+
+            Only the ACTIVE step's image is eager. The other two are a tab click
+            away and pre-loading all three would cost ~900 kB for two pictures
+            most visitors never see. */}
         <div className="aspect-[4/3] overflow-hidden rounded-lg border border-line bg-surface-alt">
-          <Illustration step={active} />
+          <img
+            src={step.image}
+            width={step.width}
+            height={step.height}
+            alt={step.imageAlt}
+            className={`h-full w-full ${step.fit === 'contain' ? 'object-contain p-3' : 'object-cover'}`}
+            loading={active === 0 ? 'eager' : 'lazy'}
+            decoding="async"
+          />
         </div>
       </div>
     </div>
-  )
-}
-
-function Illustration({ step }: { step: number }) {
-  return (
-    <svg
-      viewBox="0 0 320 240"
-      className="h-full w-full"
-      role="img"
-      aria-label={
-        ['A floor plan being read', 'A furnished room', 'A shared link'][step]
-      }
-    >
-      <defs>
-        <pattern id="hiw-grid" width="16" height="16" patternUnits="userSpaceOnUse">
-          <path
-            d="M16 0H0V16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="0.5"
-            className="text-line"
-          />
-        </pattern>
-      </defs>
-      <rect width="320" height="240" fill="url(#hiw-grid)" />
-
-      {step === 0 && (
-        <g>
-          {/* Plan outline with detected openings marked */}
-          <rect
-            x="60" y="50" width="200" height="140"
-            fill="none" stroke="currentColor" strokeWidth="6" className="text-ink"
-          />
-          <line x1="160" y1="50" x2="160" y2="130" stroke="currentColor" strokeWidth="6" className="text-ink" />
-          <line x1="160" y1="130" x2="260" y2="130" stroke="currentColor" strokeWidth="6" className="text-ink" />
-          {/* Openings the detector found */}
-          {[
-            [110, 50], [220, 50], [60, 120], [160, 95], [205, 130],
-          ].map(([x, y], i) => (
-            <rect
-              key={i}
-              x={x - 12} y={y - 4} width="24" height="8" rx="1"
-              fill="currentColor" className="text-accent"
-            />
-          ))}
-          <circle cx="110" cy="50" r="16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent" opacity="0.5" />
-        </g>
-      )}
-
-      {step === 1 && (
-        <g>
-          <rect x="60" y="50" width="200" height="140" fill="none" stroke="currentColor" strokeWidth="6" className="text-ink" />
-          {/* sofa */}
-          <rect x="80" y="140" width="70" height="30" rx="5" fill="currentColor" className="text-accent" opacity="0.85" />
-          <rect x="80" y="128" width="70" height="14" rx="5" fill="currentColor" className="text-accent" />
-          {/* rug */}
-          <ellipse cx="160" cy="150" rx="55" ry="22" fill="currentColor" className="text-ink-soft" opacity="0.18" />
-          {/* table */}
-          <rect x="140" y="140" width="42" height="22" rx="3" fill="currentColor" className="text-ink" opacity="0.65" />
-          {/* bed / cabinet block */}
-          <rect x="196" y="70" width="52" height="46" rx="4" fill="currentColor" className="text-ink" opacity="0.35" />
-          {/* pendant light + cone */}
-          <line x1="120" y1="50" x2="120" y2="76" stroke="currentColor" strokeWidth="2" className="text-ink" />
-          <path d="M108 88 L120 76 L132 88 Z" fill="currentColor" className="text-ink" />
-          <path d="M108 88 L92 130 L148 130 Z" fill="currentColor" className="text-warn" opacity="0.25" />
-        </g>
-      )}
-
-      {step === 2 && (
-        <g>
-          {/* laptop */}
-          <rect x="40" y="72" width="130" height="86" rx="6" fill="currentColor" className="text-ink" />
-          <rect x="48" y="80" width="114" height="70" rx="3" fill="currentColor" className="text-accent" opacity="0.85" />
-          <rect x="28" y="158" width="154" height="8" rx="4" fill="currentColor" className="text-ink" />
-          {/* phone */}
-          <rect x="196" y="86" width="52" height="90" rx="8" fill="currentColor" className="text-ink" />
-          <rect x="202" y="94" width="40" height="74" rx="3" fill="currentColor" className="text-accent" opacity="0.85" />
-          {/* link arc between them */}
-          <path
-            d="M150 60 Q200 26 250 62"
-            fill="none" stroke="currentColor" strokeWidth="2.5"
-            strokeDasharray="6 5" className="text-accent"
-          />
-          <circle cx="250" cy="62" r="5" fill="currentColor" className="text-accent" />
-          <circle cx="150" cy="60" r="5" fill="currentColor" className="text-accent" />
-        </g>
-      )}
-    </svg>
   )
 }
