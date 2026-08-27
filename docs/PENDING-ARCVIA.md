@@ -2230,3 +2230,61 @@ The api figure is 507 rather than the board's 485 because 22 assertions in
 `referral-and-reset.mjs` were never counted before, and `detect.mjs` runs 32
 with the detector up against 19 without it. Both differences are the harness
 telling the truth, not new tests.
+
+### 2026-08-28 (later) — the detector's last open item, and it refuted itself
+
+`A:\Tools\FloorplanModel\HANDOFF-P2.md` §6 carried one actionable item:
+*"Full-resolution re-verification of the hybrid numbers (mine were capped at
+maxdim=768 on a box with 1.9 GB free)."* The box now has 11.5 GB commit free, so
+it ran. Full write-up is in that file; the part Arcvia needs:
+
+**Resolution is not a neutral parameter for this model.** Same live run, same
+`result6` weights, only `HYBRID_MAXDIM` changed:
+
+```
+                              maxdim=768        full (1356)
+model verdicts   railing              2                  0
+                 dropped_furniture    4                  0
+recall control   foyer/lift edge  33.03%             59.46%     (live: 58.99%)
+```
+
+**At 768 the hybrid destroys a real wall** — a designated recall control drops 26
+points. At full resolution it does not. The furniture-drop benefit recorded at
+768 arrived bundled with a recall loss the markup table cannot show, because that
+table only measures where wall density *should* fall.
+
+**But "so use full resolution" does not follow.** `hybrid.py` feeds the net the
+image at the capped size (rounded to a multiple of 64) and the net is fully
+convolutional, so `maxdim` silently changes the scale at which the model sees a
+wall. The weights declare `train_crop: 512`; a 768×1344 input is ~2.6× off that,
+and "railings and furniture stop being recognised" is what an off-scale FCN does.
+Two instruments, neither of them privileged.
+
+**The consequence for this repo: the hybrid table cannot speak about the shipped
+pass either way.** `services/floorplan-ai/segment.py:380` resizes the whole
+drawing to **512 × 512 square** — a third scale, and the only one that distorts
+aspect ratio (this deck is 814 × 1356, squashed 1.66× on one axis).
+`hybrid.py` preserves aspect at every setting. Nothing measured here touched
+production.
+
+**So: `segment.py` is NOT changed, and should not be on this evidence.** Two
+things follow that are worth carrying:
+
+1. **The furniture-drop half stays unbuilt, now for two independent reasons.**
+   The existing one is that the wall-share distribution is a continuum. The new
+   one is that at n=1 the drop cost 26 points of recall on a control wall — and
+   a dropped wall costs windows, because the window pass is gated on wall recall.
+2. **§6's recorded table has a live baseline that is not on disk.** It reports
+   "51 walls in, 10 dropped as furniture"; all three saved live runs have **37**
+   and reproduce only one of its five rows. `MASTER bed` reads 0.0000 in the
+   *live* run here, so its "hybrid 24.9×" was measured against something nobody
+   can re-run. Treat that table as unreproducible until its baseline is restored.
+
+The well-posed replacement task, for whoever picks this up: score the **shipped**
+pass on this deck at its production geometry against the owner's five annotated
+markups, **with the recall controls reported alongside** — the markup table alone
+cannot see a destroyed wall. That is a different job from "re-verify at full
+resolution", and it is the one worth doing.
+
+n=1 deck. The recall-control movement is a two-sided observation on a specific
+known wall, which is why it is quoted; the markup ratios are not and are not.
