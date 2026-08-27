@@ -104,6 +104,25 @@ Landed after most of this document was written. Where they conflict, these win.
 
 #### 2026-08-27 evening — the AI paths, and four ways a green summary lied
 
+6. **The trained detector is LIVE, as a pass rather than a backend.**
+   `services/floorplan-ai/segment.py` runs whenever `FLOORPLAN_MODEL` points at
+   stamped weights. There is deliberately no `FLOORPLAN_BACKEND=segment` value —
+   a third exclusive mode would force a choice between the classifier and the
+   adjudicator when they do different jobs. **WHERE** stays with the heuristic,
+   **WHAT** (railings) is the model's and is deterministic, **WINDOWS** stay with
+   the adjudicator, which reads 3-5 against the model's one weak blob.
+
+   The weights must carry their own class map; the loader **refuses** an
+   unstamped model rather than guessing 44 channels. Note the named indices are
+   RELATIVE to their head — `railing_class_index: 8` is absolute channel 29, and
+   channel 8 is a junction.
+
+   **The furniture-drop half is deliberately NOT built.** The wall-share
+   distribution is a continuum, not two populations; three samplers were swept
+   and the ambiguous middle never collapses (13-18 of 55). A threshold there is a
+   policy decision about ~15 walls, and a dropped wall costs windows. Do not add
+   one without new evidence.
+
 0. **Nothing about the AI worked, and nothing said so.** The adjudicator's model
    had been retired by NVIDIA the previous day (HTTP 410); `adjudicate.py` fails
    open, so every call was swallowed as "went unanswered" while `/health`
