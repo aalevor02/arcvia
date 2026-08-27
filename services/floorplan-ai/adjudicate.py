@@ -126,6 +126,16 @@ _last_failure: str | None = None
 #: timeout would otherwise brand a service "degraded" for its entire lifetime.
 #: This answers "is it working NOW"; the counts above answer "at what rate".
 _last_call_failed = False
+#: The current run of consecutive failures, and the worst run seen.
+#:
+#: A rate alone cannot tell an evenly-degrading service from a dead window:
+#: 20 failures in a row inside 100 calls is 20%, and so is one failure in
+#: every five. They mean different things. This pass runs once per deck
+#: PAGE, so a contiguous run is specific pages coming back empty while the
+#: rest of the deck reads fine -- which is what a reader actually sees, and
+#: what an averaged rate hides.
+_failure_run = 0
+_worst_failure_run = 0
 _input_tokens = 0
 _output_tokens = 0
 _total_tokens = 0
@@ -141,18 +151,24 @@ def _reserve_call() -> bool:
 
 
 def _record_answer() -> None:
-    global _calls_answered, _last_call_failed
+    global _calls_answered, _last_call_failed, _failure_run
     with _budget_lock:
         _calls_answered += 1
         _last_call_failed = False
+        # The run ends, but the worst run is kept: the damage it did to a
+        # deck does not un-happen because the next page succeeded.
+        _failure_run = 0
 
 
 def _record_failure(reason: str) -> None:
     global _calls_failed, _last_failure, _last_call_failed
+    global _failure_run, _worst_failure_run
     with _budget_lock:
         _calls_failed += 1
         _last_failure = reason[:160]
         _last_call_failed = True
+        _failure_run += 1
+        _worst_failure_run = max(_worst_failure_run, _failure_run)
 
 
 def _record_usage(payload: dict) -> None:
@@ -178,6 +194,8 @@ def usage() -> dict:
             "calls_failed": _calls_failed,
             "last_failure": _last_failure,
             "last_call_failed": _last_call_failed,
+            "failure_run": _failure_run,
+            "worst_failure_run": _worst_failure_run,
             "max_calls": MAX_PROVIDER_CALLS or None,
             "input_tokens": _input_tokens,
             "output_tokens": _output_tokens,

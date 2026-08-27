@@ -181,6 +181,12 @@ FAILURE_RATE_LIMIT = 0.2
 #: Below this many calls a rate is noise rather than a trend.
 FAILURE_RATE_MIN_CALLS = 10
 
+#: A run of consecutive failures this long is a dead window rather than
+#: degradation, however good the overall rate looks. Five, because this pass
+#: runs once per deck page and five blank pages in a row is a reader's
+#: complaint whether or not the other ninety-five worked.
+FAILURE_RUN_LIMIT = 5
+
 
 def adjudicator_liveness() -> str | None:
     """Whether the configured vision model actually ANSWERS, not just whether
@@ -247,6 +253,17 @@ def adjudicator_liveness() -> str | None:
     #
     # So the RATE is reported too, once there are enough calls for a rate to
     # mean anything. Ten is the floor because 1-of-2 is noise, not a trend.
+    # A contiguous run is reported before the rate, because it is the more
+    # specific complaint: an evenly-degrading service and a dead window can
+    # share a rate, and only one of them means a identifiable block of a
+    # reader's deck came back empty.
+    worst_run = stats.get("worst_failure_run", 0)
+    if worst_run >= FAILURE_RUN_LIMIT:
+        return (
+            f"unreliable: {worst_run} vision calls failed in a row at worst "
+            f"({failed} of {started} overall) - last failure: {reason}"
+        )
+
     if started >= FAILURE_RATE_MIN_CALLS:
         rate = failed / started
         if rate >= FAILURE_RATE_LIMIT:

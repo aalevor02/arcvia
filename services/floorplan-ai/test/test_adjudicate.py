@@ -86,6 +86,8 @@ assert adjudicate.usage() == {
     "calls_failed": 0,
     "last_failure": None,
     "last_call_failed": False,
+    "failure_run": 0,
+    "worst_failure_run": 0,
     "max_calls": 1,
     "input_tokens": 40,
     "output_tokens": 7,
