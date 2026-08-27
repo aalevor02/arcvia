@@ -12,3 +12,9 @@ __pycache__/
 .test-api.log
 data/rates/*.bak
 reports/rates/
+
+# Scratch: server stdout/stderr redirects and one-off engine output. `*.log`
+# already covered the logs, but not the `.err` redirects or a reconstruction
+# written here to be looked at once — which is how this directory started
+# showing up as untracked with a GLB in it.
+.runtime-logs/

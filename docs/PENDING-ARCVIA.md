@@ -2033,3 +2033,200 @@ misled once: models under `work/enclosure-retry` are REFUSED retry artefacts,
 not accepted builds, and including them made REDDY look like a second site-
 titled pick when its accepted build picks an untitled 36.6 m frame and grades
 OK. Filter that directory out of any corpus survey.
+
+---
+
+## 2026-08-28 — a pass over this whole file, and what is actually left
+
+Session `aalev-22`. The instruction was "finish the pending list", so the first
+job was working out what is still on it. **Three entries below were already
+built** and one was wrong about which file has the defect. That is now the fifth
+time this document has described finished work as pending, and the go-and-look
+rule paid again — the cost of checking was minutes against days.
+
+### Closed by measurement, not by building anything
+
+| entry | where | what the tree says |
+|---|---|---|
+| `Space.boundedBy` "populated on none — **the biggest single unlock left in the engine**" | §1 correction 7 | **Populated.** `solve/spaces.py:223` sets `bounded_by`, line 76 serialises it as `boundedBy`, and `test_build.py` asserts a four-wall room is bounded by all four. Four consumers read it (`areas.py`, `codecheck.py`, `site.py`, `dwellings.py`). A grep for `boundedBy` "proves" it empty — the producer is Python and spells it `bounded_by`. |
+| "walls are aggregate storey meshes, so **room-specific wall colours cannot stop at a doorway**" | §3, 2026-08-24 | **They stop at the doorway.** Reconstruction emits `storeyN_wall_roomM_<slug>` and `..._ceiling_...` per room — seen on the real villa as `storey0_wall_room0_home-office` — and `deckDesign.ts` dresses them through `roomSurfaceSlug(name, 'wall')`. Its own docstring: "its room skins are what stop one paint colour at the doorway." |
+| "`solidify.py` **still builds a parapet full height**" | COORDINATION.md 19:0x | Wrong file and wrong direction. `solidify.py:165` SKIPS unpaired lines by design, and `PARAPET_HEIGHT` is 1.0 and applies to roofs. The real defect was the opposite one this file already described correctly — a balcony got *no* railing at all. Fixed below. |
+
+### Built this session
+
+**A balcony's edge is built to guard height** (`b50ce13`). `build_walls` skipped
+every unpaired wall — right, because extruding one to ceiling height seals the
+balcony and blacks out the rooms behind it; wrong, because "not full height" was
+implemented as "no geometry", so the CAD path produced slabs three metres up
+with nothing at the edge.
+
+The room's **name** decides, not the line. Nothing local to an unpaired stroke
+separates a balcony guard from a single-line wall, and this villa's exterior is
+largely single-line walls. The vocabulary is imported from `quantify/areas.py`
+(RERA's own list) rather than restated, so there is one definition of "balcony".
+
+The guard that matters is against **coincidence**. 91% of the derived perimeter
+ring sits on linework the architect drew, and a balcony's outer edge is exactly
+where the ring runs — so the naive version puts a 1.0 m box inside a full-height
+box, which is the z-fighting the black-pockets investigation spent days on.
+Measured on `DOWN VILLA`, and **the guard is not vacuous**:
+
+```
+storey 0   1 guarded room (ENCLOSED BALCONY)   2 on edge   0 built, 2 already covered
+storey 1   2 guarded rooms (DECK, DECK)        5 on edge   3 built, 2 already covered
+```
+
+Four of nine candidates rejected. `ENCLOSED BALCONY` getting zero is right for
+the right reason — an enclosed balcony has real walls, so its edge was covered.
+
+⚠ Two of the three railings come off layer `A5 FALSE CEILING`. That reads wrong
+and is not: **layer names never decide, they pre-select**, and `A5 FALSE
+CEILING` is a legitimately selected wall layer on this sheet. Recorded rather
+than filtered, because filtering it by name would break a settled rule to fix
+nothing.
+
+`test_build.py` 153 → 168, with the negatives asserted as hard as the positive.
+
+**Four harness defects, all of the "0 failed is not everything ran" family**
+(`bb0ec21`):
+
+1. **`test/referral-and-reset.mjs` could not fail.** Its `ok()` was a bare
+   `console.log` — no counter, no summary, no exit code. 22 assertions that
+   would have printed FAIL into a scrolling log and still exited 0. Found by
+   counting, not by reading: it was the one file in that directory which never
+   printed `N passed, M failed`, so the run's total came up short of the 485 on
+   the board. That shortfall was the only signal it ever gave, and reading it
+   required already knowing the total.
+2. **`services/api`'s `test` was a 29-long `&&` chain**, so one crash removed 20
+   files from the run. `test/run-all.mjs` now runs every file and reports
+   ok / failed / blocked / **silent** per file — silent meaning "exited 0 and
+   asserted nothing", which is its own answer and not a pass. It also diffs its
+   list against what is on disk, because a test nobody runs is the same defect
+   in a different hat.
+3. **`js:api` and `js:web-linkcheck` reported FAILED with no server running.**
+   They drive a server rather than booting one, and `docs/validation.md` never
+   said so — so `npm run validate` on a clean checkout showed two red lines that
+   no code change could fix. They are BLOCKED now, naming the origin and the
+   command that starts one.
+4. **`npm run dev:detect` never loaded `.env`.** It called uvicorn directly, and
+   uvicorn reads only `os.environ` — so the command everyone types started the
+   detector with no `FLOORPLAN_MODEL` and no `NVIDIA_API_KEY`: trained
+   classifier off, adjudicator degraded, both silent. That is exactly the state
+   `aalev-d0` documented, reachable straight from the package script. It now
+   runs `tools/dev-detect.ps1`. The old command is **not** kept under another
+   name — a quiet path back to the broken state is the thing being removed.
+
+### ⚠ Two API "failures" that were not real
+
+A second process bound `:8787` mid-run. Windows lets a second binder win
+quietly, and the hazard `dev-detect.ps1` documents for `:8090` is not
+uvicorn-specific. `bake` reported **17 passed / 11 failed** and `access-code`
+**24 / 2**; against a verified single A:-tree listener the same two files are
+**28 / 0** and **26 / 0**. Nothing was broken.
+
+**Before believing any API result, check the listener count and which tree it
+is**, not merely that something answers:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8787 -State Listen |
+  ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)").CommandLine }
+curl :8787/cad/health     # 200 + an A:\ python path = A: tree.  404 = the C: copy.
+```
+
+### The trained model is integrated, and /health proves it rather than naming it
+
+Verified before anything else was touched, because §1 correction 0 says to:
+
+```
+classifier.state       ready
+path                   A:/Tools/FloorplanModel/kaggle/result6/p2/runs/floorplan_segment.onnx
+trained_from           kaggle rayanamal/arcvia-p2-finetune v6, 2026-08-27,
+                       mIoU 0.8009, beats live product 4/5 markups
+classes 44 · input 512 · normalisation declared
+adjudicator            openai:gpt-5.5
+adjudicator_liveness   unverified: no vision call since this service started
+```
+
+`FLOORPLAN_MODEL` lives in `.env` now — it used to exist only in one shell's
+environment, one restart from gone. `adjudicator_liveness` reading `unverified`
+rather than green is the honest answer and should stay that way: naming a model
+is not reaching it.
+
+### Corpus: the report was 8,661 rows behind itself
+
+`reports/CORPUS.md` said 19,803 rows across 97 sources, generated 08-26. The
+manifest held **28,464** across **98**, and the `bim` category had gone 63 →
+8,575. Regenerated (R5 — announced on the board first), along with `CREDITS.md`.
+
+**Report the quantity, not just the status (R6):**
+
+```
+28,464 rows · 98 sources · 6,766.5 MB
+commercially trainable  20,959 (74%)      <- was 18,210 (92%) at 19,803 rows
+credits                 7,495 attributed across 46 sources, 859 share-alike,
+                        0 unattributable
+verify_claims           14/14 hold; negative controls 11 caught, 0 missed
+verify_corpus           9,400 on-disk artifacts, 9,383 ok + 17 ok_repo, 0 bad
+```
+
+⚠ **The trainable share fell 92% → 74% and that is not a regression.** The BIM
+harvest added rows that are correctly bucketed `quarantine`. A share is a ratio
+and its denominator moved; quoting the fall as a loss would be the same error
+this file records about one-way metrics. The absolute trainable count **rose**,
+18,210 → 20,959.
+
+`verify_corpus` finding zero bad artifacts is worth stating plainly: the
+2026-08-27 concurrent-writer clobber — where the manifest went on describing a
+41.3 MB PDF that no longer existed — does not reproduce anywhere in the tree.
+
+### What is genuinely still open
+
+Ordered by whether anyone can act on it today.
+
+**1. Three items need the owner at a keyboard, and only for the sign-in step.**
+The 360 panorama flow end to end, the live post-edit render comparison, and
+human visual approval of the stairs. The browser runtime works now — the
+error-1344 sandbox failure is gone — but everything past the sign-in screen is
+behind authentication, and entering a password or creating an account is not
+something this assistant does. **The gate is open; the door still needs a
+person.**
+
+**2. The window question cannot be settled with what exists.** `realdecks/`
+holds ONE annotated image carrying five numbered failures, and its assertion for
+the missing window is "at least one Window opening detected on the exterior wall
+at (4)" — a recall floor of one, at one location, with the real windows never
+enumerated. There is no denominator, so precision was never measurable there,
+and doubling a count against a metric that cannot see false positives looks like
+an improvement *by construction*. What would settle it is an enumerated list of
+the real window openings on that elevation. Not another pass count.
+`ADJUDICATE_WINDOW_PASSES` stays at 1.
+
+**3. A site sheet needs treating as a site containing buildings.** Visual QA
+rejects both completed site models and verification correctly blocks them. The
+recorded next step is to model a site as containing individual buildings rather
+than to weaken the building gates — and the temptation is the second, because it
+is one constant. Do not.
+
+**4. The furniture-drop half stays unbuilt, deliberately.** The wall-share
+distribution is a continuum, not two populations; three samplers were swept and
+the ambiguous middle never collapses (13–18 of 55). A threshold there is a
+policy decision about ~15 walls, and a dropped wall costs windows.
+
+**5. Not this session's, and left alone on purpose:** ~23 uncommitted files
+under `apps/studio/src/bim/**`, `apps/studio/src/plan/**` and `apps/web/**` —
+IFC import work, last edited 02:15, green in the suites but mid-flight and
+somebody else's. **Do not sweep them into a commit.** Use
+`git commit -F <msg> -- <paths>`, never a bare `git commit`.
+
+### Green at the end of this session, with all three services up
+
+```
+api      507 assertions · 29 files · 29 ok, 0 failed, 0 blocked, 0 silent
+studio   544 · brand 23 · asset-ingest + atlas green
+types      5 suites · python 30 suites / 982 assertions · bim 1 · build 4
+```
+
+The api figure is 507 rather than the board's 485 because 22 assertions in
+`referral-and-reset.mjs` were never counted before, and `detect.mjs` runs 32
+with the detector up against 19 without it. Both differences are the harness
+telling the truth, not new tests.
