@@ -116,13 +116,47 @@ async function call(path, { method = 'GET', body, token, headers = {} } = {}) {
   return { status: r.status, payload: await r.json().catch(() => ({})) }
 }
 
+/**
+ * Wait for a condition, and remember how long it actually took.
+ *
+ * The boolean alone cannot tell a comfortable pass from a pass that nearly was
+ * not one, which is why this file's known flake could be observed and never
+ * diagnosed: branch 2's watchdog missed its 15 s window once, on the day's
+ * first full chain, and passed on every run since. The recorded suspicion is
+ * cold-start contention -- 25 prior test files each booting a server -- and the
+ * tempting remedy is to widen the window. That would hide the only evidence
+ * there is.
+ *
+ * So the margin is reported even on success. A wait that has crept from 5 s to
+ * 13 s of a 15 s budget is the same failure arriving, and it is invisible while
+ * the assertion still says PASS. The number that has been fine for a month is
+ * the one worth printing, because it is the only thing that will notice when it
+ * stops being fine.
+ */
 const until = async (test, timeoutMs = 15000) => {
-  const end = Date.now() + timeoutMs
+  const started = Date.now()
+  const end = started + timeoutMs
   while (Date.now() < end) {
-    if (await test()) return true
+    if (await test()) {
+      until.elapsedMs = Date.now() - started
+      until.budgetMs = timeoutMs
+      return true
+    }
     await new Promise((r) => setTimeout(r, 150))
   }
+  until.elapsedMs = Date.now() - started
+  until.budgetMs = timeoutMs
   return false
+}
+
+/** How close that wait came to its budget, as something a reader can act on. */
+const margin = () => {
+  const used = until.elapsedMs ?? 0
+  const budget = until.budgetMs ?? 0
+  if (!budget) return ''
+  const share = used / budget
+  const note = share >= 0.6 ? '  <-- NARROW, this is the flake approaching' : ''
+  return `${(used / 1000).toFixed(1)}s of ${(budget / 1000).toFixed(0)}s${note}`
 }
 
 const readDb = async (dbPath) => JSON.parse(await readFile(dbPath, 'utf8'))
@@ -232,7 +266,7 @@ try {
   }, 15000)
   db = await readDb(dbB)
   ok('the silent job was failed when its budget ran out', watchdogFired,
-     `status=${db.renderJobs[0].status}`)
+     `${margin()}  status=${db.renderJobs[0].status}`)
   ok('...with an error naming the missing worker',
      (db.renderJobs[0].error ?? '').includes('never reported back'))
   ok('...and its credits were returned',
