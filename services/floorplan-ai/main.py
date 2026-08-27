@@ -42,6 +42,7 @@ import labels as text_labels
 import json
 
 import assign
+import segment as classify_pass
 import pdfbackend
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -294,6 +295,10 @@ def health() -> dict:
         "pdf_backend": pdfbackend.backend_name(),
         # The vision model that second-guesses proposals, or null when none is
         # configured. Named so a bug report says which model judged the plan.
+        # Whether the trained classifier is deciding WHAT. Absent weights
+        # is a deployment choice, not a fault, so this reports rather than
+        # warns -- but a reader must be able to tell which pass set `kind`.
+        "classifier": classify_pass.describe(),
         "adjudicator": adjudicate_pass.name(),
         # Counts and token totals only. Never expose the credential itself.
         "vision_usage": adjudicate_pass.usage(),
@@ -326,6 +331,24 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
     else:
         walls, objects, rooms, scale = detect_heuristic(image)
 
+    # ── What each pass is for ──────────────────────────────────────────────
+    # WHERE always comes from the heuristic above. Line extraction is solved in
+    # classical CV, and the session that trained the detector measured the
+    # decomposition rather than arguing it: feeding the model the heuristic's
+    # own segments and asking only "what is this" beat the live product on all
+    # five acceptance regions for 1.8% of wall density, while a model asked to
+    # produce geometry lost recall badly.
+    #
+    # So this is a PASS, not a backend. It needs no FLOORPLAN_BACKEND value,
+    # which is deliberate: a third exclusive mode would force a choice between
+    # the classifier and the adjudicator when the point is that they do
+    # different jobs. It runs whenever weights are configured.
+    model_notes: list[str] = []
+    model_owns_railings = False
+    if classify_pass.available():
+        walls, model_notes = classify_pass.classify_walls(image, walls)
+        model_owns_railings = True
+
     # A vision model second-guesses the proposals against the picture itself —
     # the heuristic keeps deciding WHERE, the model only ever decides WHAT.
     # Opt-in by key, fail-open by contract: without a key, or on any network
@@ -334,7 +357,11 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
     if adjudicate_pass.available():
         walls, objects, rooms, notes = adjudicate_pass.adjudicate(
             image, walls, objects, rooms, Detection,
+            owns_railings=not model_owns_railings,
         )
+    # The classifier's notes first: they describe the walls the adjudicator's
+    # notes then talk about.
+    notes = model_notes + notes
 
     confidences = [w.confidence for w in walls] + [o.confidence for o in objects]
     mean_confidence = float(np.mean(confidences)) if confidences else 0.0

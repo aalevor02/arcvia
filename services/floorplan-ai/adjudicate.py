@@ -561,7 +561,7 @@ def _crop_for(image, walls, suspect):
     return crop
 
 
-def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
+def _adjudicate_clusters(image, walls, rooms, notes, owns_railings=True) -> tuple[list, list]:
     keep = [True] * len(walls)
     drop_rooms: set[int] = set()
     dropped_boxes: list[tuple] = []
@@ -631,6 +631,17 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                     f"and {dropped} inner wall(s)"
                 )
         elif kind in ("railing", "boundary") and confidence >= MIN_CONFIDENCE:
+            if not owns_railings:
+                # The trained classifier already answered, deterministically,
+                # and two writers to one field is how a stable verdict becomes
+                # a flickering one again. Saying so beats silence: a reader who
+                # knows this pass looks for railings needs to see that it
+                # deferred rather than found nothing.
+                notes.append(
+                    f"adjudicator: also read {kind} here; the trained "
+                    "classifier owns that verdict, so this pass deferred"
+                )
+                continue
             # Asked twice, and it has to agree with itself.
             #
             # Every other verdict here either removes a proposal or leaves a
@@ -791,7 +802,7 @@ def _point_to_segment(x: float, y: float, wall) -> float:
 # Entry
 # --------------------------------------------------------------------------
 
-def adjudicate(image, walls, objects, rooms, detection_cls):
+def adjudicate(image, walls, objects, rooms, detection_cls, owns_railings=True):
     """
     Second-guess the proposals against the picture. Returns
     (walls, objects, rooms, notes) â€” unchanged plus a note on any failure.
@@ -801,7 +812,7 @@ def adjudicate(image, walls, objects, rooms, detection_cls):
         return walls, objects, rooms, notes
 
     try:
-        walls, rooms = _adjudicate_clusters(image, walls, rooms, notes)
+        walls, rooms = _adjudicate_clusters(image, walls, rooms, notes, owns_railings)
         objects = list(objects) + _find_windows(image, walls, detection_cls, notes)
     except Exception as exc:  # noqa: BLE001 â€” fail-open is the contract
         notes.append(f"adjudicator: skipped ({type(exc).__name__})")

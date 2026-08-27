@@ -267,11 +267,27 @@ def available() -> bool:
 
 
 def describe() -> dict:
-    """What /health should say about it, without pretending to more than it has."""
+    """What /health should say about it, without pretending to more than it has.
+
+    Three states, not two. The load is lazy, so a freshly started service that
+    will classify perfectly on its first request reported `loaded: false` --
+    indistinguishable from weights that are absent or broken. That is the same
+    defect as a liveness field that says "unverified" and gets read as "down",
+    and it was in the health payload written to prevent exactly that.
+    """
+    if not MODEL_PATH:
+        return {"state": "not configured", "model": None}
     if _session is None:
-        return {"loaded": False, "model": Path(MODEL_PATH).name if MODEL_PATH else None}
+        # Try, so the answer is about the artefact rather than about whether
+        # anyone has made a request yet.
+        try:
+            load()
+        except SegmentUnavailable as reason:
+            return {"state": "refused", "model": Path(MODEL_PATH).name, "reason": str(reason)[:200]}
+    if _session is None:
+        return {"state": "refused", "model": Path(MODEL_PATH).name}
     return {
-        "loaded": True,
+        "state": "ready",
         "model": Path(MODEL_PATH).name,
         "classes": len(_classes or []),
         "input_size": _input_size,
