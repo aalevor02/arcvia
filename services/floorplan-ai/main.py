@@ -39,8 +39,11 @@ import adjudicate as adjudicate_pass
 import deck
 import design
 import labels as text_labels
+import json
+
+import assign
 import pdfbackend
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -159,6 +162,67 @@ class DetectionResult(BaseModel):
 
 # --------------------------------------------------------------------------
 
+def adjudicator_liveness() -> str | None:
+    """Whether the configured vision model actually ANSWERS, not just whether
+    it is named. None when there is nothing to report; otherwise a short
+    human-readable reason.
+
+    This exists because of a real outage. On 2026-08-26T09:00:00Z NVIDIA
+    retired `nvidia/nemotron-nano-12b-v2-vl`, the model this service was pinned
+    to. Every call began returning HTTP 410 Gone. `adjudicate.py` fails open by
+    contract -- a dead adjudicator must never take the detector down with it --
+    so each failure was recorded as "a crop went unanswered; its proposal
+    stands" and the run completed successfully with the heuristic's proposals
+    untouched. `/health` reported `"adjudicator": "nvidia:nemotron-nano-12b-v2-vl"`
+    throughout, because naming a model is not the same as reaching it.
+
+    The symptom was not an error. It was the AI silently changing nothing.
+
+    Inferred from traffic rather than probed. `services/api` proxies this
+    endpoint to the studio on every poll, so a liveness check that issues its
+    own vision call bills once per poll -- the cost scales with how often
+    somebody leaves a tab open, which is the wrong thing for it to scale with.
+    Counting answers is free and catches a mid-run retirement on the first
+    plan that runs after it, which is precisely the case that bit us.
+
+    The price of being free is that a service nobody has used yet has no
+    evidence either way, and it says so. It does NOT report healthy. Asserting
+    capability from configuration is the exact defect this function exists to
+    catch, and inventing a clean bill of health with zero calls behind it would
+    be committing it one level up.
+    """
+    if not adjudicate_pass.available():
+        # Nothing is configured, `adjudicator` above is already null, and an
+        # absent adjudicator is a deployment choice rather than a fault.
+        return None
+
+    stats = adjudicate_pass.usage()
+    started = stats.get("calls_started", 0)
+    answered = stats.get("calls_answered", 0)
+    failed = stats.get("calls_failed", 0)
+    reason = stats.get("last_failure") or "no reason recorded"
+
+    if started == 0:
+        return "unverified: no vision call has been made since this service started"
+
+    if answered == 0:
+        return f"dead: {started} vision call(s) made, none answered - last: {reason}"
+
+    # "Is it working now", read from the most recent call rather than from the
+    # cumulative counts. Those counters live as long as the process, so a single
+    # transient timeout hours ago would otherwise pin this to "degraded" for the
+    # rest of its life and train everyone to ignore the field.
+    if stats.get("last_call_failed"):
+        return (
+            f"degraded: the most recent vision call failed "
+            f"({failed} of {started} so far) - last: {reason}"
+        )
+
+    # Answering now. A non-zero historical failure count is not a fault worth
+    # reporting here -- the rate is in vision_usage for anyone who wants it.
+    return None
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -180,6 +244,11 @@ def health() -> dict:
         "adjudicator": adjudicate_pass.name(),
         # Counts and token totals only. Never expose the credential itself.
         "vision_usage": adjudicate_pass.usage(),
+        # Whether that model ANSWERS, not merely whether it is named. Null
+        # when there is nothing to report; a reason string otherwise. A pinned
+        # hosted model can be retired underneath a running service, and this
+        # one was -- see adjudicator_liveness().
+        "adjudicator_liveness": adjudicator_liveness(),
         # The same model reads deck renders into DesignSpecs (/design).
         "reads_design": design.available(),
     }
@@ -310,6 +379,75 @@ async def document_page(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     return Response(content=image, media_type="image/png")
+
+
+@app.post("/assign")
+async def assign_endpoint(
+    plan: UploadFile = File(...),
+    render: UploadFile = File(...),
+    rooms: str = Form(...),
+    render_page: int = Form(0),
+    render_index: int = Form(0),
+) -> dict:
+    """
+    Propose which room on the plan a render shows.
+
+    Only for renders a caption could not place -- ambiguous ones ("Bed" fitting
+    two bedrooms) and unmatched ones ("Guest Suite" against a drawing that says
+    "Bedroom-3"). The caption path is free and resolves the majority; this costs
+    a vision call, so the caller decides when it is worth one.
+
+    `rooms` is the JSON list of Room objects /detect already returned. Passing
+    them back rather than re-detecting keeps the numbering the caller sees and
+    the numbering the model is shown identical -- re-running detection here
+    could renumber, and then a correct answer would point at the wrong room.
+    """
+    if not assign.available():
+        raise HTTPException(
+            status_code=503,
+            detail="Room assignment needs a vision model. Set NVIDIA_API_KEY "
+                   "(or OPENAI_API_KEY) for services/floorplan-ai.",
+        )
+
+    try:
+        candidates = json.loads(rooms)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=400, detail=f"rooms is not JSON: {error}") from error
+    if not isinstance(candidates, list) or not candidates:
+        raise HTTPException(status_code=400, detail="rooms must be a non-empty list.")
+
+    images = []
+    for upload, label in ((plan, "plan"), (render, "render")):
+        raw = await upload.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail=f"The {label} upload is empty.")
+        # A deck render is a page of a PDF the caller already stored. Extracting
+        # it here rather than making the caller re-upload pixels is the same
+        # bargain /design strikes, and keeps the two endpoints interchangeable
+        # from the panel's point of view.
+        if label == "render" and render_page > 0:
+            if not deck.available():
+                raise HTTPException(status_code=503, detail="PDF reading is not installed.")
+            try:
+                raw = deck.extract(raw, page=render_page, index=render_index, long_edge=1600)
+            except IndexError as error:
+                raise HTTPException(status_code=404, detail=str(error)) from error
+            except Exception as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+        image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise HTTPException(status_code=400, detail=f"Could not read the {label} image.")
+        if image.shape[0] * image.shape[1] > MAX_PIXELS:
+            raise HTTPException(status_code=413, detail=f"The {label} image is too large.")
+        images.append(image)
+
+    proposal = assign.assign_render(images[0], candidates, images[1])
+    if proposal is None:
+        # 200, not an error: "I cannot tell which room this is" is a real and
+        # useful answer, and the caller's next move is to ask a person either
+        # way. A 4xx here would read as a broken request.
+        return {"proposal": None, "model": assign.name()}
+    return {"proposal": proposal, "model": proposal["model"]}
 
 
 @app.post("/design")

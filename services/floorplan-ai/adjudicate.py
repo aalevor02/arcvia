@@ -57,7 +57,7 @@ if _PROVIDER == "openai" or (
     ENDPOINT = os.environ.get(
         "FLOORPLAN_ADJUDICATOR_URL", "https://api.openai.com/v1/chat/completions"
     )
-    MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+    MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-5.5")
     KEY = os.environ.get("OPENAI_API_KEY", "")
 else:
     PROVIDER = "nvidia"
@@ -102,6 +102,23 @@ MAX_OUTPUT_TOKENS = max(
 
 _budget_lock = threading.Lock()
 _calls_started = 0
+#: Started calls that came back with an answer. The gap between this and
+#: _calls_started is the whole point: a provider that has been retired still
+#: accepts the request shape, so "we called it" proves nothing about whether
+#: anyone is home. See adjudicator_liveness() in main.py.
+_calls_answered = 0
+#: Cumulative failures, and why the most recent one failed -- truncated and
+#: free of the key. A dead adjudicator is only actionable if it says HTTP 410
+#: rather than "unavailable", so the reason is STICKY: a later success does not
+#: erase it. Wiping it on success loses the diagnostic for exactly the case
+#: that is hardest to catch, an intermittent failure.
+_calls_failed = 0
+_last_failure: str | None = None
+#: Did the most recent call fail? State is read from this rather than from the
+#: cumulative count, because counters live as long as the process: one transient
+#: timeout would otherwise brand a service "degraded" for its entire lifetime.
+#: This answers "is it working NOW"; the counts above answer "at what rate".
+_last_call_failed = False
 _input_tokens = 0
 _output_tokens = 0
 _total_tokens = 0
@@ -114,6 +131,21 @@ def _reserve_call() -> bool:
             return False
         _calls_started += 1
         return True
+
+
+def _record_answer() -> None:
+    global _calls_answered, _last_call_failed
+    with _budget_lock:
+        _calls_answered += 1
+        _last_call_failed = False
+
+
+def _record_failure(reason: str) -> None:
+    global _calls_failed, _last_failure, _last_call_failed
+    with _budget_lock:
+        _calls_failed += 1
+        _last_failure = reason[:160]
+        _last_call_failed = True
 
 
 def _record_usage(payload: dict) -> None:
@@ -135,6 +167,10 @@ def usage() -> dict:
     with _budget_lock:
         return {
             "calls_started": _calls_started,
+            "calls_answered": _calls_answered,
+            "calls_failed": _calls_failed,
+            "last_failure": _last_failure,
+            "last_call_failed": _last_call_failed,
             "max_calls": MAX_PROVIDER_CALLS or None,
             "input_tokens": _input_tokens,
             "output_tokens": _output_tokens,
@@ -162,11 +198,39 @@ def name() -> str | None:
 # --------------------------------------------------------------------------
 
 def _encode(image: np.ndarray) -> str | None:
-    """JPEG at descending quality until it fits the endpoint's data-URL cap."""
-    for quality in (85, 70, 55, 40):
-        ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if ok and buf.size <= _MAX_IMAGE_BYTES:
-            return base64.b64encode(buf.tobytes()).decode("ascii")
+    """JPEG at descending quality, then descending size, until it fits the
+    endpoint's data-URL cap.
+
+    Quality alone is not enough and the gap was load-bearing. Crops are small
+    and fit at 85 on the first try, so this read as working for the adjudicator
+    while being unusable for the design reader, whose input is a full deck page:
+    a 2400x2135 render exceeded the cap even at quality 40, `_encode` returned
+    None, and `_ask` bailed BEFORE `_reserve_call()` -- so the attempt was never
+    counted, no failure was recorded, and /design answered 422 "it may not be a
+    render, or the vision model did not answer". Neither was true. The model was
+    never asked.
+
+    Shrinking beats crushing: for reading materials and colour a clean image at
+    half size is worth more than a blocky one at full size, so size is reduced
+    at good quality rather than quality being driven into the floor."""
+    for scale in (1.0, 0.75, 0.5, 0.375, 0.25):
+        candidate = image
+        if scale < 1.0:
+            candidate = cv2.resize(
+                image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+            )
+        for quality in (85, 70, 55, 40):
+            ok, buf = cv2.imencode(".jpg", candidate, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if ok and buf.size <= _MAX_IMAGE_BYTES:
+                return base64.b64encode(buf.tobytes()).decode("ascii")
+    # Reaching here means even a quarter-size, quality-40 encode does not fit,
+    # which should not happen for any real render. Say so rather than returning
+    # a bare None that the caller will misattribute to the model.
+    print(
+        f"[adjudicate] could not encode a {image.shape[1]}x{image.shape[0]} image "
+        f"under {_MAX_IMAGE_BYTES} bytes - the model was NOT asked",
+        flush=True,
+    )
     return None
 
 
@@ -179,7 +243,7 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
         print("[adjudicate] provider call budget exhausted", flush=True)
         return None
     max_tokens = min(max(1, max_tokens), MAX_OUTPUT_TOKENS)
-    body = json.dumps({
+    request_body = {
         "model": MODEL,
         "messages": [{
             "role": "user",
@@ -191,9 +255,16 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
         }],
         # 300 fits a verdict; a caller wanting a whole DesignSpec passes more â€”
         # the first truncated spec parsed as "no answer" and read as a refusal.
-        "max_tokens": max_tokens,
-        "temperature": 0.0,
-    }).encode("utf-8")
+    }
+    # GPT-5 family Chat Completions renamed this limit. NVIDIA's compatible
+    # endpoint still expects the older key, so choose it at the provider seam.
+    if PROVIDER == "openai":
+        request_body["max_completion_tokens"] = max_tokens
+        request_body["reasoning_effort"] = "none"
+    else:
+        request_body["max_tokens"] = max_tokens
+        request_body["temperature"] = 0.0
+    body = json.dumps(request_body).encode("utf-8")
 
     request = urllib.request.Request(
         ENDPOINT,
@@ -216,7 +287,18 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
             answer = "".join(
                 part.get("text", "") for part in answer if isinstance(part, dict)
             )
+        # A 200 carrying an empty body is not an answer. Counting it as one
+        # would rebuild the exact blind spot this counter exists to close:
+        # liveness would read healthy while every crop note said "went
+        # unanswered". This also covers content being null outright, which
+        # would otherwise raise TypeError on the slice below and escape the
+        # except clauses -- they list ValueError and KeyError, not TypeError.
+        if not answer or not str(answer).strip():
+            print("[adjudicate] empty answer body", flush=True)
+            _record_failure(f"HTTP 200 with an empty answer body from {MODEL}")
+            return None
         print(f"[adjudicate] answered: {answer[:160]!r}", flush=True)
+        _record_answer()
         return answer
     except urllib.error.HTTPError as error:
         # A 429 from the free tier and a 400 from an oversized payload need
@@ -227,9 +309,11 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
         except OSError:
             pass
         print(f"[adjudicate] HTTP {error.code}: {detail}", flush=True)
+        _record_failure(f"HTTP {error.code}: {detail}")
         return None
     except (urllib.error.URLError, OSError, KeyError, IndexError, ValueError, TimeoutError) as error:
         print(f"[adjudicate] failed: {type(error).__name__}: {error}", flush=True)
+        _record_failure(f"{type(error).__name__}: {error}")
         return None
 
 
@@ -486,9 +570,17 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                     f"and {dropped} inner wall(s)"
                 )
         elif kind in ("railing", "boundary") and confidence >= MIN_CONFIDENCE:
+            # Say WHERE. This verdict is deliberately non-destructive (see
+            # _DROP), so the wall stays in the output as an ordinary wall and
+            # this note is its only trace. A note that cannot be located is a
+            # note nobody can act on: a reviewer told "there is a railing"
+            # has to re-find it by eye on a drawing carrying fifty walls.
+            x0, y0, x1, y1 = suspect["box"]
             notes.append(
-                f"adjudicator: a proposed structure looks like {kind} â€” "
-                "kept, review it"
+                f"adjudicator: a proposed structure looks like {kind} "
+                f"({confidence:.0%}) near {((x0 + x1) / 2):.0%},"
+                f"{((y0 + y1) / 2):.0%} of the drawing \u2014 kept as a "
+                "wall, review it"
             )
 
     kept_walls = [w for w, k in zip(walls, keep) if k]
