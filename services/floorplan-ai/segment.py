@@ -137,15 +137,34 @@ def _spans_schema(meta: dict) -> tuple[list[str], dict] | None:
     # run. What they are:
     #
     #     0.200,0.207  65px  the TOILET-3 window                 REAL
-    #     0.770,0.417  34px  a mullioned panel between planters  REAL, and in
-    #     0.771,0.432   8px    (the same one, split in two)      nobody's table
+    #     0.770,0.417  34px  a banded panel in the wall between   FALSE - it is
+    #     0.771,0.432   8px    FOYER 1.66x1.99 and LIFT 1.65x1.65   A LIFT DOOR
     #     0.356..0.388, 0.119..0.138, five blobs                 THE "BALCONY
     #                                                            4.57 x 1.00"
     #                                                            LABEL TEXT
     #     0.520,0.633  26px  a HEDGE, fronds read as mullions    FALSE
     #
-    # So two real locations out of four, and — the point — IT MISSES MARKUP (4)
+    # So ONE real location out of four, and — the point — IT MISSES MARKUP (4)
     # ENTIRELY. It does not solve the one thing the ground truth asserts.
+    #
+    # The lift door was first read here as a real window and corrected by a
+    # second session. It is worth the correction rather than a quiet edit,
+    # because the mistake is instructive twice over: a lift entrance is drawn as
+    # a banded panel and looks exactly like glazing, and it sits on an INTERIOR
+    # wall with a shaft behind it, so even granting it were glazed it could
+    # never satisfy markup (4), which asks for an opening on an exterior wall.
+    # Check what is on the far side of the wall, not just what the panel looks
+    # like.
+    #
+    # ── The species, which is the actually useful finding ─────────────────────
+    # Every false positive here and in adjudicate.py is the same thing: PARALLEL
+    # BANDS. Staircase treads. Hedge fronds. The strokes of the letters in
+    # "BALCONY". A lift door's panel lines. The model learned "window = banded
+    # lines set into a wall", and a rendered plan is full of banded lines that
+    # are not windows. That is a training-domain gap, not a threshold to tune —
+    # no confidence cutoff separates a tread from a mullion, because at the
+    # feature level they are the same thing. It is an argument for what the
+    # synthetic generator should contain, and training is stopped.
     #
     # The obvious rescue does not work either. The adjudicator already refuses a
     # window further than 4% of image width from a proposed wall, and ALL NINE
