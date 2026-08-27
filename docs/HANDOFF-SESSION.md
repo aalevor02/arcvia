@@ -284,8 +284,16 @@ Asked for, not yet done:
    it anyway. Needs reference values or it is a liability.
 3. **Re-import a revised DWG** — the user has explicitly reopened the
    "one-shot importer, no merge engine" decision.
-4. **Schedule the weekly rate refresh** — `quantify/refresh.py` works and is
-   verified against the live source; nothing calls it on a timer yet.
+4. ~~**Schedule the weekly rate refresh**~~ — **DONE, and verified as running on
+   2026-08-28.** The Windows task `Arcvia rate refresh` is `Ready`, last ran
+   2026-08-26 21:49 with `LastTaskResult 0`, next 2026-08-31 09:00.
+   ⚠ Its FIRST apparent success was false: `cmd.exe` misparsed UTF-8 comments,
+   the relative log directory did not exist after `cd services/reconstruct`,
+   Python never ran, and the wrapper still returned zero.
+   `tools/refresh-rates.cmd` is ASCII-safe now, resolves the repo from its own
+   path, and returns Python's exit code. **So `LastTaskResult 0` is only worth
+   reading because the wrapper was fixed to be capable of returning non-zero** —
+   check the log beside the rate library, not just the task result.
 5. **BOQ tests, and the masonry ~2× question in §4.**
 
 Left deliberately: the two `TODO(you)` business judgements. The user has said
