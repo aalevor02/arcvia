@@ -126,6 +126,44 @@ def _spans_schema(meta: dict) -> tuple[list[str], dict] | None:
                 "weights are from different runs."
             )
 
+    # ── `window` is resolved and deliberately NOT used. Measured, do not retry ──
+    #
+    # The checkpoint carries a Window class in its icons head (absolute channel
+    # 34), and it is tempting: the vision adjudicator recovers the owner's
+    # markup (4) in only 3 runs of 12, and a checkpoint is deterministic where
+    # that pass is not. It was measured properly before being left alone.
+    #
+    # Three runs on the owner's plan gave 9 Window blobs, byte-identical every
+    # run. What they are:
+    #
+    #     0.200,0.207  65px  the TOILET-3 window                 REAL
+    #     0.770,0.417  34px  a mullioned panel between planters  REAL, and in
+    #     0.771,0.432   8px    (the same one, split in two)      nobody's table
+    #     0.356..0.388, 0.119..0.138, five blobs                 THE "BALCONY
+    #                                                            4.57 x 1.00"
+    #                                                            LABEL TEXT
+    #     0.520,0.633  26px  a HEDGE, fronds read as mullions    FALSE
+    #
+    # So two real locations out of four, and — the point — IT MISSES MARKUP (4)
+    # ENTIRELY. It does not solve the one thing the ground truth asserts.
+    #
+    # The obvious rescue does not work either. The adjudicator already refuses a
+    # window further than 4% of image width from a proposed wall, and ALL NINE
+    # BLOBS SURVIVE IT: the label text sits 0.010-0.028 from the balcony wall,
+    # because plan labels are drawn against the wall they annotate, and the hedge
+    # is 0.013 from one. That gate rejects windows floating mid-room; it cannot
+    # reject anything drawn where a window would be.
+    #
+    # Why shipping it anyway would be worse than the current variance: these
+    # errors are DETERMINISTIC. A false window that appears in one run of four
+    # reads as noise; one that appears every single run reads as a confirmed
+    # feature, and gets built.
+    #
+    # What would make it usable, untested: the service already reads text
+    # (`reads_text`), so masking Window blobs that overlap detected text removes
+    # the five-blob false cluster by rule rather than by threshold. That leaves
+    # the hedge, which is the render-domain problem again — see the staircase in
+    # adjudicate.py, where treads read as glazing bars for the same reason.
     resolved: dict[str, int] = {}
     for key, head in (
         ("wall_class_index", "rooms"),
