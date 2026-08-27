@@ -15,7 +15,7 @@ import { resolveUrl } from '../src/lib/storage.js'
  * Needs the API running: `npm run dev:api`.
  */
 
-const BASE = 'http://localhost:8787'
+const BASE = process.env.API_BASE ?? 'http://localhost:8787'
 const DB_PATH = resolve(process.env.DB_PATH ?? './.data/db.json')
 const stamp = Date.now()
 
@@ -232,7 +232,13 @@ ok('panorama remains a render job, not a bake', panoramaStored?.spec?.type === '
 // Tidy up. Both jobs are real, and a local worker will happily spend minutes
 // of CPU on them; a test suite should not leave Blender running behind it.
 for (const id of [jobBody.jobId, plain.jobId, panoramaBody.jobId].filter(Boolean)) {
-  await fetch(`${BASE}/render/jobs/${id}/cancel`, { method: 'POST', headers: { Authorization: auth.Authorization } })
+  const cancelled = await fetch(`${BASE}/render/jobs/${id}/cancel`, {
+    method: 'POST',
+    // An empty request body must not be labelled as JSON. Fastify rejects an
+    // empty `application/json` body before the route can cancel the job.
+    headers: { Authorization: auth.Authorization },
+  })
+  ok(`cancelled ${id}`, cancelled.status === 200, String(cancelled.status))
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

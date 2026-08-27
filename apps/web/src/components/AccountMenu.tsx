@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import brand from '@arcvia/brand'
 import plans from '@arcvia/brand/plans'
 import { currentUser, logout } from '../lib/auth'
 import { copyText, fetchReferral } from '../lib/account'

@@ -36,10 +36,10 @@ export interface RenderUpdate {
   markers?: Record<string, string>
 }
 
-function authHeaders(): HeadersInit {
+function authHeaders({ json = false }: { json?: boolean } = {}): HeadersInit {
   const token = localStorage.getItem('arcvia.token')
   return {
-    'Content-Type': 'application/json',
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
 }
@@ -64,7 +64,7 @@ export async function submitRender(input: {
 }): Promise<{ jobId: string; creditsRemaining: number }> {
   const response = await fetch(`${API}/render/jobs`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: authHeaders({ json: true }),
     body: JSON.stringify({
       sceneId: input.sceneId,
       preset: input.preset,
@@ -130,8 +130,13 @@ export async function pollRender(
 }
 
 export async function cancelRender(jobId: string): Promise<void> {
-  await fetch(`${API}/render/jobs/${jobId}/cancel`, {
+  const response = await fetch(`${API}/render/jobs/${jobId}/cancel`, {
     method: 'POST',
     headers: authHeaders(),
   })
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.message ?? 'Could not cancel the render.')
+  }
 }
