@@ -2201,11 +2201,18 @@ an improvement *by construction*. What would settle it is an enumerated list of
 the real window openings on that elevation. Not another pass count.
 `ADJUDICATE_WINDOW_PASSES` stays at 1.
 
-**3. A site sheet needs treating as a site containing buildings.** Visual QA
-rejects both completed site models and verification correctly blocks them. The
-recorded next step is to model a site as containing individual buildings rather
-than to weaken the building gates — and the temptation is the second, because it
-is one constant. Do not.
+**3.** ~~A site sheet needs treating as a site containing buildings.~~
+**ALREADY BUILT — and I added this entry myself this morning without grepping
+for it, which makes it the fourth stale item in this file in one day and the
+first one I wrote.** `solve/site.py::segment_site` is called from `cli.py:873`
+and `test/test_site.py` is 48 passed / 0 failed, ending on "every building is
+counted (9)" and "the unlisted ones are declared, not dropped". Caught by Codex
+in `AGENT-SYNC.md`; verified here before accepting it.
+
+I copied the sentence forward out of the earlier entry's "next step" line
+because it read like an open item. **The instruction at the top of this file —
+go and look, the cost is minutes against days — applies to the person editing
+the file, not only to the person reading it.**
 
 **4. The furniture-drop half stays unbuilt, deliberately.** The wall-share
 distribution is a continuum, not two populations; three samplers were swept and
