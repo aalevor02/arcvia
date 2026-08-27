@@ -36,6 +36,8 @@ import base64
 import json
 import os
 import re
+import socket
+import time
 import threading
 import urllib.error
 import urllib.request
@@ -91,6 +93,11 @@ SUSPECT_MAX_DIAGONAL = 0.35
 MIN_CONFIDENCE = 0.6
 
 _TIMEOUT_S = float(os.environ.get("ADJUDICATE_TIMEOUT_S", "25"))
+
+#: Retries for a TRANSIENT network failure only -- a name that did not
+#: resolve, or a connection that did not open. Not for HTTP errors, and not
+#: for timeouts: retrying a slow call is how one stall becomes three.
+_TRANSIENT_RETRIES = int(os.environ.get("ADJUDICATE_TRANSIENT_RETRIES", "2"))
 
 # Optional process-wide guardrails for evaluation and low-spend deployments.
 MAX_PROVIDER_CALLS = max(
@@ -276,8 +283,44 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        # Reading a deck fires one of these per page, and a burst of concurrent
+        # outbound connections makes Windows' getaddrinfo fail intermittently --
+        # measured 35 failures in 79 calls during one deck read, every one
+        # "[Errno 11001] getaddrinfo failed", while the same name resolved 6/6
+        # from a shell seconds later. Not a dead endpoint, not a bad key.
+        #
+        # Because this pass fails open, those 35 became "went unanswered" and
+        # the user got a half-read deck with nothing on screen saying why.
+        #
+        # The retry lives INSIDE this try on purpose: HTTPError subclasses
+        # URLError, so a retry loop wrapped around the outside swallows the
+        # 410-Gone path and re-raises it past the handler written for it --
+        # which is exactly what the first version of this did, and the
+        # dead-provider test caught it.
+        payload = None
+        for attempt in range(_TRANSIENT_RETRIES + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError:
+                # A status is an answer. Retrying a 4xx changes nothing and
+                # retrying a 429 makes it worse.
+                raise
+            except urllib.error.URLError as error:
+                # Only a name that would not resolve or a connection that
+                # would not open. NOT timeouts: retrying a slow call is how
+                # one stall becomes three.
+                transient = isinstance(error.reason, (socket.gaierror, ConnectionError))
+                if not transient or attempt == _TRANSIENT_RETRIES:
+                    raise
+                print(
+                    f"[adjudicate] transient {type(error.reason).__name__}, "
+                    f"retry {attempt + 1}/{_TRANSIENT_RETRIES}",
+                    flush=True,
+                )
+                time.sleep(0.4 * (attempt + 1))
+
         _record_usage(payload)
         answer = payload["choices"][0]["message"]["content"]
         # OpenAI can return content as typed text parts; the compatible NVIDIA

@@ -201,12 +201,14 @@ export const WALL_TYPES: readonly WallType[] = [
     id: 'railing',
     name: 'Railing / parapet',
     thickness: 0.1,
-    // 1.1 m is the guard height every residential code in this market
-    // converges on, and the reason this type exists at all: a balcony edge
-    // and an interior partition are the same two lines on a drawing, so
-    // without a type saying otherwise a parapet gets built full height and
-    // the client walks onto a balcony boxed in by masonry.
-    height: 1.1,
+    // 1.0 m, matching `PARAPET_HEIGHT` in services/reconstruct/build/
+    // solidify.py, which cites Doc 29 section 3 and the bye-law height for a
+    // usable terrace. This started as 1.1 -- a defensible guard height, and
+    // wrong anyway, because the number is not the point: the CAD engine and
+    // this builder can produce the same building, and a parapet that changes
+    // height depending on which path drew it is the kind of discrepancy a
+    // client notices and nobody can explain. Agree with the engine.
+    height: 1.0,
     surface: 'wall',
     note: 'A balcony or terrace edge. Built to guard height, not to the ceiling.',
   },

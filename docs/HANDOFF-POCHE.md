@@ -250,6 +250,30 @@ render         isometric cutaway, ~1 min, 720p/32 samples, CPU
   **All GLBs on disk predate this.** Regenerate — see §0.
 
 ### OPEN
+- **A CAD-imported balcony has NO railing geometry.** Not wrong — absent.
+  `extrude_walls` skips unpaired lines on purpose ("a single unpaired line is
+  usually a railing, and extruding one to ceiling height turns a balcony into a
+  sealed box that blacks out the rooms behind it"), and `test_build.py` asserts
+  it: `pieces == 0 and skippedUnpaired == 4`. So the engine correctly refuses to
+  build a railing as a wall, and then builds nothing, and a balcony edge is open
+  in the model. **Correcting a claim made in `2d17eda`'s commit message**, which
+  says solidify.py "still builds a parapet full height" — it does not, and that
+  sentence should not be trusted. The engine's only parapet today is
+  `build_roof`'s, at `PARAPET_HEIGHT = 1.0`.
+
+  The designed answer already exists and has not been built:
+  `engine-blueprint.md` §736 — an unpaired run > 0.8 m becomes a two-alternative
+  hypothesis `{masonry@storey-height, railing@1.0 m}`, never a wall by default —
+  plus §756, where an OUTDOOR region pushes its bounding walls towards
+  railing/kerb. Implementing it is a piece of the classifier rework, not a patch,
+  which is why this session recorded it rather than improvising against a design
+  it had just read.
+
+  Related and DONE on the other path: the raster/studio pipeline now carries the
+  adjudicator's verdict on `WallSegment.kind` and builds a `railing` wall type at
+  **1.0 m, pinned to this file's `PARAPET_HEIGHT`** rather than to a code
+  minimum — two builders that can draw the same building must agree on that
+  number, or a parapet changes height depending on which path drew it.
 - ~~**Black pockets in lit renders.**~~ **SOLVED — `6f0d685`. It is Z-FIGHTING,
   not darkness, and the account below is REFUTED. Read this before the table.**
 

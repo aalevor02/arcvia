@@ -21,7 +21,10 @@ const check = (label: string, cond: boolean, detail = '') => {
   const railing = wallTypeById('railing')
   check('a railing is a wall type', railing !== undefined)
   check('and it is shorter than a storey', (railing?.height ?? 99) < 2, String(railing?.height))
-  check('specifically guard height', railing?.height === 1.1, String(railing?.height))
+  // Pinned to the engine's PARAPET_HEIGHT, not to a code minimum: two
+  // builders that can draw the same building must agree on this number.
+  check('specifically the engine\'s parapet height',
+    railing?.height === 1.0, String(railing?.height))
   check('and thinner than masonry', (railing?.thickness ?? 9) <= 0.115, String(railing?.thickness))
 }
 
@@ -64,7 +67,7 @@ const check = (label: string, cond: boolean, detail = '') => {
   const partitionHeight = heightOf(partition.id)
 
   check('the parapet is built, not skipped', parapetHeight > 0, String(parapetHeight))
-  check('and it is built to guard height', Math.abs(parapetHeight - 1.1) < 0.01,
+  check('and it is built to parapet height', Math.abs(parapetHeight - 1.0) < 0.01,
     String(parapetHeight))
   check('while the partition beside it stays full height',
     Math.abs(partitionHeight - tallBefore) < 0.01,

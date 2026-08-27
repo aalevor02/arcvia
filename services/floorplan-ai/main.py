@@ -173,6 +173,15 @@ class DetectionResult(BaseModel):
 
 # --------------------------------------------------------------------------
 
+#: A failure rate at or above this is worth surfacing even while the service
+#: is answering. A fifth of a deck coming back empty is a broken deck to the
+#: person reading it, however healthy the last call looked.
+FAILURE_RATE_LIMIT = 0.2
+
+#: Below this many calls a rate is noise rather than a trend.
+FAILURE_RATE_MIN_CALLS = 10
+
+
 def adjudicator_liveness() -> str | None:
     """Whether the configured vision model actually ANSWERS, not just whether
     it is named. None when there is nothing to report; otherwise a short
@@ -229,8 +238,24 @@ def adjudicator_liveness() -> str | None:
             f"({failed} of {started} so far) - last: {reason}"
         )
 
-    # Answering now. A non-zero historical failure count is not a fault worth
-    # reporting here -- the rate is in vision_usage for anyone who wants it.
+    # ...but "the last call worked" is not the same as "it is working", and
+    # reading only the last call was wrong in a way that showed up in use: a
+    # deck read finished with 35 failures in 79 calls -- 44% of the user's
+    # pages silently empty -- and this reported healthy, because call 79
+    # happened to succeed. That is the same defect as the health check it
+    # replaced, one level in: a signal that cannot see a sustained fault.
+    #
+    # So the RATE is reported too, once there are enough calls for a rate to
+    # mean anything. Ten is the floor because 1-of-2 is noise, not a trend.
+    if started >= FAILURE_RATE_MIN_CALLS:
+        rate = failed / started
+        if rate >= FAILURE_RATE_LIMIT:
+            return (
+                f"unreliable: {failed} of {started} vision calls failed "
+                f"({rate:.0%}) though the last one worked - last failure: {reason}"
+            )
+
+    # Answering, at an unremarkable rate.
     return None
 
 
