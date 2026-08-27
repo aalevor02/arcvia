@@ -147,6 +147,198 @@ def side_classes(walls, spaces) -> dict[int, tuple[bool, bool]]:
 PLINTH_HEIGHT = 0.45
 
 
+#: A balcony guard's height above its slab, metres.
+#:
+#: The same number as PARAPET_HEIGHT below, and deliberately a separate name:
+#: they are the same height for the same bye-law reason but they are different
+#: things, and a later revision to one should not silently move the other.
+#: apps/studio/src/plan/types.ts carries 1.0 for its `railing` wall type and
+#: says "Agree with the engine" in as many words — these two builders can
+#: produce the same building from the same drawing, and a parapet whose height
+#: depends on which path drew it is a discrepancy a client notices and nobody
+#: can explain. If you change this, change that.
+RAILING_HEIGHT = 1.0
+
+#: A railing's thickness when the drawing does not measure one. Matches
+#: `hypothesise/pair.DEFAULT_THICKNESS`, which is what an unpaired line already
+#: carries — this constant exists to say the choice was noticed, not to differ.
+RAILING_THICKNESS = 0.115
+
+#: How close an unpaired line must sit to a balcony's boundary to be that
+#: balcony's guard, metres. Generous enough to survive the half-thickness
+#: offset between a drawn line and the room polygon derived from it, tight
+#: enough that a line crossing the middle of a balcony is not swept up.
+RAILING_EDGE_TOLERANCE = 0.35
+
+#: How close a PAIRED wall has to run to an unpaired line before that line is
+#: considered already built. See `_railing_edges` — this is the guard against
+#: coincident geometry, not a tuning knob.
+RAILING_COVERED_TOLERANCE = 0.40
+
+
+def _space_name(space) -> str:
+    """A space's name, whether it arrives as an object or a dict."""
+    name = getattr(space, "name", None)
+    if name is None and isinstance(space, dict):
+        name = space.get("name")
+    return str(name or "").strip().lower()
+
+
+def _space_loop(space):
+    loop = getattr(space, "loop", None)
+    if loop is None and isinstance(space, dict):
+        loop = space.get("loop")
+    return loop or []
+
+
+def _railing_edges(walls, spaces) -> dict[int, float]:
+    """
+    Which unpaired lines are a balcony's guard, and how thick to build each.
+
+    ── The gap this closes ──────────────────────────────────────────────────
+    `build_walls` skips every unpaired wall, and that is right: extruding a
+    single line to ceiling height turns a balcony into a sealed box and blacks
+    out the rooms behind it. But "not a full-height wall" was implemented as
+    "no geometry at all", so the CAD path builds balconies with nothing at the
+    edge — a slab you could walk off, three metres up. The studio's importer
+    already builds these at guard height off the adjudicator's verdict; this
+    path never had a verdict to read, so it built nothing.
+
+    ── Why the room NAME decides, and not the line ──────────────────────────
+    Nothing local to an unpaired stroke separates a balcony guard from a wall
+    the architect happened to draw with one line. Length, layer and thickness
+    were all considered and all of them are shared with genuine single-line
+    walls, which the villa's own exterior is largely made of. The engine's
+    reliable signal for what a region IS has always been what the architect
+    wrote inside it — the same reasoning that makes OCR room labels the only
+    dependable bed-versus-wall signal in the raster detector.
+
+    So this asks one question: does this line lie on the edge of a space the
+    architect named a balcony, verandah, deck, sit-out or terrace? The
+    vocabulary is imported from `quantify/areas.py` rather than restated,
+    because that list is grounded in the RERA area definitions and a second
+    copy would drift from it.
+
+    A drawing with no such room gets no railings and is bit-identical to
+    before. That is the point: this cannot regress a plan it does not
+    recognise.
+
+    ── The guard that matters most ──────────────────────────────────────────
+    91% of the derived perimeter ring lies on top of linework the architect
+    drew (see hypothesise/perimeter.py). Those covered lines are unpaired, and
+    a balcony's outer edge is exactly where the ring runs. Building a railing
+    there would put a 1.0 m box INSIDE the ring's full-height box — coincident
+    faces, which is the z-fighting that the black-pockets investigation spent
+    days on. Touching boxes are fine; coincident ones are not.
+
+    So an unpaired line with a near-parallel paired wall running alongside it
+    is treated as already built and skipped. It costs a few real railings on
+    drawings where the ring happens to trace the balcony edge, and that is the
+    right trade: a missing guard is visible and fixable, z-fighting reads as a
+    rendering bug somewhere else entirely.
+
+    Returns {wall_index: thickness}. Absent means "leave it skipped".
+    """
+    if not spaces:
+        return {}
+
+    try:
+        from shapely.geometry import LineString, Polygon
+        from shapely.strtree import STRtree
+    except Exception:  # pragma: no cover - shapely is a hard dependency
+        return {}
+
+    from quantify.areas import BALCONY_WORDS, TERRACE_WORDS
+
+    guarded_words = tuple(BALCONY_WORDS) + tuple(TERRACE_WORDS)
+
+    rings = []
+    for space in spaces:
+        name = _space_name(space)
+        if not any(word in name for word in guarded_words):
+            continue
+        loop = _space_loop(space)
+        if len(loop) < 3:
+            continue
+        try:
+            poly = Polygon([(float(p[0]), float(p[1])) for p in loop])
+        except Exception:
+            continue
+        if poly.is_valid and poly.area > 0:
+            rings.append(poly.exterior)
+
+    if not rings:
+        return {}
+
+    # Paired walls are the "already built" set. The perimeter ring is among
+    # them (it is emitted paired=True precisely so it gets extruded), which is
+    # what makes this check catch the coincidence case.
+    built = []
+    built_index = []
+    for index, wall in enumerate(walls):
+        if not wall.paired or wall.length <= 1e-6:
+            continue
+        built.append(LineString([(wall.ax, wall.ay), (wall.bx, wall.by)]))
+        built_index.append(index)
+    built_tree = STRtree(built) if built else None
+
+    edges: dict[int, float] = {}
+    for index, wall in enumerate(walls):
+        if wall.paired or wall.length < 0.30:
+            continue
+        line = LineString([(wall.ax, wall.ay), (wall.bx, wall.by)])
+
+        # On a guarded room's boundary? Measure the whole line, not just its
+        # midpoint: a line that clips a corner of the balcony is not its edge.
+        on_edge = any(
+            line.distance(ring) <= RAILING_EDGE_TOLERANCE
+            and ring.buffer(RAILING_EDGE_TOLERANCE).intersection(line).length
+            >= 0.60 * line.length
+            for ring in rings
+        )
+        if not on_edge:
+            continue
+
+        # Already built by something full-height running alongside it?
+        if built_tree is not None:
+            covered = False
+            for hit in built_tree.query(line.buffer(RAILING_COVERED_TOLERANCE)):
+                other = built[int(hit)]
+                if other.distance(line) > RAILING_COVERED_TOLERANCE:
+                    continue
+                # Near-parallel only. A wall meeting this one end-on at a
+                # corner is not covering it, and excluding by distance alone
+                # would drop every railing that touches a building.
+                if _near_parallel(line, other) and (
+                    other.buffer(RAILING_COVERED_TOLERANCE)
+                    .intersection(line)
+                    .length
+                    >= 0.60 * line.length
+                ):
+                    covered = True
+                    break
+            if covered:
+                continue
+
+        thickness = wall.thickness if wall.thickness > 1e-6 else RAILING_THICKNESS
+        edges[index] = thickness
+
+    return edges
+
+
+def _near_parallel(a, b, degrees: float = 12.0) -> bool:
+    """Whether two 2-point LineStrings run within `degrees` of parallel."""
+    (ax0, ay0), (ax1, ay1) = a.coords[0], a.coords[-1]
+    (bx0, by0), (bx1, by1) = b.coords[0], b.coords[-1]
+    ua = math.hypot(ax1 - ax0, ay1 - ay0)
+    ub = math.hypot(bx1 - bx0, by1 - by0)
+    if ua < 1e-9 or ub < 1e-9:
+        return False
+    dot = ((ax1 - ax0) * (bx1 - bx0) + (ay1 - ay0) * (by1 - by0)) / (ua * ub)
+    # abs: faces are traced in arbitrary directions, same as in pair.py.
+    return abs(dot) >= math.cos(math.radians(degrees))
+
+
 def build_walls(
     mesh: MeshBuilder,
     walls,
@@ -180,13 +372,29 @@ def build_walls(
     lintels = 0
     aprons = 0
     skipped = 0
+    railings = 0
 
     sides = (side_classes(walls, spaces)
              if spaces is not None and internal_mesh is not None
              and external_mesh is not None else {})
 
+    # An unpaired line on a named balcony's edge is that balcony's guard. It
+    # is built here rather than left out, at guard height rather than at
+    # ceiling height — the two wrong answers this sits between. See
+    # `_railing_edges` for why the room's NAME is the signal and what stops it
+    # doubling up on the perimeter ring.
+    guards = _railing_edges(walls, spaces)
+
     for index, wall in enumerate(walls):
         if not wall.paired:
+            if index in guards:
+                mesh.add_box_from_segment(
+                    wall.ax, wall.ay, wall.bx, wall.by,
+                    guards[index], RAILING_HEIGHT, base_z=base_z,
+                )
+                railings += 1
+                pieces += 1
+                continue
             skipped += 1
             continue
 
@@ -262,6 +470,12 @@ def build_walls(
         "lintels": lintels,
         "aprons": aprons,
         "skippedUnpaired": skipped,
+        # Reported separately from `pieces` on purpose. A railing is the one
+        # thing here built from a line the pairer could NOT confirm, so a
+        # reader checking a model against its drawing needs to see how many
+        # there are without digging: "3 railings" is checkable against the
+        # plan, "482 pieces" is not.
+        "railings": railings,
     }
 
 

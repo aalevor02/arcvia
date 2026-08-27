@@ -1737,6 +1737,14 @@ def _print_build(model: dict) -> None:
 
     print(f"\nWALLS    {w['total']}  ({w['paired']} paired, {w['unpaired']} unpaired)")
     print(f"         total length {w['totalLength']} m")
+    # Railings are the one thing built from a line the pairer could NOT
+    # confirm, so they are the one figure a reader should check against the
+    # drawing by eye. Printed rather than left in building.json: the recurring
+    # defect in this codebase is a finished producer with no consumer.
+    _railings = (model.get("build") or {}).get("railings") or 0
+    if _railings:
+        print(f"         {_railings} built as balcony guards at 1.0 m "
+              f"(unpaired lines on a named balcony/terrace edge)")
     if w["medianThickness"] is not None:
         print(f"         thickness: median {w['medianThickness']} m, "
               f"range {w['thicknessRange'][0]}–{w['thicknessRange'][1]} m")

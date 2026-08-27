@@ -22,7 +22,8 @@ from build.glb import MeshBuilder, write_glb  # noqa: E402
 from ingest import blocks as ingest_blocks  # noqa: E402
 from ingest.blocks import AGAINST_WALL_M, RoomLabel, wall_gap  # noqa: E402
 from build.solidify import (  # noqa: E402
-    build_room_finishes, build_room_slabs, build_slabs, build_walls,
+    PARAPET_HEIGHT, RAILING_HEIGHT, build_room_finishes, build_room_slabs,
+    build_slabs, build_walls,
 )
 from hypothesise import openings as op  # noqa: E402
 from hypothesise.pair import (  # noqa: E402
@@ -1019,6 +1020,121 @@ ok("a Water Closet floor is not pool water",
    _material_for("storey0_floor_room4_water-closet") == 0)
 ok("walls and floors keep the poche material (0)",
    _material_for("storey0_walls") == 0 and _material_for("storey0_floors") == 0)
+
+
+# ── A balcony's edge is built to guard height, not skipped and not to ceiling ──
+#
+# The two wrong answers this sits between are both already recorded in the
+# tree: extrude an unpaired line to ceiling height and the balcony becomes a
+# sealed box that blacks out the rooms behind it; skip it and the model has a
+# slab three metres up with nothing at the edge. The engine did the second for
+# as long as it has existed, which is why these assertions are new rather than
+# a regression net.
+#
+# Every case below turns on the ROOM NAME, because that is the only signal
+# that separates a balcony guard from a wall the architect drew with one line.
+# Assert the negative cases as hard as the positive one: a rule that fires on
+# everything is not a rule.
+
+class _Space:
+    """Minimal stand-in — the engine passes objects here, areas.py passes dicts."""
+
+    def __init__(self, name, loop):
+        self.name = name
+        self.loop = loop
+
+
+def _balcony_model(room_name, *, extra_walls=()):
+    """A 4 x 2 m room with three paired walls and one unpaired outer edge."""
+    t = 0.23
+    walls = [
+        Wall(0.0, 0.0, 0.0, 2.0, t, True, 0.9),      # left
+        Wall(4.0, 0.0, 4.0, 2.0, t, True, 0.9),      # right
+        Wall(0.0, 0.0, 4.0, 0.0, t, True, 0.9),      # back (against the house)
+        Wall(0.0, 2.0, 4.0, 2.0, 0.115, False, 0.4),  # the open edge — unpaired
+        *extra_walls,
+    ]
+    loop = [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)]
+    return walls, [_Space(room_name, loop)]
+
+
+def _built(room_name, **kw):
+    walls, spaces = _balcony_model(room_name, **kw)
+    mesh = MeshBuilder()
+    stats = build_walls(mesh, walls, [], height=3.0, spaces=spaces)
+    return mesh, stats
+
+
+_bal_mesh, _bal = _built("BALCONY")
+ok("a balcony's unpaired edge is built, not skipped",
+   _bal["railings"] == 1, f"railings={_bal['railings']}")
+ok("and it is not counted as skipped as well",
+   _bal["skippedUnpaired"] == 0, f"skipped={_bal['skippedUnpaired']}")
+# Measured on a model whose ONLY wall is the balcony edge. Asserting against
+# the full model's mesh reads 3.0 and says nothing: the three paired walls are
+# in there too, at ceiling height, exactly as they should be.
+_solo_mesh = MeshBuilder()
+_solo = build_walls(
+    _solo_mesh,
+    [Wall(0.0, 2.0, 4.0, 2.0, 0.115, False, 0.4)], [],
+    height=3.0,
+    spaces=[_Space("BALCONY", [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)])],
+)
+ok("it stops at guard height, not ceiling height",
+   _solo["railings"] == 1
+   and abs(max(p[1] for p in _solo_mesh.positions) - 1.0) < 1e-9,
+   f"top={max(p[1] for p in _solo_mesh.positions)}")
+ok("and it starts at the slab, not below it",
+   abs(min(p[1] for p in _solo_mesh.positions)) < 1e-9)
+
+# The vocabulary is quantify/areas.py's, so every RERA word it lists works —
+# and a room the architect did not name a balcony gets nothing.
+for _word in ("VERANDAH", "Sit-Out", "open terrace", "DECK"):
+    _, _s = _built(_word)
+    ok(f"'{_word}' reads as a guarded edge", _s["railings"] == 1)
+
+_, _bed = _built("BED ROOM")
+ok("a bedroom's unpaired line is still skipped — the name is the signal",
+   _bed["railings"] == 0 and _bed["skippedUnpaired"] == 1,
+   f"railings={_bed['railings']} skipped={_bed['skippedUnpaired']}")
+
+_, _unnamed = _built("")
+ok("an unnamed room gets no railing — it does not guess",
+   _unnamed["railings"] == 0 and _unnamed["skippedUnpaired"] == 1)
+
+# A drawing with no spaces at all must be bit-identical to the old behaviour.
+_nospace_walls, _ = _balcony_model("BALCONY")
+_nospace = build_walls(MeshBuilder(), _nospace_walls, [], height=3.0, spaces=None)
+ok("with no spaces the result is exactly what it was before",
+   _nospace["railings"] == 0 and _nospace["skippedUnpaired"] == 1)
+
+# ── The guard that matters most: never build inside the perimeter ring ─────
+# 91% of the derived ring lies on top of linework the architect drew, and a
+# balcony's outer edge is exactly where the ring runs. A 1.0 m box inside the
+# ring's full-height box is COINCIDENT, which is the z-fighting the
+# black-pockets investigation spent days on. Touching boxes are fine.
+_covered = Wall(0.0, 2.05, 4.0, 2.05, 0.23, True, 0.5, layer="<derived:perimeter>")
+_, _ring = _built("BALCONY", extra_walls=(_covered,))
+ok("an edge the perimeter ring already covers is left alone",
+   _ring["railings"] == 0 and _ring["skippedUnpaired"] == 1,
+   f"railings={_ring['railings']}")
+
+# ...but a paired wall meeting it END-ON at a corner is not covering it.
+# Excluding by distance alone would drop every railing that touches a building.
+_corner = Wall(4.0, 2.0, 4.0, 4.0, 0.23, True, 0.9)
+_, _touch = _built("BALCONY", extra_walls=(_corner,))
+ok("a wall meeting the edge end-on does not count as covering it",
+   _touch["railings"] == 1, f"railings={_touch['railings']}")
+
+# A line crossing the middle of the balcony is not its edge.
+_through = Wall(2.0, 0.4, 2.0, 1.6, 0.115, False, 0.3)
+_, _mid = _built("BALCONY", extra_walls=(_through,))
+ok("a line through the middle of a balcony is not its guard",
+   _mid["railings"] == 1 and _mid["skippedUnpaired"] == 1,
+   f"railings={_mid['railings']} skipped={_mid['skippedUnpaired']}")
+
+ok("the engine and the studio agree on guard height",
+   RAILING_HEIGHT == 1.0 == PARAPET_HEIGHT)
 
 
 print(f"\n{passed} passed, {failed} failed")
