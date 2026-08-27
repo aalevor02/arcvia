@@ -42,6 +42,18 @@ const ok = (label, cond, extra = '') => {
   }
 }
 
+/**
+ * The SCRIPT warning specifically, not "any line containing 'not found'".
+ *
+ * This started as a bare /not found/ over the whole of stderr, which was too
+ * loose the moment the module grew a second boot warning: renderQueue now also
+ * reports an unreachable Blender BINARY, whose message contains the same two
+ * words, and all three "resolves from X" assertions failed on a warning that
+ * had nothing to do with the script path. A test that matches more than it
+ * means passes for the wrong reason until it fails for the wrong reason.
+ */
+const SCRIPT_WARNING = /BLENDER_SCRIPT not found/
+
 /** Import the queue from `cwd`, with an optional BLENDER_SCRIPT override, and
  *  return whatever it wrote to stderr at boot (the missing-script warning). */
 async function bootFrom(cwd, env = {}) {
@@ -56,22 +68,23 @@ async function bootFrom(cwd, env = {}) {
 // From the repo root — the case that was broken.
 const fromRoot = await bootFrom(REPO_ROOT)
 ok('resolves from the repo root with no missing-script warning',
-   !/not found/.test(fromRoot), fromRoot.split('\n')[0]?.slice(0, 100))
+   !SCRIPT_WARNING.test(fromRoot), fromRoot.split('\n')[0]?.slice(0, 100))
 
 // From services/api — the npm-script case.
 const fromApi = await bootFrom(API_DIR)
 ok('resolves from services/api with no missing-script warning',
-   !/not found/.test(fromApi), fromApi.split('\n')[0]?.slice(0, 100))
+   !SCRIPT_WARNING.test(fromApi), fromApi.split('\n')[0]?.slice(0, 100))
 
 // From a deep subdirectory — proves it is not accidentally cwd-relative.
 const fromDeep = await bootFrom(HERE)
-ok('resolves from the test directory too', !/not found/.test(fromDeep))
+ok('resolves from the test directory too', !SCRIPT_WARNING.test(fromDeep))
 
 // And the warning DOES fire for a genuinely wrong explicit override, so the
 // check is not simply never triggering.
 const bad = await bootFrom(REPO_ROOT, { BLENDER_SCRIPT: './does/not/exist/render.py' })
 ok('a wrong explicit override is reported loudly at boot',
-   /not found/.test(bad), bad.split('\n').find((l) => /not found/.test(l))?.slice(0, 100))
+   SCRIPT_WARNING.test(bad),
+   bad.split('\n').find((l) => SCRIPT_WARNING.test(l))?.slice(0, 100))
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

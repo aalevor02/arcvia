@@ -51,6 +51,66 @@ if (MODE === 'local' && !existsSync(SCRIPT)) {
 }
 
 /**
+ * Where `blender` would actually resolve from, without spawning it.
+ *
+ * An absolute or relative path is answered by the filesystem. A bare name is a
+ * PATH lookup, so this walks PATH the way the OS will — including PATHEXT on
+ * Windows, where `blender` on disk is `blender.exe` and an `existsSync` of the
+ * bare name is always false.
+ *
+ * Deliberately does NOT spawn `blender --version`. That is the more thorough
+ * check and it costs a Blender start-up on every boot, on a box where Blender
+ * start-up under memory pressure is measured in seconds — a boot probe that
+ * sometimes hangs is worse than the gap it closes.
+ */
+function resolveExecutable(name) {
+  if (name.includes('/') || name.includes('\\')) {
+    return existsSync(name) ? name : null
+  }
+  const dirs = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':')
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
+      : ['']
+  for (const dir of dirs) {
+    if (!dir) continue
+    for (const ext of ['', ...exts]) {
+      const candidate = resolve(dir, name + ext)
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  return null
+}
+
+// ── The same warning for the BINARY, which is the half that was missing ─────
+// The script had a boot warning and Blender itself did not, so an unreachable
+// Blender stayed silent until the first job died — and it died with `spawn
+// blender ENOENT`, a Node errno that names neither the setting to change nor
+// the file to install.
+//
+// Measured, not hypothetical: an API started WITHOUT `--env-file-if-exists`
+// never read `.env`, so `BLENDER_PATH` was unset and `BLENDER` fell back to the
+// bare name. A 360 panorama was accepted, charged 8 credits, spawned nothing
+// and failed. The refund settled correctly, so the user lost nothing — but the
+// operator's only signal was one dead job, and the next one would look the same.
+//
+// This is the same shape as the detector's `FLOORPLAN_MODEL`: a service that
+// answers normally while a capability it needs is quietly absent. The fix there
+// was to name the missing value at start-up, and it is the fix here.
+if (MODE === 'local' && !resolveExecutable(BLENDER)) {
+  console.warn(
+    `[renderQueue] Blender not found — \`${BLENDER}\`` +
+      (process.env.BLENDER_PATH
+        ? ' (from BLENDER_PATH).'
+        : ' resolved through PATH, because BLENDER_PATH is not set.') +
+      ' EVERY local render will be accepted, charged and then fail with' +
+      ' "spawn ENOENT" until this is fixed (the charge is refunded).' +
+      ' Set BLENDER_PATH in .env, and start the API so that .env is READ:' +
+      ' `npm run dev:api`, not a bare `node src/server.js`.',
+  )
+}
+
+/**
  * Two lanes, so a bake cannot starve a preview.
  *
  * With one global slot, a 45-minute CPU bake at the head of the queue held a
