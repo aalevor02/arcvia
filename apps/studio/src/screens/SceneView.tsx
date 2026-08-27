@@ -38,6 +38,7 @@ import OptionsPanel from '../components/OptionsPanel'
 import CommentsPanel from '../components/CommentsPanel'
 import SunPanel, { type Site } from '../components/SunPanel'
 import DeckDesignPanel from '../components/DeckDesignPanel'
+import type { RoomAssignment } from '../plan/roomAssignment'
 import PanoramaViewer from '../components/PanoramaViewer'
 import type { SceneOptions } from '../publish/options'
 import { upsertHotspot, type Presentation } from '../plan/presentation'
@@ -166,6 +167,12 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
   const [floorIndex, setFloorIndex] = useState(0)
   /** The client deck this scene was built from — the design reader's source. */
   const [deckUrl, setDeckUrl] = useState<string | null>(null)
+  /**
+   * How every render past the first was matched to a room — resolved ones too,
+   * because the panel needs each assignment's POSITION to find the design it
+   * belongs to, and a pre-filtered list throws that away.
+   */
+  const [designQuestions, setDesignQuestions] = useState<RoomAssignment[]>([])
   /**
    * The design the model wears, from the deck's renders.
    *
@@ -425,7 +432,14 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
      */
     const dress = (root: THREE.Object3D) => {
       if (!design?.length) return
-      applyDesignsToModel(root, design)
+      const applied = applyDesignsToModel(root, design)
+      // Returning the previous array unchanged is deliberate: this runs inside
+      // the rebuild effect, and handing back a fresh array every time would
+      // re-render, re-dress, and loop.
+      setDesignQuestions((previous) => {
+        const next = applied.assignments ?? []
+        return JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+      })
       viewer.requestRender()
       void upgradeSurfaces(() => viewer.requestRender()).then(() => {
         if (design?.length) {
@@ -1136,6 +1150,7 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
 
         <DeckDesignPanel
           designs={design ?? []}
+          assignments={designQuestions}
           onApplyDesign={applyDesign}
           deckUrl={deckUrl}
           onDeckStored={(next) => {

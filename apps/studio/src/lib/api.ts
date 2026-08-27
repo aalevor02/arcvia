@@ -403,6 +403,44 @@ export const readDocument = (url: string) =>
  * module load. One definition, shared by the panel and the editor's
  * read-on-open, so the two cannot drift apart on the endpoint or its body.
  */
+/** What the vision model proposes, or null when it will not say. */
+export interface RoomProposal {
+  /** Zero-based position in the rooms array that was sent. */
+  index: number
+  name: string | null
+  confidence: number
+  /** Below the service's bar — show it, but do not dress it as certain. */
+  weak: boolean
+  because: string
+  model: string
+}
+
+/**
+ * Ask which room a render is of, when its caption could not say.
+ *
+ * Costs a vision round trip, so the panel calls it per render on demand rather
+ * than for a whole deck. `rooms` must be the SAME array the caller is showing:
+ * the proposal comes back as an index into it, and a re-detected list could
+ * renumber, which would make a correct answer point at the wrong room.
+ */
+export const assignRoom = (input: {
+  planUrl: string
+  renderUrl: string
+  renderPage?: number
+  renderIndex?: number
+  rooms: unknown[]
+}) =>
+  request<{ proposal: RoomProposal | null; model: string | null }>('/detect/assign', {
+    method: 'POST',
+    body: {
+      planUrl: input.planUrl,
+      renderUrl: input.renderUrl,
+      renderPage: input.renderPage ?? 0,
+      renderIndex: input.renderIndex ?? 0,
+      rooms: input.rooms,
+    },
+  })
+
 export const readDesign = (url: string, page = 0, index = 0, room?: string | null) =>
   request<DesignSpec>('/detect/document/design', {
     method: 'POST',

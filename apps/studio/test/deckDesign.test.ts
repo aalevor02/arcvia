@@ -21,6 +21,9 @@ import {
   type DesignSpec,
 } from '../src/plan/deckDesign'
 import { surface } from '../src/plan/materials'
+import { buildFloorGeometry } from '../src/plan/buildGeometry'
+import { addWall, activeFloor, emptyPlan } from '../src/plan/planStore'
+import { detectRooms } from '../src/plan/rooms'
 
 let passed = 0
 let failed = 0
@@ -198,6 +201,194 @@ console.log('\n-- room-specific dressing --')
     bathroom.material === bedroom.material)
   check('site meshes remain outside interior room dressing', lawn.material === lawnBefore)
 }
+
+// -- a bare caption must not spread across every room it fits ----------------
+// roomTokens splits 'master-bedroom' into ['master','bedroom'], so a render
+// captioned merely "Bedroom" satisfied the old subset test against BOTH the
+// guest bedroom and the master. The guest's finish landed on the master
+// silently; the only symptom was a client saying the walkthrough looked wrong.
+{
+  const root = new THREE.Group()
+  const mesh = (name: string) => {
+    const value = new THREE.Mesh(new THREE.BoxGeometry(), surface('floor'))
+    value.name = name
+    root.add(value)
+    return value
+  }
+  const opening = mesh('storey0_floor_room1_kitchen')
+  const guest = mesh('storey0_floor_room3_bedroom')
+  const master = mesh('storey0_floor_room8_master-bedroom')
+
+  const fallback = spec({ room: 'kitchen', source: { page: 1, index: 0, room: 'Kitchen' } })
+  const guestLook = spec({
+    room: 'bedroom',
+    floor: { material: 'marble', colour: '#ddeeff' },
+    source: { page: 2, index: 0, room: 'Bedroom' },
+  })
+  const applied = applyDesignsToModel(root, [fallback, guestLook])
+
+  check('a bare "Bedroom" caption dresses the guest bedroom',
+    guest.material !== opening.material)
+  check('and leaves the MASTER bedroom alone', master.material === opening.material,
+    'the guest render repainted the master')
+  check('the assignment is reported as automatic, with its room',
+    applied.assignments?.[0].status === 'auto' && applied.assignments?.[0].room === 'bedroom',
+    JSON.stringify(applied.assignments))
+}
+
+// -- a genuinely ambiguous caption paints nothing and asks --------------------
+{
+  const root = new THREE.Group()
+  const mesh = (name: string) => {
+    const value = new THREE.Mesh(new THREE.BoxGeometry(), surface('floor'))
+    value.name = name
+    root.add(value)
+    return value
+  }
+  const opening = mesh('storey0_floor_room1_kitchen')
+  const first = mesh('storey0_floor_room3_bed-1-room')
+  const second = mesh('storey0_floor_room4_bed-2-room')
+
+  const fallback = spec({ room: 'kitchen', source: { page: 1, index: 0, room: 'Kitchen' } })
+  const vague = spec({
+    room: 'bed',
+    floor: { material: 'marble', colour: '#ddeeff' },
+    source: { page: 2, index: 0, room: 'Bed' },
+  })
+  const applied = applyDesignsToModel(root, [fallback, vague])
+
+  check('an ambiguous caption paints NEITHER candidate',
+    first.material === opening.material && second.material === opening.material)
+  check('and comes back as a question naming both rooms',
+    applied.assignments?.[0].status === 'confirm' &&
+      applied.assignments?.[0].candidates.length === 2,
+    JSON.stringify(applied.assignments))
+}
+
+
+// -- a confirmed room index outranks every caption heuristic ------------------
+// The case a caption can NEVER solve: three rooms all labelled BEDROOM, or a
+// room the drawing never labelled at all. solidify.py numbers the meshes for
+// exactly this reason, and a confirmation addresses that number.
+{
+  const root = new THREE.Group()
+  const mesh = (name: string) => {
+    const value = new THREE.Mesh(new THREE.BoxGeometry(), surface('floor'))
+    value.name = name
+    root.add(value)
+    return value
+  }
+  const opening = mesh('storey0_floor_room1_kitchen')
+  const first = mesh('storey0_floor_room3_bedroom')
+  const second = mesh('storey0_floor_room4_bedroom')
+  const third = mesh('storey0_floor_room5_bedroom')
+
+  const fallback = spec({ room: 'kitchen', source: { page: 1, index: 0, room: 'Kitchen' } })
+  const confirmed = spec({
+    room: 'bedroom',
+    floor: { material: 'marble', colour: '#ddeeff' },
+    source: { page: 2, index: 0, room: 'Bedroom', roomIndex: 4 },
+  })
+  const applied = applyDesignsToModel(root, [fallback, confirmed])
+
+  check('a confirmed index dresses exactly the room that was confirmed',
+    second.material !== opening.material)
+  check('and leaves the two identically-named bedrooms alone',
+    first.material === opening.material && third.material === opening.material,
+    'a confirmation leaked onto a same-named room')
+  check('the confirmation is reported as resolved, not as a question',
+    applied.assignments?.[0].status === 'auto' &&
+      applied.assignments?.[0].reason.includes('room 4'),
+    JSON.stringify(applied.assignments))
+}
+
+// -- a confirmation answers a caption the matcher had refused ----------------
+{
+  const root = new THREE.Group()
+  const mesh = (name: string) => {
+    const value = new THREE.Mesh(new THREE.BoxGeometry(), surface('floor'))
+    value.name = name
+    root.add(value)
+    return value
+  }
+  const opening = mesh('storey0_floor_room1_kitchen')
+  const target = mesh('storey0_floor_room6_unlabelled')
+
+  const fallback = spec({ room: 'kitchen', source: { page: 1, index: 0, room: 'Kitchen' } })
+  // "Guest Suite" matches nothing in this plan; unconfirmed it stays a question.
+  const unmatched = spec({
+    room: 'guest suite',
+    floor: { material: 'marble', colour: '#ddeeff' },
+    source: { page: 2, index: 0, room: 'Guest Suite' },
+  })
+  const before = applyDesignsToModel(root, [fallback, unmatched])
+  check('an unmatched caption paints nothing on its own',
+    target.material === opening.material &&
+      before.assignments?.[0].status === 'unmatched',
+    JSON.stringify(before.assignments))
+
+  const answered = spec({
+    ...unmatched,
+    source: { page: 2, index: 0, room: 'Guest Suite', roomIndex: 6 },
+  })
+  applyDesignsToModel(root, [fallback, answered])
+  check('and the same render lands once a person says which room it is',
+    target.material !== opening.material)
+}
+
+
+// -- per-room dressing must reach STUDIO-drawn geometry, not just a CAD import --
+// The studio named its meshes `slab:<room.id>` while the deck matcher reads
+// `{kind}_room{n}_{slug}`, so every render past the first silently did nothing
+// on a plan drawn here and the whole model wore the first render's look. Two
+// naming schemes for one idea; this asserts they have converged.
+{
+  // A single closed room.
+  let plan = emptyPlan()
+  plan = addWall(plan, { x: 0, y: 0 }, { x: 4, y: 0 })
+  plan = addWall(plan, { x: 4, y: 0 }, { x: 4, y: 3 })
+  plan = addWall(plan, { x: 4, y: 3 }, { x: 0, y: 3 })
+  plan = addWall(plan, { x: 0, y: 3 }, { x: 0, y: 0 })
+
+  const floor = activeFloor(plan)
+  const detected = detectRooms(floor)
+  check('the fixture encloses one room', detected.length === 1, `${detected.length}`)
+
+  // Name it the way a drawing would.
+  floor.roomNames[detected[0].id] = 'Master Bedroom'
+
+  const built = buildFloorGeometry(floor, { ceilings: true })
+  const slab = built.children.find((c) => c.name.startsWith('floor_room'))
+  check('a studio slab is named like a reconstruction floor',
+    slab?.name === 'floor_room1_master-bedroom', String(slab?.name))
+  check('and keeps the derived room id where a name cannot carry it',
+    slab?.userData.roomId === detected[0].id, JSON.stringify(slab?.userData))
+
+  const ceiling = built.children.find((c) => c.name.startsWith('ceiling_room'))
+  check('the ceiling is named to match', ceiling?.name === 'ceiling_room1_master-bedroom',
+    String(ceiling?.name))
+
+  // The point of all of it: a caption now addresses a studio-drawn room.
+  const opening = new THREE.Mesh(new THREE.BoxGeometry(), surface('floor'))
+  opening.name = 'floor_room2_kitchen'
+  built.add(opening)
+
+  const fallback = spec({ room: 'kitchen', source: { page: 1, index: 0, room: 'Kitchen' } })
+  const bedroomLook = spec({
+    room: 'master bedroom',
+    floor: { material: 'marble', colour: '#ddeeff' },
+    source: { page: 2, index: 0, room: 'Master Bedroom' },
+  })
+  const applied = applyDesignsToModel(built, [fallback, bedroomLook])
+
+  check('a render now dresses the studio-drawn room it names',
+    (slab as THREE.Mesh).material !== (opening as THREE.Mesh).material)
+  check('and the assignment resolves rather than reporting no such room',
+    applied.assignments?.[0].status === 'auto' &&
+      applied.assignments?.[0].room === 'master-bedroom',
+    JSON.stringify(applied.assignments))
+}
+
 
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

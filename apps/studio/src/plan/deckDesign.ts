@@ -19,6 +19,7 @@
  */
 
 import * as THREE from 'three'
+import { assignDesigns, confirmedAssignment, type RoomAssignment } from './roomAssignment'
 import { surface } from './materials'
 import type { SurfaceKind } from './materials'
 import type { FloorFinish } from './types'
@@ -52,6 +53,16 @@ export interface DesignSource {
   index: number
   room?: string | null
   auto?: boolean
+  /**
+   * The room this render was CONFIRMED to be of, as the reconstruction numbers
+   * its spaces (`floor_room3_...` is 3). Set when a person accepted a proposal
+   * from the vision model, or picked the room themselves.
+   *
+   * It outranks every caption heuristic because it is not a heuristic: it is
+   * somebody's answer. It also addresses the two rooms a caption cannot -- one
+   * the drawing never labelled, and one of three all labelled BEDROOM.
+   */
+  roomIndex?: number | null
 }
 
 export interface DesignSpec {
@@ -220,6 +231,13 @@ export interface AppliedDesign {
   floors: number
   walls: number
   ceilings: number
+  /**
+   * How each render past the first was matched to a room. Present so a caller
+   * can SHOW the ones that did not resolve: a room wearing the fallback
+   * because nothing matched looks identical to a room deliberately dressed
+   * that way, and the difference is the whole question.
+   */
+  assignments?: RoomAssignment[]
 }
 
 /**
@@ -267,17 +285,55 @@ export function applyDesignToModel(root: THREE.Object3D, spec: DesignSpec): Appl
  * The structural `storeyN_walls` mesh keeps the fallback material underneath;
  * its room skins are what stop one paint colour at the doorway.
  */
+/** Every distinct room slug the model actually contains. */
+function roomsIn(root: THREE.Object3D): string[] {
+  const found = new Set<string>()
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || !object.name) return
+    for (const kind of ['floor', 'wall', 'ceiling'] as const) {
+      const slug = roomSurfaceSlug(object.name, kind)
+      if (slug) found.add(slug)
+    }
+  })
+  return [...found]
+}
+
 export function applyDesignsToModel(
   root: THREE.Object3D,
   stored: StoredDesign,
 ): AppliedDesign {
   const designs = designsOf(stored)
-  if (designs.length === 0) return { floors: 0, walls: 0, ceilings: 0 }
+  if (designs.length === 0) return { floors: 0, walls: 0, ceilings: 0, assignments: [] }
 
+  // The first render stays the fallback: a deck's opening view sets the
+  // general look, and a room nobody photographed is better served by the
+  // scheme than by bare grey. What changed is that every OTHER render must now
+  // earn its room, and anything it cannot earn is reported rather than guessed.
   const applied = applyDesignToModel(root, designs[0])
-  for (const spec of designs.slice(1)) {
-    const label = designRoomName(spec)
-    if (!label) continue
+  const rest = designs.slice(1)
+  const rooms = roomsIn(root)
+  const assignments = assignDesigns(rest.map(designRoomName), rooms)
+  // A confirmed index replaces whatever the caption pass concluded, including
+  // a 'confirm' it could not resolve — answering the question is what the
+  // confirmation IS.
+  rest.forEach((spec, index) => {
+    const confirmed = spec.source?.roomIndex
+    if (confirmed === undefined || confirmed === null) return
+    assignments[index] = confirmedAssignment(designRoomName(spec), confirmed)
+  })
+  applied.assignments = assignments
+
+  for (const [index, spec] of rest.entries()) {
+    const assignment = assignments[index]
+    // Only an unambiguous room is painted. A 'confirm' leaves the room on the
+    // fallback and travels back to the caller as a question.
+    if (assignment.status !== 'auto') continue
+    const confirmed = spec.source?.roomIndex
+    const target = assignment.room
+    if (confirmed === undefined || confirmed === null) {
+      if (!target) continue
+    }
     const floor = spec.floor ? floorMaterial(spec) : null
     const wall = spec.walls ? tinted('wall', spec.walls.colour, 0.65) : null
     const ceiling = spec.ceiling ? tinted('ceiling', spec.ceiling.colour, 0.5) : null
@@ -287,11 +343,27 @@ export function applyDesignsToModel(
       const floorSlug = roomSurfaceSlug(object.name, 'floor')
       const wallSlug = roomSurfaceSlug(object.name, 'wall')
       const ceilingSlug = roomSurfaceSlug(object.name, 'ceiling')
+      // Compared against the RESOLVED room rather than re-running the caption
+      // match per mesh. Re-matching here is what let one caption spread across
+      // every room it happened to fit.
       // An absent surface means the reader could not identify it. Preserve the
       // fallback rather than converting uncertainty into a guessed material.
-      if (floor && floorSlug && roomNameMatches(label, floorSlug)) mesh.material = floor
-      else if (wall && wallSlug && roomNameMatches(label, wallSlug)) mesh.material = wall
-      else if (ceiling && ceilingSlug && roomNameMatches(label, ceilingSlug)) {
+      // A confirmed index is compared against the mesh's own number; a caption
+      // match against the slug it resolved to. Never both, and never the
+      // caption again once somebody has answered.
+      const hits = (
+        surfaceSlug: string | null,
+        surfaceIndex: number | null,
+      ): boolean =>
+        confirmed === undefined || confirmed === null
+          ? surfaceSlug !== null && surfaceSlug === target
+          : surfaceIndex === confirmed
+
+      if (floor && hits(floorSlug, roomSurfaceIndex(object.name, 'floor'))) {
+        mesh.material = floor
+      } else if (wall && hits(wallSlug, roomSurfaceIndex(object.name, 'wall'))) {
+        mesh.material = wall
+      } else if (ceiling && hits(ceilingSlug, roomSurfaceIndex(object.name, 'ceiling'))) {
         mesh.material = ceiling
       }
     })
@@ -307,6 +379,22 @@ function floorMaterial(spec: DesignSpec): THREE.MeshStandardMaterial {
 /** Extract an addressable indoor room surface, never lawn/paving/water. */
 function roomSurfaceSlug(name: string, kind: 'floor' | 'wall' | 'ceiling'): string | null {
   return new RegExp(`(?:^|_)${kind}_room\\d+_([^:]+)$`, 'i').exec(name)?.[1] ?? null
+}
+
+/**
+ * The room's NUMBER, which the slug alone cannot supply.
+ *
+ * `floor_room3_master-bedroom` carries two identities and the matcher was only
+ * ever reading one. solidify.py puts the index there precisely because "the
+ * numeric index is unambiguous even when a drawing contains three rooms all
+ * labelled BEDROOM" - and those three are exactly the rooms a caption can never
+ * separate. Once a person (or the vision model, confirmed by a person) has said
+ * WHICH room, the index is how that decision is addressed: exact, stable, and
+ * available even for a room the drawing never labelled.
+ */
+function roomSurfaceIndex(name: string, kind: 'floor' | 'wall' | 'ceiling'): number | null {
+  const found = new RegExp(`(?:^|_)${kind}_room(\\d+)_`, 'i').exec(name)?.[1]
+  return found === undefined ? null : Number(found)
 }
 
 function compactRoom(value: string): string {

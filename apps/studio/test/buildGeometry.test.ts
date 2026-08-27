@@ -32,16 +32,16 @@ const floor = activeFloor(room())
 const group = buildFloorGeometry(floor)
 
 const walls = group.children.filter((c) => c.name.startsWith('wall:'))
-const slabs = group.children.filter((c) => c.name.startsWith('slab:'))
+const slabs = group.children.filter((c) => c.name.startsWith('floor_room'))
 
 // ---- Composition -----------------------------------------------------------
 check('one mesh per wall', walls.length === 4, `${walls.length}`)
 check('one slab per detected room', slabs.length === 1, `${slabs.length}`)
-check('no ceilings unless asked', group.children.every((c) => !c.name.startsWith('ceiling:')))
+check('no ceilings unless asked', group.children.every((c) => !c.name.startsWith('ceiling_room')))
 check(
   'ceilings appear when asked',
   buildFloorGeometry(floor, { ceilings: true }).children.some((c) =>
-    c.name.startsWith('ceiling:'),
+    c.name.startsWith('ceiling_room'),
   ),
 )
 

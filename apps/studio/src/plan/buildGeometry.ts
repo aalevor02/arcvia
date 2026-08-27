@@ -47,6 +47,22 @@ export interface BuildOptions {
 const SKIRTING_HEIGHT = 0.1
 const SKIRTING_PROUD = 0.018
 
+/**
+ * A room name as a mesh-name slug, matching solidify.py's rule so the two
+ * builders produce the same token for the same room name.
+ */
+function meshSlug(name: string): string {
+  return (
+    name
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'room'
+  )
+}
+
 export function buildFloorGeometry(
   floor: Floor,
   options: BuildOptions = {},
@@ -150,7 +166,29 @@ export function buildFloorGeometry(
   // ---- Floor slabs ---------------------------------------------------------
   // One per detected room rather than a single big rectangle, so a plan with a
   // courtyard or an L-shaped footprint does not get floor where there is none.
-  for (const room of detectRooms(floor)) {
+  // Named the way a reconstruction names its rooms: `floor_room3_bedroom`.
+  //
+  // The studio used to name these `slab:<room.id>`, and the deck-design matcher
+  // reads `{kind}_room{n}_{slug}` -- so per-room dressing worked on an imported
+  // CAD model and silently did nothing on a plan drawn here, leaving the whole
+  // model wearing the first render's look. Two schemes for the same idea is one
+  // too many; this is the one that already had consumers.
+  //
+  // The id is not lost, it moves to userData: it contains commas and colons,
+  // and the slug in a mesh name has to run to the end of the string.
+  //
+  // Numbered by area rank, matching `displayName`, so the number beside a room
+  // in the editor is the number in its mesh.
+  const detected = detectRooms(floor)
+  const rank = new Map(
+    [...detected]
+      .sort((a, b) => b.area - a.area)
+      .map((room, index) => [room.id, index + 1]),
+  )
+
+  for (const room of detected) {
+    const roomNumber = rank.get(room.id) ?? 0
+    const roomSlug = meshSlug(floor.roomNames?.[room.id] ?? `room-${roomNumber}`)
     const shape = new THREE.Shape()
     room.polygon.forEach((p, i) => {
       if (i === 0) shape.moveTo(p.x, p.y)
@@ -160,14 +198,16 @@ export function buildFloorGeometry(
 
     const slab = extrudedSlab(shape, slabThickness, slabFor(room.id))
     slab.position.y = floor.elevation - slabThickness
-    slab.name = `slab:${room.id}`
+    slab.name = `floor_room${roomNumber}_${roomSlug}`
+    slab.userData.roomId = room.id
     group.add(slab)
 
     if (ceilings) {
       const height = averageWallHeight(floor)
       const ceiling = extrudedSlab(shape, slabThickness, ceilingMaterial)
       ceiling.position.y = floor.elevation + height
-      ceiling.name = `ceiling:${room.id}`
+      ceiling.name = `ceiling_room${roomNumber}_${roomSlug}`
+      ceiling.userData.roomId = room.id
       group.add(ceiling)
     }
 
@@ -186,6 +226,9 @@ export function buildFloorGeometry(
         const mesh = new THREE.Mesh(geometry, skirtingMaterial)
         mesh.position.set(run.centre.x, floor.elevation + SKIRTING_HEIGHT / 2, -run.centre.y)
         mesh.rotation.y = run.bearing
+        // Skirting stays trim rather than a room surface: a reconstruction has
+        // no equivalent, and dressing it as a floor would run the room's
+        // flooring up the wall.
         mesh.name = `skirting:${room.id}`
         mesh.castShadow = true
         mesh.receiveShadow = true

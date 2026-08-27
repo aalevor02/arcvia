@@ -50,6 +50,7 @@ const targets = entries.length
       'test/cadPlan.test.ts',
       'test/cadReview.test.ts',
       'test/deckDesign.test.ts',
+      'test/roomAssignment.test.ts',
       'test/designFurnish.test.ts',
       'test/hubFurniture.test.ts',
       'test/modelCapture.test.ts',

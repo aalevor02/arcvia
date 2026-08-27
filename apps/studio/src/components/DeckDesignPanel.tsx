@@ -1,7 +1,11 @@
 import { useState } from 'react'
 
-import { readDocument, readDesign, uploadFloorplan, type DocumentSheet } from '../lib/api'
+import {
+  assignRoom, detectFloorplan, readDocument, readDesign, uploadFloorplan,
+  type DocumentSheet, type RoomProposal,
+} from '../lib/api'
 import { hubQueriesForSpec, type DesignSpec } from '../plan/deckDesign'
+import type { RoomAssignment } from '../plan/roomAssignment'
 
 interface Props {
   /** All room designs the scene currently wears, so each render can be marked. */
@@ -14,6 +18,14 @@ interface Props {
    * nothing ever reached the published page.
    */
   onApplyDesign(next: DesignSpec | null): void
+  /**
+   * How every render past the first was matched, in the same order. Unresolved
+   * ones are shown rather than resolved silently: a room wearing the fallback
+   * because its render was ambiguous looks exactly like a room deliberately
+   * dressed that way, and a client is the worst possible person to discover
+   * the difference.
+   */
+  assignments: RoomAssignment[]
   /** The stored deck, when the scene already remembers one. */
   deckUrl: string | null
   /** Persist a newly uploaded deck on the scene. */
@@ -42,7 +54,76 @@ interface RenderRow {
  * meshes, so bedroom timber and living-room tile can coexist at their doorway.
  * Per-room wall paint waits on the engine emitting per-room wall meshes.
  */
-export default function DeckDesignPanel({ designs, onApplyDesign, deckUrl, onDeckStored }: Props) {
+/** One render's trip through "which room is this?", per unresolved assignment. */
+interface Placing {
+  state: 'idle' | 'asking' | 'answered' | 'failed'
+  proposal?: RoomProposal | null
+  error?: string
+}
+
+export default function DeckDesignPanel({
+  designs, assignments, onApplyDesign, deckUrl, onDeckStored,
+}: Props) {
+  const [placing, setPlacing] = useState<Record<number, Placing>>({})
+
+  /**
+   * Ask the vision model which room this render is of.
+   *
+   * Two calls: detect the plan for its rooms, then assign against them. The
+   * detector's rooms are used rather than the editor's because they are
+   * normalised to THIS image, and the model is being shown numbers drawn on
+   * that same image — editor rooms are in metres and would put the numbers in
+   * the wrong places.
+   */
+  const place = async (position: number, spec: DesignSpec) => {
+    if (!deckUrl) return
+    setPlacing((prev) => ({ ...prev, [position]: { state: 'asking' } }))
+    try {
+      const detected = await detectFloorplan(deckUrl)
+      const rooms = (detected.rooms ?? []).filter((room) => (room.kind ?? 'room') === 'room')
+      if (rooms.length === 0) {
+        setPlacing((prev) => ({
+          ...prev,
+          [position]: { state: 'failed', error: 'No rooms could be found on the plan.' },
+        }))
+        return
+      }
+      const { proposal } = await assignRoom({
+        planUrl: deckUrl,
+        renderUrl: deckUrl,
+        renderPage: spec.source?.page ?? 0,
+        renderIndex: spec.source?.index ?? 0,
+        rooms,
+      })
+      setPlacing((prev) => ({ ...prev, [position]: { state: 'answered', proposal } }))
+    } catch (error) {
+      setPlacing((prev) => ({
+        ...prev,
+        [position]: {
+          state: 'failed',
+          error: error instanceof Error ? error.message : 'That render could not be placed.',
+        },
+      }))
+    }
+  }
+
+  /**
+   * Accept a proposal by writing it as the render's caption.
+   *
+   * The caption, not an index: the room's name is what the mesh slug is built
+   * from, so once the caption says "Bedroom-3" the ordinary deterministic
+   * matcher resolves it and no part of the pipeline has to trust the model
+   * again. A proposal for a room the drawing never labelled has no name to
+   * write, which is why the button is only offered when there is one.
+   */
+  const accept = (spec: DesignSpec, proposal: RoomProposal) => {
+    if (!proposal.name) return
+    onApplyDesign({
+      ...spec,
+      source: { ...(spec.source ?? { page: 0, index: 0 }), room: proposal.name },
+    })
+  }
+
   const [url, setUrl] = useState<string | null>(deckUrl)
   const [rows, setRows] = useState<RenderRow[]>([])
   const [busy, setBusy] = useState<'upload' | 'outline' | null>(null)
@@ -138,6 +219,97 @@ export default function DeckDesignPanel({ designs, onApplyDesign, deckUrl, onDec
           </button>
         </p>
       )}
+
+      {(() => {
+        // Position matters: an assignment's index is the design it belongs to,
+        // offset by one because the first render is the fallback and is never
+        // assigned to a room.
+        const open = assignments
+          .map((assignment, position) => ({ assignment, position }))
+          .filter((entry) => entry.assignment.status !== 'auto')
+        if (open.length === 0) return null
+        return (
+          <div
+            className="note"
+            style={{
+              borderLeft: '3px solid var(--warn, #c9862b)',
+              paddingLeft: 10,
+              marginBottom: 10,
+            }}
+          >
+            <strong style={{ fontSize: 12 }}>
+              {open.length === 1
+                ? '1 render was not applied'
+                : `${open.length} renders were not applied`}
+            </strong>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11.5 }}>
+              {open.map(({ assignment, position }) => {
+                const spec = designs[position + 1]
+                const trip = placing[position] ?? { state: 'idle' as const }
+                return (
+                  <li key={`${assignment.label}-${position}`} style={{ marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600 }}>
+                      {assignment.label || 'An uncaptioned render'}
+                    </span>
+                    {' — '}
+                    {assignment.reason}
+                    {spec && deckUrl && trip.state === 'idle' && (
+                      <>
+                        {' '}
+                        <button className="btn" onClick={() => void place(position, spec)}>
+                          Find its room
+                        </button>
+                      </>
+                    )}
+                    {trip.state === 'asking' && (
+                      <span className="muted"> · looking at the plan…</span>
+                    )}
+                    {trip.state === 'failed' && (
+                      <span className="muted"> · {trip.error}</span>
+                    )}
+                    {trip.state === 'answered' && !trip.proposal && (
+                      <span className="muted">
+                        {' '}
+                        · the model could not tell which room this is
+                      </span>
+                    )}
+                    {trip.state === 'answered' && trip.proposal && (
+                      <div style={{ marginTop: 3 }}>
+                        {trip.proposal.name ? (
+                          <>
+                            Looks like <strong>{trip.proposal.name}</strong>
+                            {trip.proposal.weak ? ' (not confident)' : ''}
+                            {trip.proposal.because ? ` — ${trip.proposal.because}` : ''}{' '}
+                            <button
+                              className="btn"
+                              onClick={() => spec && accept(spec, trip.proposal!)}
+                            >
+                              Use this room
+                            </button>
+                          </>
+                        ) : (
+                          // Nothing to write as a caption, so nothing to apply.
+                          // Saying which room by position is more use than a
+                          // greyed-out button with no explanation.
+                          <span className="muted">
+                            It points at room {trip.proposal.index + 1}, which the drawing never
+                            labelled — name that room on the plan first.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="muted" style={{ fontSize: 11, marginTop: 6, marginBottom: 0 }}>
+              Those rooms keep the fallback finish until a render is matched to
+              them. “Find its room” reads the plan and this render together, and
+              costs one vision call.
+            </p>
+          </div>
+        )
+      })()}
 
       {!url && (
         <label className="btn" style={{ display: 'inline-block', marginTop: 6 }}>
