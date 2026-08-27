@@ -280,13 +280,40 @@ def describe() -> dict:
 
 
 def preprocess(image: np.ndarray) -> np.ndarray:
-    """BGR uint8 → the NCHW float tensor the net was trained on."""
+    """
+    BGR uint8 -> the NCHW float tensor the net was trained on.
+
+    The declared keys are `equivalent_mean` / `equivalent_std`, NOT `mean` /
+    `std`. The first version of this read the latter, found nothing, fell back
+    to its defaults of 0 and 1, and produced a tensor in [0,1] where the model
+    wanted [-1,1] -- a silent halving of the input range that degrades output
+    without raising anything. It looks like the model being mediocre.
+
+    That is why an unrecognised normalisation block now RAISES instead of
+    falling back. A default that silently disagrees with the artefact is worse
+    than no default: the run completes, the numbers are plausible, and nothing
+    anywhere says the input was wrong.
+    """
     import cv2  # local: this module is importable without a model present
 
     resized = cv2.resize(image, (_input_size, _input_size), interpolation=cv2.INTER_AREA)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+    # RGB, stated explicitly in the metadata, because cv2 hands out BGR and the
+    # swap is another degrade-quietly failure.
+    order = (_normalisation or {}).get("colour_order", "RGB").upper()
+    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) if order == "RGB" else resized
+    rgb = rgb.astype(np.float32) / 255.0
+
     if _normalisation:
-        mean = np.array(_normalisation.get("mean", [0, 0, 0]), np.float32)
-        std = np.array(_normalisation.get("std", [1, 1, 1]), np.float32)
-        rgb = (rgb - mean) / std
+        mean = _normalisation.get("equivalent_mean", _normalisation.get("mean"))
+        std = _normalisation.get("equivalent_std", _normalisation.get("std"))
+        if mean is None or std is None:
+            raise SegmentUnavailable(
+                "The artefact declares a preprocess block this loader does not "
+                f"understand: {sorted(_normalisation)}. Expected equivalent_mean/"
+                "equivalent_std (or mean/std). Refusing rather than falling back, "
+                "because a wrong input range degrades the output silently."
+            )
+        rgb = (rgb - np.array(mean, np.float32)) / np.array(std, np.float32)
+
     return np.transpose(rgb, (2, 0, 1))[None, ...]

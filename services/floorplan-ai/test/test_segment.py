@@ -145,6 +145,44 @@ if Path(REAL).is_file():
               seg._extras.get("dim_multiple") == 64, str(seg._extras.get("dim_multiple")))
         check("normalisation is DECLARED, not assumed",
               seg.describe().get("normalisation") == "declared", str(seg.describe()))
+
+        # -- the input range must match the declared formula --------------------
+        # The artefact declares `x = 2 * (rgb / 255) - 1`, so a correct tensor
+        # spans [-1, 1]. The first version of preprocess() read `mean`/`std`
+        # while the artefact carries `equivalent_mean`/`equivalent_std`, found
+        # nothing, fell back to 0 and 1, and produced [0, 1] -- half the range.
+        #
+        # Nothing raised. Inference ran, the output was finite, and the class
+        # distribution was plausible: it called this plan's BEDROOM a Living
+        # Room at 33% and put Bed Room at 5%. With the range corrected the same
+        # image gives Bed Room 26% and Living Room 13%, which matches the
+        # drawing. A silently halved input is a wrong answer wearing a
+        # confident face, and only ground truth exposes it.
+        import numpy as _np  # noqa: PLC0415
+
+        probe = _np.full((64, 64, 3), 255, dtype=_np.uint8)
+        white = seg.preprocess(probe)
+        black = seg.preprocess(_np.zeros((64, 64, 3), dtype=_np.uint8))
+        check("white maps to the top of the declared range",
+              abs(float(white.max()) - 1.0) < 1e-5, str(float(white.max())))
+        check("black maps to the bottom of it, not to zero",
+              abs(float(black.min()) + 1.0) < 1e-5, str(float(black.min())))
+        check("so the span is 2.0, not the 1.0 an identity fallback would give",
+              abs((float(white.max()) - float(black.min())) - 2.0) < 1e-5,
+              str(float(white.max()) - float(black.min())))
+
+        # A preprocess block this loader cannot read must REFUSE, because a
+        # fallback that silently disagrees with the artefact is worse than none.
+        saved = seg._normalisation
+        try:
+            seg._normalisation = {"colour_order": "RGB", "scale": "unknown-scheme"}
+            seg.preprocess(probe)
+            check("an unreadable preprocess block is refused", False, "it fell back")
+        except seg.SegmentUnavailable as reason:
+            check("an unreadable preprocess block is refused",
+                  "does not understand" in str(reason), str(reason))
+        finally:
+            seg._normalisation = saved
 else:
     print(f"  (skipped the stamped-artefact cases: {REAL} is not on this machine)")
 
