@@ -2335,3 +2335,83 @@ the product. Trap 4 already says *"verify on the right input"* about a weaker
 vision model reading floor plans as renders; this is the same error committed
 against a database instead of an image. **Before recording something as blocked,
 check what it was blocked against.**
+
+### 2026-08-28 — items 2 and 3 are run. All three are now closed.
+
+`aalev-22`, immediately after establishing that none of the three was gated on
+sign-in.
+
+**Item 2 — live post-edit render comparison: PASSES, and it is two-sided.**
+
+One variable, everything else pinned: same model, same scene, same `isometric`
+preset, same `cgi` style, and the SAME camera passed verbatim to both jobs. The
+only change between them is one `PATCH /scenes/:id` setting `hdriUrl` to
+`/env/golden-hour.hdr`.
+
+The edit reaches the render at both levels that matter:
+
+```
+job spec   BEFORE  hdriUrl = null
+           AFTER   hdriUrl = ...\apps\studio\public\env\golden-hour.hdr
+
+pixels     BEFORE  mean 238.5   blown 9.51%   black 0.00%
+           AFTER   mean 186.0   blown 0.00%   black 0.00%
+           100.00% of pixels differ by more than 8/255; mean abs diff 51.37
+           sha256 differs
+```
+
+**Why both halves are asserted.** "The images differ" on its own is also
+satisfied by a renderer that is broken in a new way each run, so validity is
+checked too: neither frame is black, and the blown fraction goes 9.51% -> 0.00%,
+which is the direction a real HDRI replacing an over-bright default sky should
+move it. A difference between two frames only means something once both frames
+are known to be pictures.
+
+⚠ **One observation NOT dressed up as a result.** BGR means move
+[248.3, 240.1, 231.8] -> [203.0, 188.5, 174.6], i.e. very slightly *cooler*. For
+an HDRI called "golden hour" that is not the naive expectation. The exposure drop
+and the blown-fraction collapse are consistent with real IBL replacing a
+synthetic sky, but the colour direction was not investigated and no claim is made
+about it. Someone reading this later should treat it as an open question about
+the environment, not as evidence the pipeline is wrong.
+
+*Two harness bugs found on the way, both mine and both the same shape as the ones
+this file already collects.* `POST /render/jobs` answers `jobId`, not `id`;
+reading `id` gave `undefined` and the poller sat on `/render/jobs/undefined` for
+the full ten-minute timeout while the real job completed — **a poll loop that
+cannot tell "not finished" from "not a job" waits exactly as long for both.** And
+`POST /scenes` does not accept `modelUrl`; the model is attached by PATCH, and
+the API's 409 "Save the scene before rendering it." is the correct refusal.
+
+**Item 3 — stair geometry: rendered, measured, and now yours to approve.**
+
+`DOWN VILLA` reconstructs to the documented stair exactly:
+
+```
+type dog-leg-u   source measured-riser-lines   risers [9, 9]
+going 0.300 m    flight widths 1.169 / 1.153 m  gap 0.079 m
+landing depth 1.200 m   landing height -1.500 m
+```
+
+Measured off the MESH rather than off the report — the two can disagree, and on
+this engine they have: `storey0_stair_marked_riser_core` is **3.900 x 2.400 m
+with a rise of exactly 3.000 m**, matching the drawing's measured opening and the
+-3.0 -> 0.0 m storey span.
+
+⚠ **The product's own isometric cannot show a stair, and that is worth knowing
+before someone tries again.** The shipped isometric suppresses CEILINGS, which is
+right for a room. A stair is the one element living BETWEEN two storeys, so what
+occludes it is the upper storey's FLOOR SLAB, and nothing in the view solver
+removes that. Three close isometrics aimed at the stair core rendered the outside
+of a slab. The renders that answer the question keep the stair mesh and drop the
+other 142 (`.runtime-logs/stair_view.py`, a diagnostic, not a product path).
+
+**Approval is still the owner's** — the geometry is now visible and dimensioned,
+which is all a session can do. Winders, spirals, L and three-flight stairs,
+irregular wells, railings, strings, soffits and headroom remain unbuilt, as
+recorded.
+
+*The frame-validity gate earned its keep unprompted:* of three stair close-ups it
+passed two and stamped the third `ARCVIA_SUSPECT: 73% blown out`. That check was
+added for renders nobody would look at; here it correctly flagged one a human was
+about to look at.
