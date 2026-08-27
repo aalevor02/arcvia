@@ -286,9 +286,17 @@ def describe() -> dict:
             return {"state": "refused", "model": Path(MODEL_PATH).name, "reason": str(reason)[:200]}
     if _session is None:
         return {"state": "refused", "model": Path(MODEL_PATH).name}
+    meta = _session.get_modelmeta().custom_metadata_map or {}
     return {
         "state": "ready",
+        # The BASENAME is not an identity. Two checkpoints on this machine are
+        # both called floorplan_segment.onnx and one of them is refuted, so a
+        # health payload naming only the file cannot answer "which model is
+        # running" -- the question an operator actually has. The full path and
+        # the artefact's own provenance stamp both go out.
         "model": Path(MODEL_PATH).name,
+        "path": str(MODEL_PATH),
+        "trained_from": meta.get("trained_from", "UNSTAMPED - provenance unknown"),
         "classes": len(_classes or []),
         "input_size": _input_size,
         "normalisation": "declared" if _normalisation else "assumed",
