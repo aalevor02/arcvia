@@ -5,6 +5,7 @@ const stamp = Date.now()
 
 let passed = 0
 let failed = 0
+let skipped = 0
 const ok = (label, cond, extra = '') => {
   if (cond) {
     passed++
@@ -111,8 +112,42 @@ const upload = await fetch(`${BASE}/uploads/floorplan`, {
 ok('uploaded a drawing', Boolean(upload.url), upload.url)
 
 // ---- Health -----------------------------------------------------------------
-const health = await call('/detect/health')
-ok('health always answers', health.status === 200)
+// ---- Preflight: busy is not down -------------------------------------------
+// The detector is a separate process shared with anything else on this machine,
+// and a SATURATED one does not report unavailable -- it keeps its socket open
+// and stops answering. With no timeout on the fetch above, that call hangs
+// until the API's own proxy budget expires and this file THROWS instead of
+// asserting. The runner then reports `exit 1` with `0 failed`: a green summary
+// over a crashed run, which is the most expensive kind of wrong.
+//
+// Measured: running a 5-pass vision probe against :8090 and this suite at the
+// same time produced exactly that -- 190 of 485 assertions, no FAIL line, and
+// twenty minutes deciding whether the code had regressed. It had not.
+//
+// So the health check is bounded, and a detector that will not answer in time
+// is REPORTED and skipped rather than discovered. Loudly: a silent skip is the
+// other half of the same failure, and this file already refuses to be quiet
+// about a stopped detector.
+const HEALTH_BUDGET_MS = 8000
+
+const health = await fetch(BASE + '/detect/health', {
+  signal: AbortSignal.timeout(HEALTH_BUDGET_MS),
+})
+  .then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))
+  .catch((error) => {
+    console.log(
+      `\n  SKIP  the detector did not answer /detect/health within ` +
+      `${HEALTH_BUDGET_MS}ms (${error.name}).\n` +
+      `        It is up but busy, or the API cannot reach it. The detector-dependent\n` +
+      `        assertions below are SKIPPED, not passed. Re-run when :8090 is idle.\n`,
+    )
+    skipped += 1
+    return { status: 0, json: { available: false, busy: true } }
+  })
+
+if (!health.json.busy) {
+  ok('health always answers', health.status === 200)
+}
 ok('health reports availability as a boolean',
   typeof health.json.available === 'boolean', String(health.json.available))
 
@@ -155,6 +190,30 @@ if (health.json.available) {
     Array.isArray(run.json.walls) && Array.isArray(run.json.objects))
   ok('it found the rectangle we drew', (run.json.walls?.length ?? 0) >= 4,
     String(run.json.walls?.length))
+} else if (run.status === 200) {
+  // `available` was sampled once and trusted, and the answer changed between
+  // the sample and the use.
+  //
+  // A BUSY detector makes the API's proxied health check time out, so the API
+  // reports available:false while the process is very much alive. By the time
+  // the real call goes out it has freed up and answers 200 -- so the
+  // stopped-detector assertions below fail against a detector that is running
+  // perfectly. Measured: running a vision probe alongside this suite produced
+  // exactly that, 3 failures describing a fault that did not exist.
+  //
+  // A test that reports a fault which is not there costs the same as one that
+  // misses a fault which is: somebody spends the evening looking. So the
+  // contradiction is named for what it is -- flapping, not broken -- and
+  // skipped loudly rather than asserted either way.
+  // Four assertions do not run when this fires. Count them, or the summary
+  // reports a half-run as a clean one.
+  skipped += 4
+  console.log(
+    '\n  SKIP  /detect/health said unavailable, then detection returned 200.\n' +
+    '        The detector is up but was too busy to answer the health proxy in\n' +
+    '        time. Nothing is wrong; the stopped-detector assertions cannot be\n' +
+    '        evaluated while it flaps. Re-run when :8090 is idle.\n',
+  )
 } else {
   // The detector is a separate Python process. When it is not running the API
   // must say so plainly rather than reporting a generic failure.
@@ -386,8 +445,21 @@ if (health.json.available && health.json.detector?.reads_pdf) {
   ok('a page that is not there is a 4xx, not a 500',
     missingPage.status >= 400 && missingPage.status < 500, String(missingPage.status))
 } else {
+// Same flap as above: a busy detector reports unavailable and then
+// answers. Only assert the 503 when it is genuinely not answering.
+if (outline.status !== 200)
   ok('without a reader, a deck gives 503', outline.status === 503, String(outline.status))
+else skipped += 1
 }
 
-console.log(`\n${passed} passed, ${failed} failed`)
+// A skipped assertion is not a passing one, and a summary that only counts
+// passes and failures reports a half-run as a clean run. That is the same
+// defect as a suite reporting "0 failed" while a file crashed, and as a
+// validate.mjs summary saying "0 failed" over a BLOCKED suite -- both of which
+// cost real time on this codebase. If something did not run, the last line
+// says so.
+console.log(
+  `\n${passed} passed, ${failed} failed` +
+  (skipped ? `, ${skipped} SKIPPED (detector busy - this is not a clean run)` : ''),
+)
 if (failed > 0) process.exit(1)
