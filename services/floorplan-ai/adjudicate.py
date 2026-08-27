@@ -211,11 +211,19 @@ _WINDOW_PASS_LONG_EDGE = 896
 
 #: How many times to ask for windows, taking the UNION of the answers.
 #:
-#: The problem is real. Six runs of one drawing returned 4, 4, 5, 2, 5, 4
-#: windows, and the training session saw a run return 1. The note count matched
-#: the window count every time, so nothing was being discarded by the wall gate
-#: — the model simply sees fewer on some passes. A run that finds one window is
-#: a run where the owner's annotated missing-window failure is back.
+#: The problem is real, and the sample is nine runs of ONE drawing collected by
+#: two sessions independently: 1, 2, 4, 4, 4, 4, 5, 5, 5. Walls stayed constant
+#: at 37 throughout both samples and the note count matched the window count
+#: every time, so nothing was being discarded by the wall gate — the model
+#: simply sees fewer on some passes. The floor is ONE, not two; the low run is
+#: not a rounding artefact (object counts moved with it), and a run that finds
+#: one window is a run where the owner's annotated failure at (4) is back.
+#:
+#: Worth keeping the two samples rather than averaging them away. Measured
+#: alone, each of us saw a floor the other did not: six runs bottomed out at 2,
+#: three runs bottomed out at 1. A tail this heavy does not show up reliably in
+#: any single small sample, which is the argument for pooling before drawing a
+#: worst case rather than after.
 #:
 #: Union is safe HERE and would be wrong elsewhere, and the difference is worth
 #: stating: a window is an ADDITIVE detection, so a second opinion can only add
@@ -226,8 +234,8 @@ _WINDOW_PASS_LONG_EDGE = 896
 #: nothing for a decision.
 #:
 #: And yet this DEFAULTS TO 1, leaving behaviour unchanged. Two was measured to
-#: lift the floor from 2 windows to 6, which does fix the near-empty run, and it
-#: also roughly doubled the count — the added centres are spatially distinct
+#: lift the floor to 6, which does fix the near-empty run, and it also roughly
+#: doubled the count — the added centres are spatially distinct
 #: (closest pair 0.060 against a 0.03 dedup radius), so they are genuinely new
 #: detections and not one window counted twice. Whether they are WINDOWS is the
 #: part nobody here can answer: they land on real openings in the left
@@ -255,6 +263,13 @@ _WINDOW_PASS_LONG_EDGE = 896
 #:
 #: What would settle it is an enumerated list of the real window openings on
 #: that elevation. Not another pass count, and not another run of the eval.
+#:
+#: The general trap, because it will be walked into again: doubling a count
+#: against a metric that cannot see false positives looks like an improvement
+#: BY CONSTRUCTION. It is not enough to add recall controls to a scoring
+#: harness — the missing half here is absent from the ground truth itself, so
+#: no amount of care in the harness recovers it. When a metric can only move
+#: one way, a change that moves it is not evidence.
 WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "1"))
 
 #: Two windows nearer than this are the same window seen twice.
