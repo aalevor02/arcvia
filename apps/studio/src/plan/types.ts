@@ -1,4 +1,13 @@
 import type { PlacedObject } from '../catalogue/types'
+import type {
+  BimElementKind,
+  BimEntityProvenance,
+  BimEntitySnapshot,
+  BimQuantity,
+  BimRelations,
+  BimSource,
+  BimTriangleMesh,
+} from '../bim/semantics'
 
 /**
  * The floor-plan data model.
@@ -57,6 +66,42 @@ export interface Wall {
    * this existed.
    */
   type?: WallTypeId
+  /** Native BIM element from which this editable wall segment was derived. */
+  bimSource?: BimEntityProvenance
+  /** Source semantics and measurements retained for audit and analysis. */
+  bimData?: BimEntitySnapshot
+}
+
+/**
+ * An imported BIM element kept as a measurable reference solid.
+ *
+ * Not everything in a model becomes an editable wall. A column, a duct or a
+ * stair carries real quantities and real semantics, but nothing in this editor
+ * knows how to let someone drag it. Discarding it would throw away measured
+ * data the source had; forcing it into a Wall would claim an editability that
+ * does not exist. So it is kept as itself, with its quantities intact.
+ *
+ * `representation` records which of the two things the geometry actually is,
+ * because a bounding solid and the real triangles measure differently and a
+ * consumer must not have to guess which it was handed.
+ */
+export interface BimReferenceComponent {
+  id: string
+  sourceId: string
+  sourceClass?: string
+  kind: BimElementKind
+  /** Exact source triangles when budget permits, otherwise a measured bounding solid. */
+  representation: 'bounds' | 'mesh'
+  /** Component-local XYZ positions in metres. */
+  mesh?: BimTriangleMesh
+  /** Full source semantics retained alongside the editable representation. */
+  bimData?: BimEntitySnapshot
+  position: Vec2
+  /** Metres above this floor's elevation. */
+  elevation: number
+  size: { width: number; depth: number; height: number }
+  quantities: BimQuantity[]
+  relations: BimRelations
 }
 
 /**
@@ -232,6 +277,8 @@ export interface Floor {
    * walls are: everything that references one references it by id.
    */
   objects: Record<string, PlacedObject>
+  /** Imported non-wall BIM components retained as measurable reference solids. */
+  bimComponents: Record<string, BimReferenceComponent>
   /** Optional traced floor-plan image sitting under the drawing. */
   underlay: Underlay | null
 }
@@ -294,6 +341,15 @@ export interface Plan {
   floors: Floor[]
   /** Which floor the editor is currently showing. */
   activeFloorId: string
+  /** Auditable origin of a plan created from a structured BIM model. */
+  bimSource?: {
+    source: BimSource
+    sourceName: string
+    schema: string
+    sourceOrigin: { x: number; z: number; elevation: number }
+    recordCount: number
+    qualityCounts: { error: number; warning: number; info: number }
+  }
 }
 
 // ---- Defaults --------------------------------------------------------------

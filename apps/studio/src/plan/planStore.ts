@@ -53,6 +53,7 @@ function reserveIds(plan: Plan): void {
       ...Object.keys(floor.vertices),
       ...Object.keys(floor.walls),
       ...Object.keys(floor.objects ?? {}),
+      ...Object.keys(floor.bimComponents ?? {}),
       floor.id,
     ]) {
       const n = Number(String(id).replace(/^\D+/, ''))
@@ -73,6 +74,7 @@ export function emptyFloor(name: string, elevation = 0): Floor {
     walls: {},
     roomNames: {},
     objects: {},
+    bimComponents: {},
     underlay: null,
   }
 }
@@ -258,6 +260,10 @@ export interface AddWallOptions {
   height?: number
   /** How close a click has to be to weld to a vertex or split a wall, in metres. */
   snapRadius?: number
+  /** Native BIM element this wall was derived from. */
+  bimSource?: Wall['bimSource']
+  /** Semantic source snapshot to copy onto every segment created for this wall. */
+  bimData?: Wall['bimData']
 }
 
 /**
@@ -327,7 +333,15 @@ export function addWall(plan: Plan, from: Vec2, to: Vec2, options: AddWallOption
     for (let i = 0; i + 1 < ordered.length; i++) {
       if (ordered[i] === ordered[i + 1]) continue
       const id = nextId('w')
-      walls[id] = { id, a: ordered[i], b: ordered[i + 1], thickness, height }
+      walls[id] = {
+        id,
+        a: ordered[i],
+        b: ordered[i + 1],
+        thickness,
+        height,
+        bimSource: options.bimSource,
+        bimData: options.bimData,
+      }
     }
 
     return { ...working, walls }
@@ -358,7 +372,7 @@ export function updateWall(plan: Plan, wallId: string, patch: Partial<Wall>): Pl
     if (!wall) return floor
     // a/b are graph structure, not properties. Changing them here would let a
     // property edit silently rewire the plan.
-    const { a: _a, b: _b, id: _id, ...safe } = patch
+    const { a: _a, b: _b, id: _id, bimSource: _bimSource, bimData: _bimData, ...safe } = patch
     return { ...floor, walls: { ...floor.walls, [wallId]: { ...wall, ...safe } } }
   })
 }
@@ -366,7 +380,7 @@ export function updateWall(plan: Plan, wallId: string, patch: Partial<Wall>): Pl
 /** Apply a patch to every wall on the floor — the "Edit All Walls" action. */
 export function updateAllWalls(plan: Plan, patch: Partial<Wall>): Plan {
   return withFloor(plan, (floor) => {
-    const { a: _a, b: _b, id: _id, ...safe } = patch
+    const { a: _a, b: _b, id: _id, bimSource: _bimSource, bimData: _bimData, ...safe } = patch
     const walls = Object.fromEntries(
       Object.entries(floor.walls).map(([id, wall]) => [id, { ...wall, ...safe }]),
     )
@@ -748,7 +762,7 @@ export function updateObject(
     if (!object) return floor
     // `id` is identity, not a property: letting a patch rewrite it would
     // detach the object from every reference to it.
-    const { id: _id, ...safe } = patch
+    const { id: _id, bimSource: _bimSource, bimData: _bimData, ...safe } = patch
     return { ...floor, objects: { ...floor.objects, [objectId]: { ...object, ...safe } } }
   })
 }
