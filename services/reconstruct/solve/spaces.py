@@ -251,17 +251,84 @@ def _pt(label):
     return Point(label.x, label.y)
 
 
-def summarise(spaces: list[Space]) -> dict:
+#: How far outside the built envelope a label may sit and still be counted as belonging
+#: to this build. A room name is printed inside its room, so anything beyond a couple of
+#: metres is labelling a different drawing on the same sheet — measured at 350 of 357
+#: misses on a real 6-frame DXF, all more than 10 m out.
+LABEL_SCOPE_PAD_M = 2.0
+
+
+def summarise(spaces: list[Space], labels=None) -> dict:
+    """Room counts, and — when `labels` is passed — what happened to the drawing's
+    own room names.
+
+    WHY LABEL ACCOUNTING IS HERE
+    ----------------------------
+    A space is named only if a label point lands inside it (or within 0.4 m). Every
+    label that lands nowhere is silently discarded, and the resulting room is simply
+    `kind: unknown` — indistinguishable from a room the drawing never labelled at all.
+
+    Measured 2026-08-27 across 51 built models: 792 spaces, 470 named, and **all 322
+    unknowns were unnamed**, with zero name→kind classification failures. So the
+    classifier is not the constraint; the naming step upstream is, and it reports
+    nothing. `labelsUnplaced` makes that visible, because a label the drawing printed
+    and the model dropped is a real loss and currently leaves no trace anywhere.
+
+    `labels` is optional so existing callers keep working unchanged.
+    """
     if not spaces:
-        return {
+        base = {
             "count": 0, "totalArea": 0.0, "named": 0,
             "warning": "No closed cycles. The walls do not enclose anything — "
                        "this is almost always corner-joining, not room detection.",
         }
-    return {
-        "count": len(spaces),
-        "totalArea": round(sum(s.area for s in spaces), 2),
-        "named": sum(1 for s in spaces if s.name),
-        "largest": round(spaces[0].area, 2),
-        "smallest": round(spaces[-1].area, 2),
-    }
+    else:
+        base = {
+            "count": len(spaces),
+            "totalArea": round(sum(s.area for s in spaces), 2),
+            "named": sum(1 for s in spaces if s.name),
+            "largest": round(spaces[0].area, 2),
+            "smallest": round(spaces[-1].area, 2),
+        }
+    if labels is None:
+        return base
+
+    # Only labels that lie WITHIN the built area count as offered.
+    #
+    # A sheet carries several drawings. Measured on a real 6-frame DXF: 406 labels
+    # extracted, 49 inside a space, 357 outside — but **350 of those sit more than 10 m
+    # away**, because they label the other frames. Counting them made an unscoped
+    # "5 of 28 placed" look like a catastrophic loss when the true near-miss population
+    # was six labels, five of which are title-block text.
+    #
+    # Scoping to the built envelope is what makes `labelsUnplaced` mean "the drawing
+    # named a room here and the model did not pick it up" rather than "this sheet has
+    # other drawings on it".
+    used = {s.name for s in spaces if s.name}
+    if spaces:
+        xs = [x for s in spaces for x, _ in s.loop]
+        ys = [y for s in spaces for _, y in s.loop]
+        pad = LABEL_SCOPE_PAD_M
+        x0, x1 = min(xs) - pad, max(xs) + pad
+        y0, y1 = min(ys) - pad, max(ys) + pad
+
+        def in_scope(lb) -> bool:
+            x, y = getattr(lb, "x", None), getattr(lb, "y", None)
+            if x is None or y is None:
+                return True          # no position to judge by; count it rather than hide it
+            return x0 <= x <= x1 and y0 <= y <= y1
+    else:
+        def in_scope(lb) -> bool:
+            return True
+
+    scoped = [lb for lb in labels if in_scope(lb)]
+    offered = [t for t in (getattr(lb, "text", None) for lb in scoped) if t]
+    unplaced = sorted({t for t in offered if t not in used})
+    base["labelsOffered"] = len(offered)
+    base["labelsPlaced"] = len(used)
+    base["labelsUnplaced"] = len(unplaced)
+    base["labelsOutsideBuild"] = len(labels) - len(scoped)
+    # Named, so a reviewer can see WHICH rooms the drawing knows about and the model
+    # does not. Capped — the list is a signal, not an inventory.
+    base["unplacedNames"] = unplaced[:25]
+    return base

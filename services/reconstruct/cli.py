@@ -940,7 +940,10 @@ def reconstruct(
             )
 
         site_reports.append(report)
-        room_stats = sp.summarise(rooms)
+        # `labels` is passed so the summary can account for room names the drawing
+        # printed and the model never placed. Without it, a dropped label is
+        # indistinguishable from a room that was never labelled.
+        room_stats = sp.summarise(rooms, labels=labels)
 
         # ---- Which of that run is actually indoor -------------------------
         # `Space.bounded_by` was in the schema and empty on every space this

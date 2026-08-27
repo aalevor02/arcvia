@@ -62,17 +62,49 @@ _ROOM_KINDS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"bed\s?room|\bbed\b|\bmbr\b|master", re.I), "bedroom"),
     (re.compile(r"dining", re.I), "dining"),
     (re.compile(r"living|lounge|drawing|family|hall\b", re.I), "living"),
+    # Outdoor is tested BEFORE study/circulation, and the order is load-bearing.
+    # `OFFICE PATIO` is a real label in a real drawing, and with `office` first it
+    # classified as `study` — an indoor habitable room. NBC's habitable-area and
+    # habitable-width rules would then have been applied to a patio. An outdoor word
+    # is a strong, specific qualifier: a room called anything PATIO, BALCONY, TERRACE
+    # or DECK is outside, whatever else the label says.
+    (re.compile(r"veranda|balcon|terrace|deck|porch|patio|garden|lawn|court", re.I), "outdoor"),
     (re.compile(r"study|office|library|work", re.I), "study"),
     (re.compile(r"foyer|entry|entrance|lobby|passage|corridor|stair|lift", re.I), "circulation"),
-    (re.compile(r"veranda|balcon|terrace|deck|porch|patio|garden|lawn|court", re.I), "outdoor"),
     (re.compile(r"store|storage|closet|almirah", re.I), "store"),
     (re.compile(r"car\s?park|garage|parking", re.I), "parking"),
 ]
 
 
+#: Text that reaches the room-label pool but is an ANNOTATION, not a room name.
+#:
+#: A drawing's text layer carries title blocks, notes and provisions alongside room
+#: labels, and `usable_room_labels` does not fully separate them — a real build offered
+#: `Architect`, `Project`, `VILLAS AT ASSAGAON` and `Provision for home lift` as room
+#: labels. Most fall through to `unknown` harmlessly, but `Provision for home lift`
+#: matched `lift` and became a `circulation` ROOM: a note about a future lift turning
+#: into a space the code checks measure.
+#:
+#: Matching a phrase is not the same as naming a room. These are the shapes that say
+#: "this sentence is about the drawing, not a space in it".
+_NOT_A_ROOM = re.compile(
+    r"provision\s+for|refer\s+to|\bnote[s]?\b|drawn\s+by|checked\s+by|"
+    r"\bscale\b|\bclient\b|\barchitect\b|\bproject\b|\brevision\b|\bsheet\b|"
+    r"\btyp\.|do\s+not\s+scale",
+    re.I,
+)
+
+
 def classify_room(name: str | None) -> str:
-    """The kind of room a printed label refers to, or 'unknown'."""
-    if not name:
+    """The kind of room a printed label refers to, or 'unknown'.
+
+    'unknown' is a real answer and is preserved deliberately: a room the drawing never
+    named, or named something this vocabulary does not know, must stay distinguishable
+    from one that was classified. Nothing here guesses past it.
+    """
+    if not name or not name.strip():
+        return "unknown"
+    if _NOT_A_ROOM.search(name):
         return "unknown"
     for pattern, kind in _ROOM_KINDS:
         if pattern.search(name):
