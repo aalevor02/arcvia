@@ -534,10 +534,13 @@ export function buildObject(
     // per asset, because a great many exports are Z-up and nothing in the file
     // says which.
     group.userData.modelUpAxis = model?.upAxis ?? 'y'
-    // Per-axis footprint fill, only where the catalogue asserts its dims are
-    // real measurements (see AssetModel.fitFootprint). Never for uploads: a
-    // stranger's file makes no such claim.
-    group.userData.modelFitFootprint = Boolean(model?.fitFootprint)
+    // A measured placement carries the footprint read from the plan. Preserve
+    // that footprint on the real GLB as well as on the parametric stand-in;
+    // otherwise a model with padded/incorrect source proportions can be much
+    // wider or deeper than the walls it was fitted into. Uploaded custom files
+    // still use the catalogue/model policy because their dimensions are not
+    // trusted.
+    group.userData.modelFitFootprint = Boolean(object.size || model?.fitFootprint)
   }
 
   /**

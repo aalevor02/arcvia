@@ -59,7 +59,8 @@ for (const fixture of manifest.files) {
       includeProperties: fixture.file === 'IFC4-building-architecture.ifc',
       includeGeometry:
         fixture.file === 'IFC4-wall-opening-window.ifc'
-        || fixture.file === 'IFC4-building-structural.ifc',
+        || fixture.file === 'IFC4-building-structural.ifc'
+        || fixture.file.endsWith('building-architecture.ifc'),
       includeMeshes: fixture.file === 'IFC4-building-structural.ifc',
       meshVertexBudget: 100_000,
     })
@@ -111,6 +112,13 @@ for (const fixture of manifest.files) {
       check(`${fixture.file}: direct material associations are retained`,
         result.elements.some((element) =>
           element.materials.some((material) => Boolean(material.name))))
+      const measuredSpaces = result.elements.filter((element) =>
+        element.kind === 'space' && element.geometry?.planLoop)
+      check(`${fixture.file}: IfcSpace floor boundaries are measured from source triangles`,
+        measuredSpaces.length > 0)
+      const spaceProposal = createIfcPlanProposal(result, fixture.file)
+      check(`${fixture.file}: measured spaces survive proposal conversion`,
+        spaceProposal.storeys.some((storey) => storey.spaces.length > 0))
     }
     if (fixture.file === 'IFC4-building-structural.ifc') {
       const proposal = createIfcPlanProposal(result, fixture.file)

@@ -83,7 +83,7 @@ export default function AccountMenu() {
   if (!user) {
     return (
       <div className="flex items-center gap-3">
-        <a href="/login/" className="hidden text-sm font-medium sm:inline-flex">
+        <a href="/login/" className="inline-flex text-sm font-medium">
           Sign in
         </a>
         <a href="/register/" className="btn-primary !px-4 !py-2">

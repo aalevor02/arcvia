@@ -33,6 +33,19 @@ import { labelPoint, signedArea } from './geometry'
  */
 
 export function detectRooms(floor: Floor): Room[] {
+  if (floor.bimSpaces) {
+    return floor.bimSpaces.flatMap((space) => {
+      const area = Math.abs(signedArea(space.polygon))
+      if (space.polygon.length < 3 || area < MIN_ROOM_AREA) return []
+      return [{
+        id: `bim-space:${space.sourceId}`,
+        loop: space.polygon.map((_, index) => `bim-space:${space.sourceId}:${index}`),
+        polygon: space.polygon.map((point) => ({ ...point })),
+        area,
+        label: labelPoint(space.polygon),
+      }]
+    }).sort((left, right) => right.area - left.area)
+  }
   const vertices = floor.vertices
   const walls = Object.values(floor.walls)
 

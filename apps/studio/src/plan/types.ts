@@ -85,6 +85,13 @@ export interface Wall {
  * because a bounding solid and the real triangles measure differently and a
  * consumer must not have to guess which it was handed.
  */
+export interface BimSpaceBoundary {
+  sourceId: string
+  name: string
+  /** Exact measured IFC space boundary in Arcvia plan coordinates. */
+  polygon: Vec2[]
+}
+
 export interface BimReferenceComponent {
   id: string
   sourceId: string
@@ -302,6 +309,8 @@ export interface Floor {
    * walls are: everything that references one references it by id.
    */
   objects: Record<string, PlacedObject>
+  /** Measured IFC spaces used as authoritative rooms without inventing walls. */
+  bimSpaces?: BimSpaceBoundary[]
   /** Imported non-wall BIM components retained as measurable reference solids. */
   bimComponents: Record<string, BimReferenceComponent>
   /** Optional traced floor-plan image sitting under the drawing. */

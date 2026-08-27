@@ -111,6 +111,7 @@ function migrate(plan: Plan): Plan {
       ...floor,
       roomNames: floor.roomNames ?? {},
       objects: floor.objects ?? {},
+      bimComponents: floor.bimComponents ?? {},
       underlay: floor.underlay ? migrateUnderlay(floor.underlay) : null,
     })),
   }

@@ -88,7 +88,10 @@ const BY_ID = new Map(CATALOGUE.map((item) => [item.id, item]))
 function toWorld(point: { x: number; y: number }, underlay: Underlay): Vec2 {
   return {
     x: underlay.origin.x + point.x * underlay.width * underlay.scale,
-    y: underlay.origin.y + point.y * underlay.height * underlay.scale,
+    // Image y runs down while the plan's world y runs up. This must remain
+    // identical to detections.ts::toWorld: using + here mirrored every fitting
+    // vertically away from the walls read from the very same pixels.
+    y: underlay.origin.y - point.y * underlay.height * underlay.scale,
   }
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import {
-  assignRoom, detectFloorplan, readDocument, readDesign, uploadFloorplan,
+  assignRoom, detectFloorplan, extractDocumentPage, readDocument, readDesign, uploadFloorplan,
   type DocumentSheet, type RoomProposal,
 } from '../lib/api'
 import { hubQueriesForSpec, type DesignSpec } from '../plan/deckDesign'
@@ -79,7 +79,17 @@ export default function DeckDesignPanel({
     if (!deckUrl) return
     setPlacing((prev) => ({ ...prev, [position]: { state: 'asking' } }))
     try {
-      const detected = await detectFloorplan(deckUrl)
+      // The detector accepts raster images, not a multi-page PDF. Extract the
+      // first plan sheet before asking it to find rooms; the render remains the
+      // original PDF and is addressed by its page/index below.
+      let planUrl = deckUrl
+      if (/\.pdf(?:$|[?#])/i.test(deckUrl)) {
+        const outline = await readDocument(deckUrl)
+        const planSheet = outline.sheets.find((sheet) => sheet.kind === 'plan')
+        if (!planSheet) throw new Error('No plan sheet was found in this PDF.')
+        planUrl = (await extractDocumentPage(deckUrl, planSheet.page, planSheet.index)).url
+      }
+      const detected = await detectFloorplan(planUrl)
       const rooms = (detected.rooms ?? []).filter((room) => (room.kind ?? 'room') === 'room')
       if (rooms.length === 0) {
         setPlacing((prev) => ({
@@ -89,7 +99,7 @@ export default function DeckDesignPanel({
         return
       }
       const { proposal } = await assignRoom({
-        planUrl: deckUrl,
+        planUrl,
         renderUrl: deckUrl,
         renderPage: spec.source?.page ?? 0,
         renderIndex: spec.source?.index ?? 0,

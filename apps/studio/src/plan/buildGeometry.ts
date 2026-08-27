@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { wallTypeById } from './types'
-import type { Floor, FloorFinish, Vec2, WallTypeId } from './types'
+import type { BimReferenceComponent, Floor, FloorFinish, Vec2, WallTypeId } from './types'
 import { detectRooms } from './rooms'
 import { distance, dot, normalise, sub } from './geometry'
 import { buildObjects } from '../catalogue/build'
@@ -163,6 +163,12 @@ export function buildFloorGeometry(
     group.add(mesh)
   }
 
+  // Exact IFC meshes are reference solids, not editable catalogue objects, but
+  // successful imports must render the measured components they retained.
+  for (const component of Object.values(floor.bimComponents ?? {})) {
+    group.add(buildBimComponent(component, floor.elevation))
+  }
+
   // ---- Floor slabs ---------------------------------------------------------
   // One per detected room rather than a single big rectangle, so a plan with a
   // courtyard or an L-shaped footprint does not get floor where there is none.
@@ -244,6 +250,36 @@ export function buildFloorGeometry(
   if (furniture.children.length > 0) group.add(furniture)
 
   return group
+}
+
+function buildBimComponent(component: BimReferenceComponent, floorElevation: number): THREE.Mesh {
+  let geometry: THREE.BufferGeometry
+  const sourceMesh = component.mesh
+  if (component.representation === 'mesh' && sourceMesh
+    && sourceMesh.positions.length >= 9 && sourceMesh.indices.length >= 3) {
+    geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(sourceMesh.positions, 3))
+    geometry.setIndex(sourceMesh.indices)
+    geometry.computeVertexNormals()
+  } else {
+    geometry = new THREE.BoxGeometry(
+      Math.max(component.size.width, 0.001),
+      Math.max(component.size.height, 0.001),
+      Math.max(component.size.depth, 0.001),
+    )
+    geometry.translate(0, component.size.height / 2, 0)
+  }
+  const materialKind = component.kind === 'furniture' ? 'wood'
+    : component.kind === 'equipment' || component.kind === 'railing' ? 'metal'
+      : component.kind === 'covering' ? 'floor-tile' : 'concrete'
+  const mesh = new THREE.Mesh(geometry, surface(materialKind))
+  mesh.position.set(component.position.x, floorElevation + component.elevation, -component.position.y)
+  mesh.name = `bim:${component.kind}:${component.sourceId}`
+  mesh.userData.bimSourceId = component.sourceId
+  mesh.userData.bimRepresentation = component.representation
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  return mesh
 }
 
 /**

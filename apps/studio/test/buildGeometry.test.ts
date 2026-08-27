@@ -116,6 +116,30 @@ check(
     near(bounds.max.y, 6, 0.2), `max y ${bounds.max.y.toFixed(2)}`)
 }
 
+// ---- Imported BIM reference meshes ----------------------------------------
+{
+  const withBim = {
+    ...floor,
+    bimComponents: {
+      'bim-42': {
+        id: 'bim-42', sourceId: '42', sourceClass: 'IfcSlab', kind: 'slab' as const,
+        representation: 'mesh' as const,
+        mesh: { positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
+        position: { x: 2, y: 1 }, elevation: 0.5,
+        size: { width: 1, depth: 0.1, height: 1 }, quantities: [], relations: {},
+      },
+    },
+  }
+  const bimGroup = buildFloorGeometry(withBim)
+  const reference = bimGroup.children.find((child) => child.name === 'bim:slab:42') as THREE.Mesh
+  check('exact IFC component mesh is visible in the floor group', Boolean(reference))
+  check('IFC component keeps plan-to-world coordinates',
+    Boolean(reference) && near(reference.position.x, 2) && near(reference.position.y, 0.5)
+      && near(reference.position.z, -1))
+  check('IFC component retains its exact triangle representation',
+    Boolean(reference) && (reference.geometry as THREE.BufferGeometry).getAttribute('position').count === 3)
+}
+
 // ---- Empty plan ------------------------------------------------------------
 {
   const blank = buildFloorGeometry(activeFloor(emptyPlan()))

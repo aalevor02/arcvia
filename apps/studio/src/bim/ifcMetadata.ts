@@ -1,6 +1,7 @@
 import {
   classifyBimElement,
   type BimElementGeometry,
+  type BimPoint3,
   type BimElementInput,
   type BimElementSemantic,
   type BimRelations,
@@ -225,11 +226,86 @@ function transformPoint(
   }
 }
 
+function measuredPlanLoop(
+  triangles: Array<[BimPoint3, BimPoint3, BimPoint3]>,
+): Array<{ x: number; y: number }> | undefined {
+  if (triangles.length === 0) return undefined
+  const ys = triangles.flatMap((triangle) => triangle.map((point) => point.y))
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  const tolerance = Math.max(0.002, (maxY - minY) * 0.002)
+  const horizontal = (plane: number) => triangles.filter((triangle) =>
+    triangle.every((point) => Math.abs(point.y - plane) <= tolerance))
+  const faces = horizontal(minY).length ? horizontal(minY) : horizontal(maxY)
+  if (faces.length === 0) return undefined
+
+  const pointByKey = new Map<string, { x: number; y: number }>()
+  const edges = new Map<string, { a: string; b: string; count: number }>()
+  const pointKey = (point: BimPoint3) => `${Math.round(point.x * 10000)},${Math.round(point.z * 10000)}`
+  const addEdge = (from: BimPoint3, to: BimPoint3) => {
+    const a = pointKey(from)
+    const b = pointKey(to)
+    if (a === b) return
+    pointByKey.set(a, { x: from.x, y: from.z })
+    pointByKey.set(b, { x: to.x, y: to.z })
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`
+    const current = edges.get(key)
+    if (current) current.count++
+    else edges.set(key, { a, b, count: 1 })
+  }
+  for (const [a, b, c] of faces) {
+    addEdge(a, b)
+    addEdge(b, c)
+    addEdge(c, a)
+  }
+
+  const boundary = [...edges.values()].filter((edge) => edge.count === 1)
+  const neighbours = new Map<string, string[]>()
+  for (const edge of boundary) {
+    neighbours.set(edge.a, [...(neighbours.get(edge.a) ?? []), edge.b])
+    neighbours.set(edge.b, [...(neighbours.get(edge.b) ?? []), edge.a])
+  }
+  const unused = new Set(boundary.map((edge) => edge.a < edge.b
+    ? `${edge.a}|${edge.b}` : `${edge.b}|${edge.a}`))
+  const loops: Array<Array<{ x: number; y: number }>> = []
+  for (const first of boundary) {
+    const firstEdge = first.a < first.b ? `${first.a}|${first.b}` : `${first.b}|${first.a}`
+    if (!unused.has(firstEdge)) continue
+    const keys = [first.a]
+    let previous = first.a
+    let current = first.b
+    unused.delete(firstEdge)
+    for (let step = 0; step <= boundary.length; step++) {
+      if (current === keys[0]) break
+      keys.push(current)
+      const next = (neighbours.get(current) ?? []).find((candidate) => {
+        if (candidate === previous) return false
+        const edge = current < candidate ? `${current}|${candidate}` : `${candidate}|${current}`
+        return unused.has(edge)
+      })
+      if (!next) break
+      const edge = current < next ? `${current}|${next}` : `${next}|${current}`
+      unused.delete(edge)
+      previous = current
+      current = next
+    }
+    if (current === keys[0] && keys.length >= 3) {
+      loops.push(keys.map((key) => pointByKey.get(key)!).filter(Boolean))
+    }
+  }
+  const area = (loop: Array<{ x: number; y: number }>) => Math.abs(loop.reduce((sum, point, index) => {
+    const next = loop[(index + 1) % loop.length]
+    return sum + point.x * next.y - next.x * point.y
+  }, 0) / 2)
+  return loops.sort((left, right) => area(right) - area(left))[0]
+}
+
 function measureGeometry(
   api: IfcMetadataApi,
   modelID: number,
   expressID: number,
   includePlanAxis: boolean,
+  includePlanLoop: boolean,
   includeMesh: boolean,
   meshBudget: { remainingVertices: number },
 ): BimElementGeometry | undefined {
@@ -239,6 +315,7 @@ function measureGeometry(
   const points: Array<{ x: number; y: number; z: number }> = []
   const meshPositions: number[] = []
   const meshIndices: number[] = []
+  const planTriangles: Array<[BimPoint3, BimPoint3, BimPoint3]> = []
   let meshValid = includeMesh && Boolean(api.GetIndexArray)
   let meshOmittedReason: BimElementGeometry['meshOmittedReason']
   if (includeMesh && !api.GetIndexArray) meshOmittedReason = 'unavailable'
@@ -258,6 +335,7 @@ function measureGeometry(
         meshPositions.length = 0
         meshIndices.length = 0
       }
+      const partPoints: BimPoint3[] = []
       // web-ifc interleaves XYZ position and XYZ normal.
       for (let index = 0; index + 2 < vertices.length; index += 6) {
         const point = transformPoint(
@@ -267,10 +345,21 @@ function measureGeometry(
           vertices[index + 2],
         )
         points.push(point)
+        partPoints.push(point)
         if (meshValid) meshPositions.push(point.x, point.y, point.z)
       }
-      if (meshValid && api.GetIndexArray) {
-        const indices = api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize())
+      const indices = api.GetIndexArray
+        ? api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize())
+        : undefined
+      if (includePlanLoop && indices) {
+        for (let index = 0; index + 2 < indices.length; index += 3) {
+          const a = partPoints[indices[index]]
+          const b = partPoints[indices[index + 1]]
+          const c = partPoints[indices[index + 2]]
+          if (a && b && c) planTriangles.push([a, b, c])
+        }
+      }
+      if (meshValid && indices) {
         for (const index of indices) {
           if (index >= partVertexCount) {
             meshValid = false
@@ -324,6 +413,7 @@ function measureGeometry(
     }
   }
 
+  if (includePlanLoop) geometry.planLoop = measuredPlanLoop(planTriangles)
   if (!includePlanAxis) return geometry
 
   const meanX = sumX / points.length
@@ -624,6 +714,7 @@ export async function extractOpenIfcMetadata(
               modelID,
               expressID,
               ['wall', 'curtain-wall', 'door', 'window', 'opening'].includes(probe.kind),
+              probe.kind === 'space',
               includeMeshes && meshKinds.has(probe.kind),
               meshBudget,
             )

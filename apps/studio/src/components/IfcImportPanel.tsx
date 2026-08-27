@@ -103,6 +103,7 @@ export function IfcImportPanel({ onImportPlan }: Props) {
   const proposedComponents = proposal
     ? proposal.storeys.reduce((sum, storey) => sum + storey.components.length, 0)
     : 0
+  const measurableSpaces = result?.elements.filter((element) => element.kind === 'space' && element.geometry).length ?? 0
   const proposedMeshes = proposal
     ? proposal.storeys.reduce(
       (sum, storey) => sum + storey.components.filter((component) => component.mesh).length,
@@ -339,6 +340,10 @@ export function IfcImportPanel({ onImportPlan }: Props) {
                 <span className="mono">{proposedOpenings.toLocaleString()}</span>
               </div>
               <div className="stat">
+                <span className="muted">Measured IFC spaces</span>
+                <span className="mono">{measurableSpaces.toLocaleString()}</span>
+              </div>
+              <div className="stat">
                 <span className="muted">BIM components</span>
                 <span className="mono">{proposedComponents.toLocaleString()}</span>
               </div>
@@ -355,7 +360,15 @@ export function IfcImportPanel({ onImportPlan }: Props) {
                   and will not be flattened.
                 </p>
               )}
-              {onImportPlan && (proposedWalls > 0 || proposedComponents > 0) && (
+              {onImportPlan && proposedWalls === 0 && (
+                <p className="alert alert-error" role="alert" style={{ fontSize: 12, marginTop: 10 }}>
+                  {measurableSpaces === 0
+                    ? 'This file has no measurable IfcWall or IfcSpace geometry. '
+                    : `This file has ${measurableSpaces.toLocaleString()} measurable IfcSpace ${measurableSpaces === 1 ? 'volume' : 'volumes'}, but no measurable IfcWall geometry. `}
+                  Arcvia cannot produce an editable architectural plan from it. No synthetic boundary walls will be created; export explicit IfcWall geometry from the authoring model.
+                </p>
+              )}
+              {onImportPlan && proposedWalls > 0 && (
                 <button
                   className="btn btn-primary"
                   style={{ width: '100%', marginTop: 10 }}

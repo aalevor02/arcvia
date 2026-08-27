@@ -133,7 +133,10 @@ const result = (rooms: DetectedRoom[]): DetectionResult => ({
 })
 
 {
-  // A bedroom 0..4 m with a labelled wardrobe drawn against its left wall.
+  // A bedroom 0..4 m in image space becomes 0..-4 m in plan space, with a
+  // labelled wardrobe drawn against its left wall. Walls use this same
+  // inverted-y transform; keeping the expected y negative is the regression
+  // for furniture previously being mirrored outside its own plan.
   const detection = result([
     room('Bedroom', [0, 0, 0.4, 0.4]),
     fitting('WARDROBE', [0.02, 0.1, 0.08, 0.3]),
@@ -144,7 +147,7 @@ const result = (rooms: DetectedRoom[]): DetectionResult => ({
   check('identified from its label', proposals[0]?.item === 'wardrobe')
   check('attributed to its room', proposals[0]?.room === 'Bedroom')
   check('placed where it was drawn',
-    Math.abs(proposals[0].position.x - 0.5) < 0.2 && Math.abs(proposals[0].position.y - 2.0) < 0.3,
+    Math.abs(proposals[0].position.x - 0.5) < 0.2 && Math.abs(proposals[0].position.y - -2.0) < 0.3,
     JSON.stringify(proposals[0].position))
 
   // Against the left wall, so it must face right: rotation -PI/2.

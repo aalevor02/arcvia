@@ -56,7 +56,7 @@ import {
 import { cadModel, detectFloorplan, getScene, updateScene, type CadSummary, type Scene } from '../lib/api'
 import { cadStoreys, furnishFromCad, type CadModel } from '../plan/cadFurnish'
 import { planFromCad } from '../plan/cadPlan'
-import { furnishFromDesign } from '../plan/designFurnish'
+import { furnishFromDesign, planAsMeasuredModel } from '../plan/designFurnish'
 import { placeFurniture } from '../plan/placeFurniture'
 import {
   designFurnitureKey,
@@ -250,21 +250,22 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     latestDesignsRef.current = designs
     const run = ++designOfferRunRef.current
     const url = sourceScene?.cadModelJsonUrl
-    if (!url || furnitureRef.current) return
+    if (furnitureRef.current) return
 
     const pending = designs.filter(
       (design) => !reviewedDesignKeysRef.current.includes(designFurnitureKey(design)),
     )
     if (pending.length === 0) return
 
-    let model = cadModelCacheRef.current?.url === url
+    let model = url && cadModelCacheRef.current?.url === url
       ? cadModelCacheRef.current.model
       : null
-    if (!model) {
+    if (!model && url) {
       model = await cadModel(url)
       if (!model) return
       cadModelCacheRef.current = { url, model }
     }
+    if (!model) model = planAsMeasuredModel(sourcePlan)
     if (run !== designOfferRunRef.current || furnitureRef.current) return
 
     const pieces = furnishFromDesign(model, pending, sourcePlan)
@@ -640,7 +641,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       let traced = underlay
       let scaleApplied = false
       const printed = result.scale
-      if (printed && !underlay.calibrated && result.width > 0) {
+      // Reject an implausible OCR scale. A single misread dimension can shrink
+      // every room and object by 10x; let the user calibrate those sheets.
+      const plausibleSheetWidth = printed && printed.metres_per_unit >= 3 && printed.metres_per_unit <= 48
+      if (plausibleSheetWidth && !underlay.calibrated && result.width > 0) {
         const metresPerPixel = printed.metres_per_unit / result.width
         traced = { ...underlay, scale: metresPerPixel, calibrated: true }
         apply((current) => rescaleUnderlay(current, metresPerPixel))
@@ -1144,6 +1148,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             onStartCalibrate={() => setTool('calibrate')}
             detecting={detecting}
             onDetect={runDetection}
+            onOpenRenders={() => setMode('3d')}
             onDeck={({ url }) => {
               // Keep the original PDF on the scene, not only its extracted
               // plan page on the underlay. SceneView reads this field to find
@@ -1350,7 +1355,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                         type: type?.id,
                         ...(type ? { thickness: type.thickness } : {}),
                         // A type with its own height sets it for the same
-                        // reason: a railing is 1.1 m because that is what a
+                        // reason: a railing is 1.0 m because that is what a
                         // railing IS, not because of the storey it sits on.
                         // Types without one leave the wall's height alone.
                         ...(type?.height ? { height: type.height } : {}),

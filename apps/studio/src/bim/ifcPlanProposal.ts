@@ -50,6 +50,13 @@ export interface IfcProposedComponent {
   bimData: BimEntitySnapshot
 }
 
+export interface IfcProposedSpace {
+  sourceId: string
+  name: string
+  storeyId: string
+  polygon: Vec2[]
+}
+
 export interface IfcProposedStorey {
   sourceId: string
   name: string
@@ -57,6 +64,7 @@ export interface IfcProposedStorey {
   walls: IfcProposedWall[]
   openings: IfcProposedOpening[]
   components: IfcProposedComponent[]
+  spaces: IfcProposedSpace[]
 }
 
 export interface IfcPlanProposal {
@@ -83,10 +91,6 @@ function midpoint(element: BimElementSemantic): { x: number; y: number; z: numbe
     y: (bounds.min.y + bounds.max.y) / 2,
     z: (bounds.min.z + bounds.max.z) / 2,
   }
-}
-
-function storeyId(element: BimElementSemantic, host?: BimElementSemantic): string {
-  return element.relations.containerId ?? host?.relations.containerId ?? 'unassigned'
 }
 
 function semanticSnapshot(element: BimElementSemantic): BimEntitySnapshot {
@@ -165,6 +169,20 @@ export function createIfcPlanProposal(
         : []
     }),
   )
+  const recordsById = new Map(result.records.map((record) => [record.sourceId, record]))
+  const nativeStoreyIds = new Set(result.records.flatMap((record) =>
+    record.sourceClass?.toUpperCase() === 'IFCBUILDINGSTOREY' ? [record.sourceId] : []))
+  const resolveStoreyId = (element: BimElementSemantic, host?: BimElementSemantic): string => {
+    let id = element.relations.containerId ?? element.relations.parentId ?? host?.relations.containerId
+    const visited = new Set<string>()
+    while (id && !visited.has(id)) {
+      if (nativeStoreyIds.has(id)) return id
+      visited.add(id)
+      const spatialRecord = recordsById.get(id)
+      id = spatialRecord?.relations.parentId ?? spatialRecord?.relations.containerId
+    }
+    return 'unassigned'
+  }
   const storeys = new Map<string, IfcProposedStorey>()
   const ensureStorey = (id: string, elevation: number): IfcProposedStorey => {
     const current = storeys.get(id)
@@ -181,6 +199,7 @@ export function createIfcPlanProposal(
       walls: [],
       openings: [],
       components: [],
+      spaces: [],
     }
     storeys.set(id, created)
     return created
@@ -188,7 +207,7 @@ export function createIfcPlanProposal(
 
   for (const element of measurableWalls) {
     const axis = element.geometry!.planAxis!
-    const id = storeyId(element)
+    const id = resolveStoreyId(element)
     ensureStorey(id, element.geometry!.bounds.min.y - baseElevation).walls.push({
       sourceId: element.sourceId,
       source: element.source,
@@ -219,7 +238,7 @@ export function createIfcPlanProposal(
       openingsWithoutHost++
       continue
     }
-    const id = storeyId(element, host)
+    const id = resolveStoreyId(element, host)
     ensureStorey(id, host.geometry.bounds.min.y - baseElevation).openings.push({
       sourceId: element.sourceId,
       source: element.source,
@@ -246,7 +265,7 @@ export function createIfcPlanProposal(
     const bounds = element.geometry.bounds
     const centreX = (bounds.min.x + bounds.max.x) / 2
     const centreZ = (bounds.min.z + bounds.max.z) / 2
-    const id = storeyId(element)
+    const id = resolveStoreyId(element)
     ensureStorey(id, bounds.min.y - baseElevation).components.push({
       sourceId: element.sourceId,
       sourceClass: element.sourceClass,
@@ -274,6 +293,28 @@ export function createIfcPlanProposal(
       relations: element.relations,
       bimData: semanticSnapshot(element),
     })
+  }
+  for (const element of measuredElements) {
+    const loop = element.kind === 'space' ? element.geometry?.planLoop : undefined
+    if (!loop || loop.length < 3) continue
+    const id = resolveStoreyId(element)
+    ensureStorey(id, element.geometry!.bounds.min.y - baseElevation).spaces.push({
+      sourceId: element.sourceId,
+      name: recordNames.get(element.sourceId) ?? `Space ${element.sourceId}`,
+      storeyId: id,
+      polygon: loop.map(toPlan),
+    })
+  }
+  const unassigned = storeys.get('unassigned')
+  const nativeStoreys = [...storeys.values()].filter((storey) => storey.sourceId !== 'unassigned')
+  if (unassigned && unassigned.walls.length === 0 && unassigned.openings.length === 0 && nativeStoreys.length > 0) {
+    for (const component of unassigned.components) {
+      const target = nativeStoreys.reduce((nearest, candidate) =>
+        Math.abs(candidate.elevation - component.elevation) < Math.abs(nearest.elevation - component.elevation)
+          ? candidate : nearest)
+      target.components.push({ ...component, storeyId: target.sourceId })
+    }
+    storeys.delete('unassigned')
   }
   for (const storey of storeys.values()) {
     for (const component of storey.components) component.elevation -= storey.elevation
@@ -362,7 +403,7 @@ export function planFromIfcProposal(proposal: IfcPlanProposal): Plan {
       plan = addWall(plan, wall.from, wall.to, {
         thickness: wall.thickness,
         height: wall.height,
-        snapRadius: 0.03,
+        snapRadius: Math.min(0.35, Math.max(0.03, wall.thickness * 1.25)),
         bimSource: {
           source: wall.source,
           sourceId: wall.sourceId,
@@ -397,6 +438,11 @@ export function planFromIfcProposal(proposal: IfcPlanProposal): Plan {
         bimData: opening.bimData,
       })
     }
+    const bimSpaces = storey.spaces.map((space) => ({
+      sourceId: space.sourceId,
+      name: space.name,
+      polygon: space.polygon.map((point) => ({ ...point })),
+    }))
     const bimComponents = Object.fromEntries(storey.components.map((component) => {
       const id = `bim-${component.sourceId}`
       return [id, {
@@ -417,7 +463,14 @@ export function planFromIfcProposal(proposal: IfcPlanProposal): Plan {
     plan = {
       ...plan,
       floors: plan.floors.map((floor) =>
-        floor.id === plan.activeFloorId ? { ...floor, bimComponents } : floor),
+        floor.id === plan.activeFloorId ? { ...floor, bimSpaces, bimComponents } : floor),
+    }
+    const roomNames = { ...activeFloor(plan).roomNames }
+    for (const space of storey.spaces) roomNames[`bim-space:${space.sourceId}`] = space.name
+    plan = {
+      ...plan,
+      floors: plan.floors.map((floor) =>
+        floor.id === plan.activeFloorId ? { ...floor, roomNames } : floor),
     }
   }
 

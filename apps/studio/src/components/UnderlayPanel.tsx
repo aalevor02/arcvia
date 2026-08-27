@@ -18,6 +18,8 @@ interface Props {
   onRemove(): void
   onStartCalibrate(): void
   onDetect(): void
+  /** Move to the view that reads and applies the deck's render pages. */
+  onOpenRenders?(): void
   /**
    * The rest of an uploaded deck: its renders, elevations and other floors.
    *
@@ -46,6 +48,7 @@ export function UnderlayPanel({
   onRemove,
   onStartCalibrate,
   onDetect,
+  onOpenRenders,
   onDeck,
 }: Props) {
   const input = useRef<HTMLInputElement>(null)
@@ -140,7 +143,14 @@ export function UnderlayPanel({
           {busy ?? 'Upload a plan or PDF'}
         </button>
 
-        {deck && <DeckSummary deck={deck} busy={Boolean(busy)} onPick={pick} />}
+        {deck && (
+          <DeckSummary
+            deck={deck}
+            busy={Boolean(busy)}
+            onPick={pick}
+            onOpenRenders={onOpenRenders}
+          />
+        )}
 
         {error && (
           <p className="alert alert-error" role="alert" style={{ fontSize: 12 }}>
@@ -245,10 +255,12 @@ function DeckSummary({
   deck,
   busy,
   onPick,
+  onOpenRenders,
 }: {
   deck: { url: string; sheets: DocumentSheet[] }
   busy: boolean
   onPick(url: string, sheet: DocumentSheet): void
+  onOpenRenders?(): void
 }) {
   const plans = deck.sheets.filter((sheet) => sheet.kind === 'plan')
   const renders = deck.sheets.filter((sheet) => sheet.kind === 'render')
@@ -276,12 +288,20 @@ function DeckSummary({
       )}
 
       {renders.length > 0 && (
-        <p className="muted" style={{ fontSize: 11.5 }}>
-          Also found {renders.length} interior render
-          {renders.length === 1 ? '' : 's'}
-          {rooms.length > 0 && <> of {rooms.join(', ').toLowerCase()}</>}. These
-          are matched to rooms by name once the plan is traced.
-        </p>
+        <>
+          <p className="muted" style={{ fontSize: 11.5 }}>
+            Also found {renders.length} interior render
+            {renders.length === 1 ? '' : 's'}
+            {rooms.length > 0 && <> of {rooms.join(', ').toLowerCase()}</>}. The
+            first is analysed automatically in 3D; use Deck design there to
+            read and apply the others.
+          </p>
+          {onOpenRenders && (
+            <button className="btn btn-primary" onClick={onOpenRenders}>
+              Analyze renders in 3D
+            </button>
+          )}
+        </>
       )}
     </div>
   )

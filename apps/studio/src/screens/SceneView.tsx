@@ -326,7 +326,10 @@ export default function SceneView({ plan, sceneId, sceneName, onDesignsChanged }
         const doc = await readDocument(deckUrl)
         const renders = doc.sheets.filter((sheet) => sheet.kind === 'render')
         if (renders.length === 0) return
-        const sheet = renders[0]
+        // A deck often opens with an exterior hero image or an option cover.
+        // Prefer the first render whose caption resolved to a room so the
+        // automatic design visibly dresses measured interior geometry.
+        const sheet = renders.find((candidate) => candidate.room) ?? renders[0]
         const spec = await readDesign(deckUrl, sheet.page, sheet.index, sheet.room)
         spec.source = { page: sheet.page, index: sheet.index, room: sheet.room, auto: true }
         applyDesign(spec)

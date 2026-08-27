@@ -1,6 +1,7 @@
 import { createIfcPlanProposal, planFromIfcProposal } from '../src/bim/ifcPlanProposal'
 import type { IfcMetadataResult } from '../src/bim/ifcMetadata'
 import { activeFloor, updateObject } from '../src/plan/planStore'
+import { detectRooms } from '../src/plan/rooms'
 
 let passed = 0
 let failed = 0
@@ -140,6 +141,43 @@ check('plan retains auditable BIM model provenance',
   plan.bimSource?.sourceName === 'fixture.ifc'
   && plan.bimSource.schema === 'IFC4'
   && plan.bimSource.recordCount === 1)
+
+const nestedProposal = createIfcPlanProposal({
+  ...result,
+  records: [
+    ...result.records,
+    {
+      source: 'ifc', sourceId: 'space-1', sourceClass: 'IfcSpace', kind: 'space', confidence: 1,
+      evidence: [], conflicts: [], relations: { parentId: 'storey-1' }, quantities: [], properties: { name: 'Measured office' },
+    },
+  ],
+  elements: [
+    {
+      ...result.elements[0], sourceId: 'beam-in-space', kind: 'beam',
+      relations: { containerId: 'space-1' },
+    },
+    {
+      source: 'ifc', sourceId: 'space-1', sourceClass: 'IfcSpace', kind: 'space', confidence: 1,
+      evidence: [], conflicts: [], relations: { parentId: 'storey-1' }, quantities: [],
+      properties: { name: 'Measured office' },
+      geometry: {
+        bounds: { min: { x: 100, y: 12, z: 200 }, max: { x: 104, y: 15, z: 204 } },
+        vertexCount: 8, partCount: 1,
+        planLoop: [{ x: 100, y: 200 }, { x: 104, y: 200 }, { x: 104, y: 204 }, { x: 100, y: 204 }],
+      },
+    },
+  ],
+}, 'nested-spatial.ifc')
+check('space-contained components resolve to the native building storey',
+  nestedProposal.storeys.length === 1
+  && nestedProposal.storeys[0].sourceId === 'storey-1'
+  && nestedProposal.storeys[0].components[0]?.storeyId === 'storey-1')
+check('measured IFC spaces are retained on their native storey',
+  nestedProposal.storeys[0].spaces[0]?.name === 'Measured office')
+const nestedPlan = planFromIfcProposal(nestedProposal)
+check('measured IFC spaces become authoritative named editor rooms',
+  detectRooms(activeFloor(nestedPlan)).length === 1
+  && activeFloor(nestedPlan).roomNames['bim-space:space-1'] === 'Measured office')
 
 const componentOnlyProposal = createIfcPlanProposal({
   ...result,

@@ -72,6 +72,8 @@ export interface BimElementGeometry {
   }
   vertexCount: number
   partCount: number
+  /** Exact measured boundary of an IFC space on the X/Z floor plane. */
+  planLoop?: Array<{ x: number; y: number }>
   /** Exact transformed source geometry, retained only within the import budget. */
   mesh?: BimTriangleMesh
   /** Why an eligible element fell back to its measured bounds. */

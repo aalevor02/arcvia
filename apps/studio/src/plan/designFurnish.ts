@@ -15,6 +15,22 @@ import type {
   ProposalPlacementContext,
 } from './furnish'
 import type { Plan, Vec2 } from './types'
+import { detectRooms } from './rooms'
+
+export function planAsMeasuredModel(plan: Plan): CadModel {
+  const storeys = plan.floors.map((floor, storey) => {
+    const rooms = detectRooms(floor)
+    const walls: CadWall[] = Object.values(floor.walls).flatMap((wall) => {
+      const a = floor.vertices[wall.a]
+      const b = floor.vertices[wall.b]
+      return a && b ? [{ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y }, thickness: wall.thickness }] : []
+    })
+    return { storey, title: floor.name, shift: [0, 0] as [number, number], walls,
+      spaces: rooms.map((room, index) => ({ index, name: floor.roomNames[room.id] ?? `Room ${index + 1}`, kind: 'room', area: room.area,
+        loop: room.polygon.map((point) => [point.x, point.y] as [number, number]) })) }
+  })
+  return { elements: { storeys } }
+}
 
 /**
  * Furniture observed in a render, arranged inside measured reconstruction rooms.
@@ -92,10 +108,14 @@ export function furnishFromDesign(
       const takenFloor: Slot[] = []
       const takenWall: Slot[] = []
       const takenCeiling: Slot[] = []
+      const emitted = new Set<string>()
       const edges = attachmentEdges(block, space, polygon)
       for (const observed of design.furniture) {
         const found = fromLabel(observed.item)
         const item = found ? BY_ID.get(found.item.id) : undefined
+        if (item && !roomAllowsItem(room, item.id)) continue
+        const duplicateKey = `${room.toLowerCase()}|${item?.id ?? observed.item.toLowerCase()}`
+        if (emitted.has(duplicateKey)) continue
         if (!item || item.placement === 'in-wall') {
           // Inventory is still valuable when the catalogue cannot place it:
           // bespoke joinery, a one-off lamp, and render-only decor must be
@@ -119,6 +139,7 @@ export function furnishFromDesign(
             confidence: Math.min(0.7, Math.max(0.35, design.confidence ?? 0.55)),
             because: `seen in the ${designRoomName(design) || room} render; no safe catalogue asset or attachment target is available yet`,
           })
+          emitted.add(duplicateKey)
           continue
         }
 
@@ -146,6 +167,7 @@ export function furnishFromDesign(
           confidence: Math.min(0.75, Math.max(0.45, design.confidence ?? 0.6)),
           because: `seen in the ${designRoomName(design) || room} render; arranged inside the measured ${room} boundary`,
         })
+        emitted.add(duplicateKey)
         if (item.id !== 'rug') {
           const target = item.placement === 'floor'
             ? takenFloor : item.placement === 'wall' ? takenWall : takenCeiling
@@ -155,6 +177,17 @@ export function furnishFromDesign(
     }
   }
   return proposals
+}
+
+function roomAllowsItem(room: string, itemId: string): boolean {
+  const name = room.toLowerCase()
+  const kitchen = ['counter', 'island', 'kitchen-cabinet', 'kitchen-stove', 'sink'].includes(itemId)
+  const bath = ['bathtub', 'toilet', 'bidet', 'basin'].includes(itemId)
+  const balcony = /balcony|terrace|veranda|deck|corridor|hall|landing/.test(name)
+  if (kitchen) return /kitchen|utility|pantry/.test(name)
+  if (bath) return /bath|toilet|wc|powder|ensuite/.test(name)
+  if (balcony && (itemId === 'coffee-table' || itemId === 'dining-table-6')) return false
+  return true
 }
 
 /**
