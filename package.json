@@ -20,7 +20,14 @@
     "dev:vis": "npm run dev --workspace=apps/visualisation",
     "dev:api": "npm run dev --workspace=services/api",
     "dev:detect": "services/floorplan-ai/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8090 --app-dir services/floorplan-ai",
-    "build": "npm run build --workspaces --if-present"
+    "check:types": "node tools/validate.mjs types",
+    "test:js": "node tools/validate.mjs js",
+    "test:python": "node tools/validate.mjs python",
+    "test:bim": "node tools/validate.mjs bim",
+    "compare:trees": "node tools/compare-trees.mjs A:\\Web\\Arcvia C:\\Users\\aalev\\Arcvia",
+    "build": "npm run build --workspaces --if-present",
+    "build:production": "node tools/validate.mjs build",
+    "validate": "node tools/validate.mjs all"
   },
   "engines": {
     "node": ">=20"
