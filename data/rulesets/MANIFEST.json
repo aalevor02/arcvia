@@ -1,0 +1,220 @@
+{
+ "name": "arcvia-building-rules",
+ "ruleset_version": "0.1.0",
+ "generated_at": "2026-08-27T04:32:44",
+ "status": "PROPOSED - not wired into any product code. Awaiting product-side ownership.",
+ "produced_by": {
+  "tool": "A:/Research/Corpus/tools/codes_rules.py",
+  "tests": "A:/Research/Corpus/tools/test_codes_rules.py --negative",
+  "corpus_source_id": "ecfr_building_regs",
+  "registry": "A:/Research/Corpus/registry/sources.yaml"
+ },
+ "licence": {
+  "code": "PUBLIC_DOMAIN",
+  "basis": "US Government works, 17 USC 105",
+  "evidence": "https://www.ecfr.gov/reader-aids/understanding-the-ecfr/what-is-the-ecfr",
+  "attribution_required": false,
+  "commercial_use_ok": true
+ },
+ "counts": {
+  "extracted": 661,
+  "deduplicated_away": 27,
+  "rules": 634,
+  "quarantined": 1835,
+  "unit_verified": 311,
+  "max_conversion_delta_mm": 4.0,
+  "unit_verified_by_unit": {
+   "in": {
+    "rules": 486,
+    "verified": 305,
+    "max_delta_mm": 2.4,
+    "percent_verified": 62.8
+   },
+   "ft": {
+    "rules": 148,
+    "verified": 6,
+    "max_delta_mm": 4.0,
+    "percent_verified": 4.1
+   }
+  },
+  "tolerance_basis": {
+   "in": {
+    "n": 259,
+    "max_observed_mm": 2.4
+   },
+   "ft": {
+    "n": 6,
+    "max_observed_mm": 4.0
+   }
+  },
+  "verification_by_document": {
+   "16 CFR 1211": {
+    "rules": 2,
+    "verified": 2,
+    "percent_verified": 100.0,
+    "dual_prints_metric": null,
+    "classification_basis": "n<10 - not enough rules to characterise the document"
+   },
+   "24 CFR 3280": {
+    "rules": 31,
+    "verified": 1,
+    "percent_verified": 3.2,
+    "dual_prints_metric": false,
+    "classification_basis": "n=31"
+   },
+   "28 CFR 36": {
+    "rules": 1,
+    "verified": 0,
+    "percent_verified": 0.0,
+    "dual_prints_metric": null,
+    "classification_basis": "n<10 - not enough rules to characterise the document"
+   },
+   "29 CFR 1910": {
+    "rules": 128,
+    "verified": 1,
+    "percent_verified": 0.8,
+    "dual_prints_metric": false,
+    "classification_basis": "n=128"
+   },
+   "29 CFR 1926": {
+    "rules": 152,
+    "verified": 5,
+    "percent_verified": 3.3,
+    "dual_prints_metric": false,
+    "classification_basis": "n=152"
+   },
+   "36 CFR 1190": {
+    "rules": 49,
+    "verified": 44,
+    "percent_verified": 89.8,
+    "dual_prints_metric": true,
+    "classification_basis": "n=49"
+   },
+   "36 CFR 1191": {
+    "rules": 261,
+    "verified": 258,
+    "percent_verified": 98.9,
+    "dual_prints_metric": true,
+    "classification_basis": "n=261"
+   },
+   "7 CFR 1924": {
+    "rules": 10,
+    "verified": 0,
+    "percent_verified": 0.0,
+    "dual_prints_metric": false,
+    "classification_basis": "n=10"
+   }
+  },
+  "structurally_unverifiable": {
+   "rules": 321,
+   "rules_in_unclassified_documents": 3,
+   "reason": "their source document prints imperial units only, with no metric equivalent to cross-check against. PERMANENT - collecting more text cannot raise it."
+  }
+ },
+ "per_document": {
+  "10 CFR 433": {
+   "rules": 0,
+   "quarantined": 0
+  },
+  "10 CFR 435": {
+   "rules": 0,
+   "quarantined": 0
+  },
+  "16 CFR 1211": {
+   "rules": 2,
+   "quarantined": 52
+  },
+  "24 CFR 3280": {
+   "rules": 32,
+   "quarantined": 216
+  },
+  "24 CFR 3285": {
+   "rules": 0,
+   "quarantined": 46
+  },
+  "28 CFR 36": {
+   "rules": 1,
+   "quarantined": 69
+  },
+  "29 CFR 1910": {
+   "rules": 131,
+   "quarantined": 550
+  },
+  "29 CFR 1926": {
+   "rules": 174,
+   "quarantined": 574
+  },
+  "36 CFR 1190": {
+   "rules": 49,
+   "quarantined": 67
+  },
+  "36 CFR 1191": {
+   "rules": 262,
+   "quarantined": 229
+  },
+  "36 CFR 1234": {
+   "rules": 0,
+   "quarantined": 10
+  },
+  "7 CFR 1924": {
+   "rules": 10,
+   "quarantined": 22
+  }
+ },
+ "quarantine": {
+  "total": 1835,
+  "by_reason": {
+   "no-explicit-comparator": 533,
+   "explicit-exemption": 40,
+   "no-obligation-verb": 767,
+   "no-subject": 35,
+   "multiple-values-one-comparator": 212,
+   "unit-check-failed": 1,
+   "permissive-allowance": 166,
+   "rate-not-dimension": 7,
+   "ambiguous-comparator-binding": 17,
+   "conditional-applicability": 8,
+   "exception-clause": 22,
+   "compound-unit-not-dimension": 2,
+   "multiple-values-multiple-comparators": 25
+  },
+  "full_list": "A:/Research/Corpus/exports/rulesets/quarantine-v0.1.0.json",
+  "note": "Kept in the corpus, not the repo: it is a work queue, not a deliverable."
+ },
+ "limitations": [
+  "VERIFICATION IS A PROPERTY OF THE DOCUMENT, NOT THE UNIT, AND THE CEILING IS PERMANENT. 36 CFR 1191 prints every dimension twice and verifies at 258/261 = 98.9%. OSHA (29 CFR 1910, 1926) and HUD (24 CFR 3280) print imperial only and verify at 7/311 = 2.3% - in BOTH units. So 311 of 572 rules (54.4%) are STRUCTURALLY unverifiable by the dual-unit cross-check: their source prints no metric equivalent, and no amount of further collecting can raise that. It is a structural ceiling, not a sample-size problem. The per-unit figures (in 60%, ft 4.3%) are themselves an aggregate hiding this - feet look unverifiable only because 132 of the 140 foot rules come from imperial-only documents; inside 36 CFR 1191 feet verify at 4/5. Practical consequence for a consumer: treat 36 CFR 1191 rules as cross-checked and every other document's rules as parsed-but-unconfirmed, and weight a compliance finding accordingly.",
+  "COVERAGE, MEASURED 2026-08-27 (not estimated): the eCFR search API reports 2,957 sections CFR-wide carrying the dual-unit dimensional pattern, across 230 parts, with count relation 'eq' (not a capped 'gte'). The 7 parts harvested here hold 185 of them = 6.3%. BUT that denominator is dimensional prose in general, not building rules - the largest holders are fisheries (50 CFR 648), endangered species, hazmat shipping and consumer appliances. Filtering the 223 unharvested parts by building-related headings leaves 23 parts / 148 sections, and most of those are vehicles (46 CFR vessel construction, 49 CFR 38 and 36 CFR 1192 transportation) or nuclear (10 CFR 50). Genuinely building-relevant and still missing: 28 CFR 36 (DOJ ADA Title III), 36 CFR 1190 (PROWAG, public right-of-way), 36 CFR 1234 (records storage facilities), 16 CFR 1211 (residential garage door operators), 7 CFR 1924 (construction and repair). So coverage of BUILDING dimensional CFR is high, and 6.3% understates it - but the honest figure is 'high', not 'complete', and the remaining candidates are named above rather than left as an unbounded gap.",
+  "eCFR XML only. UFC and ADA PDFs are NOT parsed - they carry no machine-readable section tree, so any citation from them would be reconstructed rather than sourced. That is 169 UFC PDFs (679 MB) and 2 ADA PDFs whose rule content is entirely unmeasured - unlike the CFR gap above, this one has NO number attached to it yet.",
+  "Subject extraction is shallow (text before 'shall'). Every rule carries its verbatim quote so a human can check what was read.",
+  "Applicability/scope is NOT modelled. A rule knows its section and heading, not which building types or occupancies it governs.",
+  "Permissive, conditional and exception clauses are quarantined, not interpreted. Some of them ARE requirements under conditions.",
+  "No rule here has been evaluated against a real reconstructed plan."
+ ],
+ "validation": {
+  "suite": "tools/test_codes_rules.py",
+  "positive_checks": 22,
+  "negative_perturbations_caught": 10,
+  "result": "ALL CHECKS PASSED"
+ },
+ "files": [
+  {
+   "file": "building-rules-v0.1.0.json",
+   "bytes": 534541,
+   "sha256": "b95658d4446142be00e4497666894f89fb6588f15946b118827f082c8ebd3001"
+  },
+  {
+   "file": "building-rules.schema.json",
+   "bytes": 5718,
+   "sha256": "536476ef27b8083e90808772f0492e2a1da050d6873b80ecebd48642f81f2297"
+  }
+ ],
+ "coverage_measured": {
+  "method": "eCFR search API, hierarchy counts, query '\"inches (\" AND (minimum OR maximum)'",
+  "cfr_wide_matching_sections": 2957,
+  "count_relation": "eq",
+  "parts_carrying_pattern": 230,
+  "sections_in_harvested_parts": 185,
+  "percent_of_all_dimensional_cfr": 6.3,
+  "caveat": "That denominator is dimensional prose generally, not building rules. Building-relevant unharvested parts: 23 parts / 148 sections, most of them vehicles or nuclear. See limitations for the 5 that genuinely matter."
+ }
+}

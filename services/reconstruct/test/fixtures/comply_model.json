@@ -1,0 +1,203 @@
+{
+ "_note": "Hand-built minimal model for compliance tests. Three rooms and four doors chosen so every three-valued outcome is exercised: a room that PASSES the turning circle, one that FAILS it, one whose geometry is degenerate and must come back UNKNOWN; a door below the ADA figure (FAIL) and one above it (UNKNOWN, never PASS). Coordinates are metres. Wall endpoints use the real model's {x,y} object schema; an earlier draft used [x,y] pairs and map_openings rejected it, which is exactly what a fixture is for.",
+ "unit": "m",
+ "scale": 1.0,
+ "wallHeight": 2.7,
+ "elements": {
+  "walls": [
+   {
+    "a": {
+     "x": 0.0,
+     "y": 0.0
+    },
+    "b": {
+     "x": 6.0,
+     "y": 0.0
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 6.0,
+     "y": 0.0
+    },
+    "b": {
+     "x": 6.0,
+     "y": 6.0
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 6.0,
+     "y": 6.0
+    },
+    "b": {
+     "x": 0.0,
+     "y": 6.0
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 0.0,
+     "y": 6.0
+    },
+    "b": {
+     "x": 0.0,
+     "y": 0.0
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 6.0,
+     "y": 0.0
+    },
+    "b": {
+     "x": 7.2,
+     "y": 0.0
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 7.2,
+     "y": 0.0
+    },
+    "b": {
+     "x": 7.2,
+     "y": 1.2
+    },
+    "thickness": 0.23
+   },
+   {
+    "a": {
+     "x": 7.2,
+     "y": 1.2
+    },
+    "b": {
+     "x": 6.0,
+     "y": 1.2
+    },
+    "thickness": 0.23
+   }
+  ],
+  "spaces": [
+   {
+    "index": 0,
+    "name": "LIVING",
+    "kind": "living",
+    "area": 34.5,
+    "gross_area": 36.0,
+    "perimeter": 24.0,
+    "loop": [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      6.0
+     ],
+     [
+      0.0,
+      6.0
+     ]
+    ]
+   },
+   {
+    "index": 1,
+    "name": "STORE",
+    "kind": "bedroom",
+    "area": 1.2,
+    "gross_area": 1.44,
+    "perimeter": 4.8,
+    "loop": [
+     [
+      6.0,
+      0.0
+     ],
+     [
+      7.2,
+      0.0
+     ],
+     [
+      7.2,
+      1.2
+     ],
+     [
+      6.0,
+      1.2
+     ]
+    ]
+   },
+   {
+    "index": 2,
+    "name": "SLIVER",
+    "kind": "living",
+    "area": 0.0,
+    "gross_area": 0.0,
+    "perimeter": 0.0,
+    "loop": [
+     [
+      10.0,
+      10.0
+     ],
+     [
+      11.0,
+      11.0
+     ]
+    ]
+   }
+  ],
+  "openings": [
+   {
+    "kind": "door",
+    "wall": 0,
+    "along": 3.0,
+    "width": 0.75,
+    "height": 2.1,
+    "sill": 0.0,
+    "source": "fixture",
+    "confidence": 1.0
+   },
+   {
+    "kind": "door",
+    "wall": 1,
+    "along": 3.0,
+    "width": 1.2,
+    "height": 2.1,
+    "sill": 0.0,
+    "source": "fixture",
+    "confidence": 1.0
+   },
+   {
+    "kind": "door",
+    "wall": 4,
+    "along": 0.6,
+    "width": 0.7,
+    "height": 2.1,
+    "sill": 0.0,
+    "source": "fixture",
+    "confidence": 1.0
+   },
+   {
+    "kind": "window",
+    "wall": 2,
+    "along": 3.0,
+    "width": 1.5,
+    "height": 1.2,
+    "sill": 0.9,
+    "source": "fixture",
+    "confidence": 1.0
+   }
+  ],
+  "fixtures": [],
+  "storeys": []
+ }
+}
