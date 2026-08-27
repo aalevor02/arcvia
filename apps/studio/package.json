@@ -17,6 +17,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.171.0",
+    "web-ifc": "^0.0.77",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

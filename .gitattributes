@@ -1,0 +1,15 @@
+# IFC/STEP files are byte-pinned test fixtures.
+#
+# They are TEXT by format, so git's autocrlf happily rewrites their line endings on
+# checkout -- which changes their byte length and their checksum. That is not cosmetic
+# here: apps/studio/test/fixtures/ifc/manifest.json pins the exact size and sha256 of
+# each fixture, and ifcCorpus.test.ts verifies them, so a normalised checkout fails the
+# suite. It also means the bytes a parser test reads are not the bytes the publisher
+# shipped.
+#
+# Measured 2026-08-27: IFC4-wall-opening-window.ifc went 12,492 -> 12,689 bytes on
+# checkout, exactly 197 LF->CRLF conversions.
+*.ifc -text
+*.ifcxml -text
+*.step -text
+*.stp -text

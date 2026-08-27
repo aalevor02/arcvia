@@ -511,6 +511,15 @@ export function duplicateFloor(plan: Plan, sourceId: string, name?: string): Pla
     elevation: last.elevation + DEFAULT_STOREY,
     vertices,
     walls,
+    // Duplicated BIM components get fresh ids but keep their provenance: the
+    // copy came from the same native element, and saying otherwise would break
+    // the unique-source-element count the whole analysis rests on.
+    bimComponents: Object.fromEntries(
+      Object.values(source.bimComponents ?? {}).map((component) => {
+        const id = nextId('b')
+        return [id, { ...component, id }]
+      }),
+    ),
     // Room names are deliberately not copied: the ids they are keyed by belong
     // to the source floor's vertices and would never match here.
     roomNames: {},

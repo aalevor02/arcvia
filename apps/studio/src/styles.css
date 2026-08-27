@@ -892,3 +892,92 @@ select:focus {
 .pub-new .btn {
   flex: none;
 }
+
+/* ---- BIM workspace ------------------------------------------------------- */
+/* Only the shapes the app has no class for. Text, alerts and headings reuse
+   .eyebrow / .muted / .alert, so this adds no second vocabulary for them. */
+
+.bim-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Importing replaces the document, so the confirmation is visually a stop, not
+   another row in the panel. */
+.bim-confirm {
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--panel-alt);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bim-confirm h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.bim-confirm p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.bim-confirm-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Provenance is a record, so it reads as one: label above value, monospaced
+   figures, nothing that looks clickable. */
+.bim-provenance {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.bim-provenance dt {
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.bim-provenance dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Each skipped cause is its own line: they have different fixes, so a summed
+   total would be unactionable. */
+.bim-skipped h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.bim-skipped ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.bim-skipped li {
+  margin-bottom: 2px;
+}
+
+.bim-skipped strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}

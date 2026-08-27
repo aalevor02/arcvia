@@ -119,6 +119,9 @@ function buildFloor(
     id: `cad-floor-${source.storey}`,
     name: source.title,
     elevation: index * rise,
+    // A DWG/DXF carries no BIM semantics, so this is empty by fact rather than
+    // by omission. Left explicit so the absence reads as measured, not skipped.
+    bimComponents: {},
     vertices,
     walls,
     roomNames: {},

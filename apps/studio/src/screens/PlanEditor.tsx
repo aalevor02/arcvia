@@ -83,6 +83,7 @@ import { HubBrowserPanel, type HubUse } from '../components/HubBrowserPanel'
 import { ObjectInspector } from '../components/ObjectInspector'
 import type { PlacedObject } from '../catalogue/types'
 import { resolveHubFurniture } from '../plan/hubFurniture'
+import { BimWorkspacePanel } from '../components/BimWorkspacePanel'
 
 interface Props {
   sceneId: string
@@ -1100,6 +1101,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
             units={units}
             placing={placing}
             onPick={setPlacing}
+          />
+
+          <BimWorkspacePanel
+            plan={plan}
+            onReplacePlan={(next) => apply(() => next)}
           />
 
           <HubBrowserPanel

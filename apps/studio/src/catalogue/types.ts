@@ -166,6 +166,18 @@ export interface AssetModel {
 /** An instance of a catalogue item, placed on a floor. */
 export interface PlacedObject {
   id: string
+  /**
+   * Native BIM element this object was derived from.
+   *
+   * A door imported from an IFC model is the same kind of thing as a wall
+   * imported from one: it has an origin, and every downstream takeoff reads
+   * that origin as though the source asserted it. Typed as unknown-shaped here
+   * rather than importing from `../bim/semantics`, because catalogue types are
+   * the lower layer and must not depend on the BIM subsystem above them.
+   */
+  bimSource?: import('../bim/semantics').BimEntityProvenance
+  /** Source semantics and measurements retained for audit and analysis. */
+  bimData?: import('../bim/semantics').BimEntitySnapshot
   /** Catalogue item id. */
   item: string
   /** Plan coordinates, metres — the object's centre. */
