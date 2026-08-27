@@ -11,7 +11,7 @@
 // currently BOTH recompute ceil(sqrt(n)) and must stay byte-identical or light
 // leaks from the wrong room. After this, both READ atlas.cells.
 // ─────────────────────────────────────────────────────────────────────────────
-import type { Id, M, P2, Provenance } from './schema'
+import type { Id, M, P2, Provenance, Rad } from './schema'
 
 export type SurfaceKind =
   | 'wall-paint' | 'wall-exterior' | 'floor-wood' | 'floor-tile' | 'ceiling'
