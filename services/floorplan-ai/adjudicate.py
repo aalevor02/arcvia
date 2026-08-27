@@ -584,7 +584,7 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
             crops,
         ))
 
-    for (suspect, _), answer in zip(crops, answers):
+    for (suspect, crop_image), answer in zip(crops, answers):
         verdict = _verdict_of(answer) if answer else None
         if not verdict:
             notes.append("adjudicator: a crop went unanswered; its proposal stands")
@@ -631,6 +631,41 @@ def _adjudicate_clusters(image, walls, rooms, notes) -> tuple[list, list]:
                     f"and {dropped} inner wall(s)"
                 )
         elif kind in ("railing", "boundary") and confidence >= MIN_CONFIDENCE:
+            # Asked twice, and it has to agree with itself.
+            #
+            # Every other verdict here either removes a proposal or leaves a
+            # note. This one CHANGES THE BUILDING: a line marked railing is
+            # built at parapet height instead of storey height, so the same DWG
+            # imported twice would come back with a balcony that is open on one
+            # import and boxed in on the next, with nothing on screen saying
+            # which you got. Measured on one drawing, three consecutive runs
+            # gave 2 railings, then 1 boundary, then 0 -- same file, same
+            # service, same crops. The model is not deterministic and no
+            # temperature setting makes it so.
+            #
+            # So a geometry-changing verdict has to survive being asked again.
+            # One extra call, on the one or two candidates a drawing produces,
+            # buys an answer that is the same tomorrow. When the two disagree
+            # the proposal stands as an ordinary wall -- doubt goes to the
+            # incumbent, as it does everywhere else in this pass -- and the
+            # note says the verdict was unstable rather than silently omitting
+            # it, because "no railing found" and "could not decide" send a
+            # reviewer to different places.
+            again = _verdict_of(_ask(crop_image, _CROP_PROMPT) or "")
+            agreed = (
+                again is not None
+                and str(again.get("verdict", "")).lower() == kind
+                and float(again.get("confidence", 0) or 0) >= MIN_CONFIDENCE
+            )
+            if not agreed:
+                second = str((again or {}).get("verdict", "no answer")).lower()
+                x0, y0, x1, y1 = suspect["box"]
+                notes.append(
+                    f"adjudicator: a structure near {((x0 + x1) / 2):.0%},"
+                    f"{((y0 + y1) / 2):.0%} read as {kind} then {second} "
+                    "- unstable, kept as an ordinary wall"
+                )
+                continue
             # Mark the walls themselves, not just the transcript.
             #
             # This verdict is deliberately non-destructive (see _DROP): a
