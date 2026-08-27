@@ -204,6 +204,87 @@ export async function registerDetectRoutes(app) {
    * reading a spec is seconds of a hosted vision model, and charging to find
    * out what the designer chose would price the question nobody skips.
    */
+  /**
+   * Which room is this render of?
+   *
+   * The caption matcher in the studio resolves most renders for nothing. This
+   * costs a vision call, so it is a separate request the panel makes only for
+   * the ones it could not place — never automatically for a whole deck.
+   *
+   * Both files come from storage by key rather than the wire: the plan and the
+   * deck are already stored, and re-uploading a 3 MB drawing to ask a question
+   * about it is a cost with no payer.
+   */
+  app.post('/assign', { preHandler: requireAuth }, async (request, reply) => {
+    const planKey = storageKey(request.body?.planUrl ?? request.body?.planKey)
+    const renderKey = storageKey(request.body?.renderUrl ?? request.body?.renderKey)
+    if (!planKey || !renderKey) {
+      return reply
+        .status(400)
+        .send({ message: 'Provide the stored plan and the stored render.' })
+    }
+
+    const rooms = request.body?.rooms
+    if (!Array.isArray(rooms) || rooms.length === 0) {
+      return reply.status(400).send({ message: 'Provide the rooms to choose between.' })
+    }
+
+    const page = Number(request.body?.renderPage ?? 0)
+    const index = Number(request.body?.renderIndex ?? 0)
+    if (!Number.isInteger(page) || page < 0 || !Number.isInteger(index) || index < 0) {
+      return reply.status(400).send({ message: 'Page and index must be whole numbers.' })
+    }
+
+    const [planFile, renderFile] = await Promise.all([open(planKey), open(renderKey)])
+    if (!planFile || !renderFile) {
+      return reply.status(404).send({ message: 'That file is not stored here.' })
+    }
+
+    const form = new FormData()
+    form.append(
+      'plan',
+      new Blob([await streamToBuffer(planFile.stream)], { type: planFile.contentType }),
+      'plan.png',
+    )
+    form.append(
+      'render',
+      new Blob([await streamToBuffer(renderFile.stream)], { type: renderFile.contentType }),
+      'render.png',
+    )
+    // The SAME rooms the caller is showing. Re-detecting inside the service
+    // could renumber them, and then a correct answer would point at the wrong
+    // room — the one failure mode this endpoint exists to remove.
+    form.append('rooms', JSON.stringify(rooms))
+    form.append('render_page', String(page))
+    form.append('render_index', String(index))
+
+    let response
+    try {
+      response = await fetch(`${DETECTOR}/assign`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+      })
+    } catch (error) {
+      request.log.error({ err: error, detector: DETECTOR }, 'assignment reader unreachable')
+      return reply.status(503).send({
+        message: 'The plan reader is not running. Start services/floorplan-ai.',
+        code: 'DETECTOR_DOWN',
+      })
+    }
+
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      // Forward the service's own reason. A missing vision key and an
+      // unreadable image need different fixes, and a generic message sends the
+      // operator to the wrong one.
+      return reply.status(response.status).send({
+        message: typeof body.detail === 'string' ? body.detail : 'That render could not be placed.',
+      })
+    }
+    return reply.send(body)
+  })
+
   app.post('/document/design', { preHandler: requireAuth }, async (request, reply) => {
     const key = storageKey(request.body?.url ?? request.body?.key)
     if (!key) {

@@ -144,6 +144,96 @@ async function gemini(imageBase64, mimeType, prompt) {
 }
 
 /**
+ * BytePlus Ark (Seedream). The same OpenAI-ish `/images/generations` shape,
+ * with two differences that matter.
+ *
+ * First, the source image goes in as a data URL rather than inline parts.
+ * Measured 2026-08-27: a 2.53 MB data URL is accepted, which covers a normal
+ * viewport capture, so nothing has to be downscaled on the way out.
+ *
+ * Second, Ark answers with a URL rather than bytes, and that URL is temporary.
+ * Fetching it here rather than storing it is deliberate: a link that expires
+ * would turn a client's published walkthrough into broken images weeks later,
+ * long after anyone connects the two.
+ */
+async function byteplus(imageBase64, mimeType, prompt) {
+  const base = process.env.AI_IMAGE_BASE_URL ?? 'https://ark.ap-southeast.bytepluses.com/api/v3'
+  const model = process.env.AI_IMAGE_MODEL ?? 'seedream-4-0-250828'
+
+  const response = await fetch(`${base.replace(/\/$/, '')}/images/generations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({
+      model,
+      prompt,
+      image: `data:${mimeType};base64,${imageBase64}`,
+      size: process.env.AI_IMAGE_SIZE ?? '2K',
+      response_format: 'url',
+      // A watermark on a client's presentation render is not acceptable, and
+      // the default is on.
+      watermark: false,
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+
+    // Ark reports an un-activated model as 404 rather than 403, which reads as
+    // "wrong URL" and sends people to check the endpoint. It nearly always
+    // means the model was never switched on for this account.
+    if (response.status === 404 && detail.includes('InvalidEndpointOrModel')) {
+      throw new Error(
+        `The image model "${model}" is not activated on this Ark account. ` +
+        'Enable it in the BytePlus console, or set AI_IMAGE_MODEL to one that is.',
+      )
+    }
+    if (response.status === 429) {
+      throw new Error('The image provider is rate limiting or out of quota.')
+    }
+    throw new Error(`Image provider returned ${response.status}: ${detail.slice(0, 200)}`)
+  }
+
+  const body = await response.json()
+  const url = body.data?.[0]?.url
+  if (!url) {
+    // A refusal arrives as a 200 with no image, exactly like the vision path.
+    // Say which, rather than "no image was returned".
+    const reason = body.data?.[0]?.revised_prompt ?? body.error?.message
+    throw new Error(reason ? `The model declined: ${String(reason).slice(0, 160)}` : 'No image was returned.')
+  }
+
+  const fetched = await fetch(url)
+  if (!fetched.ok) {
+    throw new Error(`The provider's image URL returned ${fetched.status} when fetched back.`)
+  }
+  return Buffer.from(await fetched.arrayBuffer())
+}
+
+/**
+ * One name to one function. The choice is an env var precisely so that moving
+ * providers is a config change and not a patch, so the dispatch stays a table.
+ */
+const PROVIDERS = { gemini, byteplus }
+
+/** The image type actually present in the bytes, from its magic number. */
+function sniffImageType(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png'
+  }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+      && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+  // Storage needs some answer, and PNG was the long-standing assumption, so an
+  // unrecognised payload behaves exactly as it did before rather than throwing.
+  return 'image/png'
+}
+
+/**
  * Render a captured viewport into a photograph, and store it.
  *
  * Returns a stored URL, the same shape as a Blender render, so everything
@@ -167,13 +257,19 @@ export async function renderWithAi({ sourcePath, styleId, note, ownerId }) {
   // "do not move the walls".
   const prompt = [PRESERVE, style.prompt, note?.slice(0, 300)].filter(Boolean).join(' ')
 
-  const rendered =
-    PROVIDER === 'gemini'
-      ? await gemini(bytes.toString('base64'), mimeType, prompt)
-      : (() => {
-          throw new Error(`Unknown AI_IMAGE_PROVIDER "${PROVIDER}".`)
-        })()
+  const provider = PROVIDERS[PROVIDER]
+  if (!provider) {
+    throw new Error(
+      `Unknown AI_IMAGE_PROVIDER "${PROVIDER}". Known: ${Object.keys(PROVIDERS).join(', ')}.`,
+    )
+  }
+  const rendered = await provider(bytes.toString('base64'), mimeType, prompt)
 
-  const stored = await put(rendered, 'image/png', { prefix: `renders/${ownerId}` })
+  // Sniff the bytes rather than trusting a constant. Gemini returns PNG and
+  // Ark returns JPEG, and the old hardcoded 'image/png' meant an Ark render was
+  // stored as .png while actually being a JPEG. Browsers sniff and render it
+  // anyway, so this stays invisible until something downstream believes the
+  // extension -- a thumbnailer, a PDF export, a Content-Type header.
+  const stored = await put(rendered, sniffImageType(rendered), { prefix: `renders/${ownerId}` })
   return stored.url
 }
