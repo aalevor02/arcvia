@@ -1,126 +1,85 @@
 ---
 /**
- * The hero image, drawn rather than photographed.
+ * The hero: a real drawing and the real render made from it.
  *
- * A placeholder box that says "Product walkthrough" is worse than nothing: it
- * is the largest element on the page and it reads as a broken image. Until
- * there is a real capture to put here, this shows what the product actually
- * produces — a shared walkthrough with a live configurator — in about 2 kB of
- * inline SVG that is sharp on any display and needs no network request.
+ * ── Why this replaced the drawn placeholder ─────────────────────────────────
+ * The previous version was an inline SVG illustration, and its own comment said
+ * why: "until there is a real capture to put here". That condition is now met —
+ * the render pipeline has produced finished Cycles frames of a real villa, and
+ * the plan reader has produced the storey drawings they came from.
  *
- * Everything paints in `currentColor` against Tailwind's brand tokens, so it
- * follows a rebrand automatically.
+ * Showing an illustration was the worse failure than a placeholder box. A
+ * visualisation company whose largest on-page element is clip art is making a
+ * claim about its own output quality, and the claim is wrong. The product's
+ * actual frames are better than anything drawn to stand in for them.
+ *
+ * ── Why the PAIR, and not just the pretty render ────────────────────────────
+ * A render alone says "we make images", which every competitor also says and
+ * which a stock photo could fake. The plan beside it says the thing that is
+ * actually hard: this image was derived from that drawing. The transformation
+ * IS the product, so the transformation is what the hero shows.
+ *
+ * ── Performance ─────────────────────────────────────────────────────────────
+ * `fetchpriority="high"` and no lazy-loading on the render: it is the LCP
+ * element, and lazy-loading the thing the page is about delays the only paint
+ * that matters. The plan inset IS lazy — it is decorative-adjacent and below
+ * the fold on narrow screens. Both carry intrinsic width/height so nothing
+ * reflows when they land.
  */
 ---
 
-<div
-  class="mx-auto mt-14 aspect-video w-full max-w-4xl overflow-hidden rounded-card border border-line bg-surface shadow-sm"
->
-  <svg
-    viewBox="0 0 800 450"
-    class="h-full w-full"
-    role="img"
-    aria-label="A published walkthrough open in a browser, with material options a client can switch between"
-  >
-    <defs>
-      <linearGradient id="hero-sky" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="currentColor" class="text-accent" stop-opacity="0.30" />
-        <stop offset="100%" stop-color="currentColor" class="text-accent" stop-opacity="0.05" />
-      </linearGradient>
-      <linearGradient id="hero-floor" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="currentColor" class="text-ink" stop-opacity="0.16" />
-        <stop offset="100%" stop-color="currentColor" class="text-ink" stop-opacity="0.05" />
-      </linearGradient>
-      <linearGradient id="hero-light" x1="0.5" y1="0" x2="0.5" y2="1">
-        <stop offset="0%" stop-color="currentColor" class="text-warn" stop-opacity="0.34" />
-        <stop offset="100%" stop-color="currentColor" class="text-warn" stop-opacity="0" />
-      </linearGradient>
-      <clipPath id="hero-screen">
-        <rect x="24" y="60" width="752" height="366" rx="8" />
-      </clipPath>
-    </defs>
+<div class="mx-auto mt-14 w-full max-w-5xl">
+  <figure class="relative">
+    <!-- The render, in a browser frame: it is a published, shareable page,
+         not a picture file emailed to a client. -->
+    <div class="overflow-hidden rounded-card border border-line bg-surface shadow-lg">
+      <div class="flex items-center gap-2 border-b border-line bg-surface-alt px-4 py-3">
+        <span class="h-2.5 w-2.5 rounded-full bg-line"></span>
+        <span class="h-2.5 w-2.5 rounded-full bg-line"></span>
+        <span class="h-2.5 w-2.5 rounded-full bg-line"></span>
+        <span
+          class="ml-3 hidden truncate rounded-full bg-surface px-3 py-1 text-xs text-ink-soft sm:block"
+        >
+          arcvia.com/w/villa-a &middot; living room
+        </span>
+      </div>
 
-    <!-- ── Browser chrome ─────────────────────────────────────────────── -->
-    <rect width="800" height="450" class="text-surface-alt" fill="currentColor" />
-    <g>
-      <circle cx="48" cy="32" r="5" class="text-line" fill="currentColor" />
-      <circle cx="68" cy="32" r="5" class="text-line" fill="currentColor" />
-      <circle cx="88" cy="32" r="5" class="text-line" fill="currentColor" />
-      <rect x="116" y="21" width="360" height="22" rx="11" class="text-surface" fill="currentColor" />
-      <rect x="130" y="29" width="128" height="6" rx="3" class="text-line" fill="currentColor" />
-    </g>
+      <img
+        src="/hero/interior.webp"
+        width="1920"
+        height="1080"
+        alt="An interior walkthrough view of a villa living room, rendered by Arcvia from the architect's floor plan"
+        class="block aspect-video w-full object-cover"
+        fetchpriority="high"
+        decoding="async"
+      />
+    </div>
 
-    <!-- ── The scene ──────────────────────────────────────────────────── -->
-    <g clip-path="url(#hero-screen)">
-      <rect x="24" y="60" width="752" height="366" fill="url(#hero-sky)" />
+    <!-- The source drawing. Deliberately small and offset: it is the input, and
+         the eye should reach it second. -->
+    <div
+      class="absolute -bottom-6 -left-2 hidden w-32 overflow-hidden rounded-card border border-line bg-surface shadow-lg sm:block md:-left-8 md:w-44"
+    >
+      <img
+        src="/hero/plan.webp"
+        width="800"
+        height="1440"
+        alt="The architect's first-floor plan that this walkthrough was built from"
+        class="block w-full object-cover"
+        style="aspect-ratio: 800 / 1440"
+        loading="lazy"
+        decoding="async"
+      />
+      <figcaption
+        class="border-t border-line px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-ink-soft"
+      >
+        The drawing
+      </figcaption>
+    </div>
+  </figure>
 
-      <!-- back wall + window opening -->
-      <rect x="150" y="118" width="500" height="196" class="text-surface" fill="currentColor" />
-      <rect x="150" y="118" width="500" height="196" fill="none" stroke="currentColor" stroke-width="2" class="text-line" />
-      <rect x="452" y="150" width="150" height="112" class="text-accent" fill="currentColor" opacity="0.22" />
-      <rect x="452" y="150" width="150" height="112" fill="none" stroke="currentColor" stroke-width="3" class="text-ink" opacity="0.55" />
-      <line x1="527" y1="150" x2="527" y2="262" stroke="currentColor" stroke-width="3" class="text-ink" opacity="0.55" />
-
-      <!-- side walls in perspective -->
-      <path d="M150 118 L24 60 L24 400 L150 314 Z" class="text-ink" fill="currentColor" opacity="0.07" />
-      <path d="M650 118 L776 60 L776 400 L650 314 Z" class="text-ink" fill="currentColor" opacity="0.10" />
-
-      <!-- floor -->
-      <path d="M150 314 L650 314 L776 400 L776 426 L24 426 L24 400 Z" fill="url(#hero-floor)" />
-
-      <!-- pendant light + cone -->
-      <line x1="330" y1="118" x2="330" y2="156" stroke="currentColor" stroke-width="2" class="text-ink" opacity="0.6" />
-      <path d="M314 172 L330 156 L346 172 Z" class="text-ink" fill="currentColor" opacity="0.75" />
-      <path d="M314 172 L262 314 L398 314 Z" fill="url(#hero-light)" />
-
-      <!-- rug -->
-      <ellipse cx="380" cy="352" rx="150" ry="34" class="text-ink" fill="currentColor" opacity="0.10" />
-
-      <!-- sofa -->
-      <g>
-        <rect x="228" y="272" width="176" height="30" rx="7" class="text-accent" fill="currentColor" />
-        <rect x="228" y="298" width="176" height="44" rx="8" class="text-accent" fill="currentColor" opacity="0.82" />
-        <rect x="222" y="284" width="16" height="56" rx="7" class="text-accent" fill="currentColor" opacity="0.9" />
-        <rect x="394" y="284" width="16" height="56" rx="7" class="text-accent" fill="currentColor" opacity="0.9" />
-      </g>
-
-      <!-- coffee table -->
-      <rect x="436" y="306" width="104" height="16" rx="4" class="text-ink" fill="currentColor" opacity="0.55" />
-      <rect x="446" y="322" width="6" height="26" class="text-ink" fill="currentColor" opacity="0.4" />
-      <rect x="524" y="322" width="6" height="26" class="text-ink" fill="currentColor" opacity="0.4" />
-
-      <!-- plant -->
-      <path d="M596 316 q-22 -34 -4 -58 q16 24 4 58 Z" class="text-signal" fill="currentColor" opacity="0.75" />
-      <path d="M596 316 q22 -30 44 -30 q-14 26 -44 30 Z" class="text-signal" fill="currentColor" opacity="0.55" />
-      <path d="M584 316 h28 l-5 30 h-18 Z" class="text-ink" fill="currentColor" opacity="0.45" />
-
-      <!-- ── Configurator strip ──────────────────────────────────────── -->
-      <g>
-        <rect x="52" y="352" width="238" height="52" rx="10" class="text-surface" fill="currentColor" />
-        <rect x="52" y="352" width="238" height="52" rx="10" fill="none" stroke="currentColor" stroke-width="1" class="text-line" />
-        <rect x="66" y="364" width="58" height="6" rx="3" class="text-line" fill="currentColor" />
-
-        <!-- swatches; the first is "selected" -->
-        <circle cx="76" cy="386" r="9" class="text-accent" fill="currentColor" />
-        <circle cx="76" cy="386" r="12.5" fill="none" stroke="currentColor" stroke-width="1.5" class="text-accent" />
-        <circle cx="104" cy="386" r="9" class="text-ink" fill="currentColor" opacity="0.5" />
-        <circle cx="132" cy="386" r="9" class="text-warn" fill="currentColor" opacity="0.85" />
-        <circle cx="160" cy="386" r="9" class="text-signal" fill="currentColor" opacity="0.8" />
-        <circle cx="188" cy="386" r="9" class="text-ink" fill="currentColor" opacity="0.22" />
-      </g>
-
-      <!-- ── Share pill ──────────────────────────────────────────────── -->
-      <g>
-        <rect x="556" y="88" width="184" height="34" rx="17" class="text-ink" fill="currentColor" />
-        <path
-          d="M602 105 h-8 a7 7 0 0 1 0 -14 h8 M614 105 h8 a7 7 0 0 0 0 -14 h-8 M600 98 h16"
-          fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"
-        />
-        <rect x="632" y="102" width="92" height="6" rx="3" fill="#fff" opacity="0.75" />
-        <rect x="632" y="92" width="58" height="6" rx="3" fill="#fff" opacity="0.4" />
-      </g>
-    </g>
-
-    <rect x="24" y="60" width="752" height="366" rx="8" fill="none" stroke="currentColor" stroke-width="1" class="text-line" />
-  </svg>
+  <p class="mt-10 text-center text-sm text-ink-soft sm:mt-8">
+    A real project. The drawing on the left became the walkthrough on the right &mdash;
+    no remodelling, no 3D artist.
+  </p>
 </div>
