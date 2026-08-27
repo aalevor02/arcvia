@@ -1,9 +1,21 @@
-# Building rulesets — PROPOSED, not wired in
+# Building rulesets — WIRED, and gated by jurisdiction
 
 Machine-checkable dimensional rules extracted from harvested US federal regulation.
-**Nothing in the product reads these files.** They are here so the product side can
-evaluate the shape before anyone commits to it. See `MANIFEST.json` for counts,
-checksums, licence and validation.
+See `MANIFEST.json` for counts, checksums, licence and validation.
+
+**These files ARE read by the product.** `services/reconstruct/cli.py` points
+`DEFAULT_RULESET` at `building-rules-v0.1.0.json` and runs `comply.assess()` on every
+build, writing `model["compliance"]` beside `model["codecheck"]`. This heading said
+"PROPOSED, not wired in" for long enough to outlive the wiring, which is the same
+stale-record defect the repo keeps paying for — a reader who trusted it would have
+concluded these rules were inert while they were running.
+
+**What keeps it safe is the jurisdiction gate, not the absence of a caller.** These are
+US FEDERAL rules and the buildings are mostly Indian, so `cli.DEFAULT_JURISDICTION` is
+deliberately not "US federal" and the pass evaluates nothing out of scope. Findings are
+kept separate from `codecheck` on purpose: a finding citing 36 CFR 1191 is a different
+kind of claim from one citing an NBC transcription, and a reader has to be able to tell
+which they are looking at.
 
 | | |
 |---|---|

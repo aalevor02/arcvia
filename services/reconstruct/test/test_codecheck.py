@@ -340,6 +340,42 @@ ok("summary carries coverage and refuses a verdict",
 ok("the basis names the rulebook and the architect's ownership",
    "verify" in summary["basis"])
 
+# ── `basis` reports the BOOK's provenance, not an assumption about it ────────
+# This field used to hardcode "a transcription the architect of record must
+# verify". True of the hand-typed NBC book; false of a machine-extracted one --
+# comply/ builds a book out of the eCFR API where each rule carries its clause,
+# issue date and the regulation's verbatim sentence. Describing that as somebody
+# typing out of a paperback misstates provenance in the one field whose entire
+# job is provenance, which is why it is asserted rather than left to review.
+_transcribed = {
+    "title": "NBC 2016 (residential extract)",
+    "basis": "A working transcription made as a starting point, not a certification.",
+}
+_extracted = {
+    "title": "eCFR building rules v0.1.0",
+    "basis": "Machine-extracted from the eCFR API; each rule carries its clause "
+             "and the issue date of that text.",
+}
+
+ok("a transcribed book is described as transcribed",
+   "transcription" in codecheck.basis_of(_transcribed))
+ok("a machine-extracted book is NOT called a transcription",
+   "transcription" not in codecheck.basis_of(_extracted),
+   codecheck.basis_of(_extracted))
+ok("and it is described the way it describes itself",
+   "Machine-extracted" in codecheck.basis_of(_extracted))
+ok("both name their own book",
+   "NBC 2016" in codecheck.basis_of(_transcribed)
+   and "eCFR" in codecheck.basis_of(_extracted))
+
+# A book that says nothing about itself is MORE suspect, not less. The old code
+# handed it a confident provenance sentence it had never earned.
+_silent = codecheck.basis_of({"title": "someone's rules"})
+ok("a book with no basis is called UNKNOWN, not assumed", "UNKNOWN" in _silent)
+ok("and it does not claim to be a transcription", "transcription" not in _silent)
+ok("an untitled, basis-less book still produces a usable sentence",
+   "unnamed rulebook" in codecheck.basis_of({}))
+
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

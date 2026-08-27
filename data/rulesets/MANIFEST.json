@@ -2,7 +2,7 @@
  "name": "arcvia-building-rules",
  "ruleset_version": "0.1.0",
  "generated_at": "2026-08-27T04:32:44",
- "status": "PROPOSED - not wired into any product code. Awaiting product-side ownership.",
+ "status": "WIRED - services/reconstruct/cli.py DEFAULT_RULESET reads this file and comply.assess() runs on every build, writing model['compliance']. Scope is limited by cli.DEFAULT_JURISDICTION, not by the absence of a caller: these are US federal rules and the pass evaluates nothing outside that scope.",
  "produced_by": {
   "tool": "A:/Research/Corpus/tools/codes_rules.py",
   "tests": "A:/Research/Corpus/tools/test_codes_rules.py --negative",

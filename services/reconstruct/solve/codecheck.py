@@ -834,6 +834,46 @@ def check_building(model: dict, rulebook: dict) -> tuple[list[Finding], list[dic
     return findings, list(merged.values())
 
 
+def basis_of(rulebook: dict) -> str:
+    """
+    The book's OWN account of what it is — not this function's assumption.
+
+    ── What this used to say, and why it was wrong ───────────────────────────
+    This sentence was hardcoded:
+
+        "a transcription the architect of record must verify"
+
+    That is exactly true of `data/rulebooks/nbc-2016-residential.json`, which
+    was hand-transcribed, and exactly false of a machine-extracted book. The
+    `comply/` package builds one out of the eCFR API where every rule carries
+    its clause, its issue date and the regulation's verbatim sentence — a
+    different provenance with different failure modes, described as if a person
+    had typed it out of a paperback.
+
+    It mattered because of WHERE it appears. `basis` is the one field a reader
+    consults to decide how much to trust the numbers underneath it, so getting
+    it wrong there is worse than getting it wrong anywhere else in the report:
+    it misstates provenance in the field whose entire job is provenance.
+
+    Both books already carry a `basis` of their own. This reads it.
+
+    ── A book with no `basis` is MORE suspect, not less ──────────────────────
+    The old code handed such a book a confident provenance sentence it had
+    never earned. The fallback now says the provenance is unknown, because
+    "unknown" is the true answer and it is the one that makes a reader go and
+    look.
+    """
+    title = rulebook.get("title") or "unnamed rulebook"
+    own = str(rulebook.get("basis") or "").strip()
+    if own:
+        return f"Measured against '{title}'. {own}"
+    return (
+        f"Measured against '{title}', which carries no `basis` field — so its "
+        "provenance is UNKNOWN and must be established before these numbers are "
+        "relied on. Not a certification, and deliberately no verdict."
+    )
+
+
 def summarise(findings: list[Finding], coverage: list[dict], rulebook: dict) -> dict:
     """Counts and coverage. No `ok`, no score — same refusal as clearance."""
     by_rule: dict[str, int] = {}
@@ -844,9 +884,5 @@ def summarise(findings: list[Finding], coverage: list[dict], rulebook: dict) -> 
         "byRule": by_rule,
         "checked": sum(r["checked"] for r in coverage),
         "skipped": sum(len(r["skipped"]) for r in coverage),
-        "basis": (
-            f"Measured against '{rulebook.get('title', 'unnamed rulebook')}' — "
-            "a transcription the architect of record must verify. "
-            "Not a certification, and deliberately no verdict."
-        ),
+        "basis": basis_of(rulebook),
     }

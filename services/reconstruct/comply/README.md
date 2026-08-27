@@ -15,7 +15,7 @@ outcome.
 ```python
 from comply import assess
 report = assess(model, "data/rulesets/building-rules-v0.1.0.json", jurisdiction="IN")
-model["compliance"] = report.as_dict()      # not wired into cli.py; see Blockers
+model["compliance"] = report.as_dict()      # cli.py already does exactly this
 ```
 
 ## Verified against six real reconstructed buildings
@@ -128,13 +128,19 @@ caught it. That is what the fixture is for.
 
 ## Blockers
 
-1. **Not wired into `cli.py`.** Importable and tested; nothing calls it during a build.
-   Wiring is one line and one file outside this package's scope.
+1. ~~**Not wired into `cli.py`.**~~ **CLOSED.** `cli.py` imports `comply.assess`, runs it
+   on every build with `DEFAULT_RULESET` and `DEFAULT_JURISDICTION`, and writes
+   `model["compliance"]` beside `model["codecheck"]` — wrapped so a compliance pass can
+   never fail a build. This blocker outlived its own fix; it was still being read as open
+   on 2026-08-28, which is why it is struck through here rather than deleted.
 2. **Room classification limits coverage more than geometry does** — see the
    `ada-route-clear-width` note above.
-3. **`cc.summarise()` hardcodes** *"a transcription the architect of record must verify"*.
-   True of the NBC book, wrong for a machine-extracted one; it should read the book's own
-   `basis` field, which both books already carry. Not this package's file.
+3. ~~**`cc.summarise()` hardcodes** *"a transcription the architect of record must
+   verify"*.~~ **FIXED 2026-08-28.** `solve/codecheck.py` grew `basis_of()`, which reads
+   the book's own `basis`. A book carrying none is now reported as provenance **UNKNOWN**
+   rather than being handed a confident sentence it never earned — a silent book is more
+   suspect, not less. Asserted in `test/test_codecheck.py` (30 -> 37), including the case
+   that was wrong: a machine-extracted book must NOT be described as a transcription.
 4. **US federal law, Indian product.** The durable value is as the template for an
    NBC/RERA ruleset. NBC is paywalled (`nbc_india`, quarantined); the Indian area law is
    written up in `A:\Research\BIM\knowledge\10`.
