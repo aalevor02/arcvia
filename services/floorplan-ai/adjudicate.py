@@ -209,70 +209,84 @@ def usage() -> dict:
 _MAX_IMAGE_BYTES = 170_000
 _WINDOW_PASS_LONG_EDGE = 896
 
-#: How many times to ask for windows, taking the UNION of the answers.
+#: How many times to ask for windows, and how many of those asks must agree.
 #:
-#: The problem is real, and the sample is nine runs of ONE drawing collected by
-#: two sessions independently: 1, 2, 4, 4, 4, 4, 5, 5, 5. Walls stayed constant
-#: at 37 throughout both samples and the note count matched the window count
-#: every time, so nothing was being discarded by the wall gate — the model
-#: simply sees fewer on some passes. The floor is ONE, not two; the low run is
-#: not a rounding artefact (object counts moved with it), and a run that finds
-#: one window is a run where the owner's annotated failure at (4) is back.
+#: The variance is real and large. Nine runs of one drawing, pooled from two
+#: sessions sampling independently, returned 1, 2, 4, 4, 4, 4, 5, 5, 5 windows.
+#: Walls stayed constant at 37 throughout and the note count matched the window
+#: count every time, so nothing was being discarded by the wall gate — the model
+#: simply sees a different subset on each pass. The floor is ONE, and a run that
+#: finds one window is a run where the owner's annotated failure at (4) is back.
 #:
-#: Worth keeping the two samples rather than averaging them away. Measured
-#: alone, each of us saw a floor the other did not: six runs bottomed out at 2,
-#: three runs bottomed out at 1. A tail this heavy does not show up reliably in
-#: any single small sample, which is the argument for pooling before drawing a
-#: worst case rather than after.
+#: The first version of this took the UNION of the passes, reasoning that a
+#: window is an ADDITIVE detection so a second opinion can only add one. The
+#: reasoning was sound and the conclusion was wrong, and only looking at the
+#: drawing found that out. Every candidate proposed across three runs was
+#: cropped and inspected — eight distinct locations:
 #:
-#: Union is safe HERE and would be wrong elsewhere, and the difference is worth
-#: stating: a window is an ADDITIVE detection, so a second opinion can only add
-#: one, and every candidate still has to survive the 4%-of-width wall gate that
-#: refuses a window floating in the middle of a room. The railing verdict is not
-#: additive — it CHANGES a wall — so there the answer was to stop asking a
-#: source that varies, not to ask it more. More sampling helps a union and does
-#: nothing for a decision.
+#:     seen in 2 of 3 runs                           verdict
+#:     A  0.156,0.599  glazed band set into wall     plausible  <- markup (4)
+#:     B  0.777,0.158  band on exterior, stair core  plausible
 #:
-#: And yet this DEFAULTS TO 1, leaving behaviour unchanged. Two was measured to
-#: lift the floor to 6, which does fix the near-empty run, and it also roughly
-#: doubled the count — the added centres are spatially distinct
-#: (closest pair 0.060 against a 0.03 dedup radius), so they are genuinely new
-#: detections and not one window counted twice. Whether they are WINDOWS is the
-#: part nobody here can answer: they land on real openings in the left
-#: elevation, but this drawing also has doors at its balcony thresholds, and the
-#: prompt forbids doors. Recall bought without measuring precision is a bigger
-#: number, not a better answer.
+#:     seen in 1 of 3 runs
+#:     C  0.138,0.410  ENCL. BAL. glazing line       plausible
+#:     F  0.135,0.459  wall junction with a band     plausible
+#:     D  0.411,0.872  AN ARMCHAIR on the balcony    FALSE
+#:     E  0.219,0.298  A POTTED PLANT / empty sheet  FALSE
+#:     G  0.646,0.191  THE STAIRCASE, treads as bars FALSE
+#:     H  0.519,0.881  EMPTY BALCONY FLOOR           FALSE
 #:
-#: So the union ships available and unassumed, and the obvious way to settle it
-#: does not work. The acceptance artefact is ONE annotated image
-#: (realdecks/49b4f5f96a40c7bddf27e09915de195e) carrying five NUMBERED failures
-#: the owner marked, not five drawings, and its assertion for the missing window
-#: is "at least one Window opening detected on the exterior wall at (4)". That
-#: is a recall floor of one, at one location. The notes never enumerate the true
-#: windows, so there is no denominator: running it can confirm the window at (4)
-#: came back and can say nothing at all about the extra detections. Precision
-#: cannot hold there because it was never measurable there.
+#: AGREEMENT ACROSS PASSES PREDICTS CORRECTNESS. Both candidates two passes
+#: found are plausible; four of the six singletons are unambiguously not
+#: windows. Union is therefore exactly the wrong operation — it keeps every
+#: singleton, which is why turning it up roughly doubled the count while adding
+#: mostly junk. Consensus is the right one, and it is the same shape as the
+#: railing gate: ask more than once, then require the answers to agree.
 #:
-#: And the doubt is worse than merely unresolved. Annotations 2 and 5 on that
-#: same image are both balcony confusions — a lobby wrongly sealed, a railing
-#: read as a wall — and the window at (4) sits at the ENCL BAL edge. The four
-#: new left-elevation detections land in the exact region this drawing is
-#: already documented to get wrong, which is also where balcony thresholds are,
-#: and a threshold is a door. Distinct centres prove they are not double-counts.
-#: They do not make them windows.
+#: G is worth knowing beyond this function. A staircase is parallel treads
+#: between two dark edges, which is what a window band with mullions looks like
+#: to a model that learned windows as banded lines. That is not a weak
+#: classifier; it is the render domain supplying a near-perfect impostor.
 #:
-#: What would settle it is an enumerated list of the real window openings on
-#: that elevation. Not another pass count, and not another run of the eval.
+#: Why a false window costs more than a missed one, which is what sets the
+#: default: a missed window leaves a blank wall, and a false one punches an
+#: opening into a wall where an armchair is. The second contradicts the drawing
+#: and travels downstream into geometry.
 #:
-#: The general trap, because it will be walked into again: doubling a count
-#: against a metric that cannot see false positives looks like an improvement
-#: BY CONSTRUCTION. It is not enough to add recall controls to a scoring
-#: harness — the missing half here is absent from the ground truth itself, so
-#: no amount of care in the harness recovers it. When a metric can only move
-#: one way, a change that moves it is not evidence.
-WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "1"))
+#: MEASURED, eight runs of the gate at 2 of 3, because the table above is three
+#: runs and three runs is not enough to set a default on:
+#:
+#:   windows kept   5, 2, 3, 2, 3, 2, 3, 2      floor 2, against a floor of 1
+#:                                              for a single ask (nine runs)
+#:   known FALSE    survived in 2 of 8 runs (D twice, G once), all in the
+#:                  first batch
+#:   markup (4)     kept in 4 of 8
+#:
+#: So consensus REDUCES false positives and does not eliminate them, and the
+#: near-empty run is gone. Both halves matter: the first three runs alone would
+#: have said the gate lets junk through, and the last five alone would have said
+#: it is clean. Neither is true.
+#:
+#: It also surfaced a NINTH location the three-run table never contained:
+#:
+#:     I  0.212,0.215  white glazed band with a mullion, set into the
+#:                     TOILET-3 exterior wall between two wall segments
+#:                     -- a REAL window, verified by crop, kept in 4 of 5
+#:
+#: which is the useful reminder that the eight-location table is a lower bound
+#: on what exists, not an inventory. It only ever listed what some run proposed.
+#:
+#: Cost: N vision calls per detect instead of one, ~14 s against ~11 s on this
+#: drawing. ADJUDICATE_WINDOW_PASSES=1 returns to a single ask, in which case
+#: the agreement gate cannot apply and does not.
+WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "3"))
 
-#: Two windows nearer than this are the same window seen twice.
+#: How many passes must independently propose a candidate for it to survive.
+#: Clamped to WINDOW_PASSES, so a single-pass configuration still works.
+WINDOW_AGREEMENT = int(os.environ.get("ADJUDICATE_WINDOW_AGREEMENT", "2"))
+
+#: Two proposals nearer than this are the same window seen twice. Measured: the
+#: closest pair of genuinely distinct candidates here is 0.060 apart.
 _WINDOW_SAME = 0.03
 
 
@@ -819,25 +833,46 @@ _WINDOW_PROMPT = (
 
 
 def _find_windows(image, walls, detection_cls, notes) -> list:
-    """Ask WINDOW_PASSES times and union, deduping by proximity."""
-    found: list = []
-    for _ in range(max(1, WINDOW_PASSES)):
+    """Ask WINDOW_PASSES times and keep what WINDOW_AGREEMENT passes agree on."""
+    passes = max(1, WINDOW_PASSES)
+    agreement = min(max(1, WINDOW_AGREEMENT), passes)
+    clusters: list = []
+
+    for _ in range(passes):
+        counted: set = set()
         for candidate in _find_windows_once(image, walls, detection_cls, notes):
             x = candidate.bbox[0] + candidate.bbox[2] / 2
             y = candidate.bbox[1] + candidate.bbox[3] / 2
-            duplicate = any(
-                abs(x - (c.bbox[0] + c.bbox[2] / 2)) < _WINDOW_SAME
-                and abs(y - (c.bbox[1] + c.bbox[3] / 2)) < _WINDOW_SAME
-                for c in found
+            hit = next(
+                (i for i, c in enumerate(clusters)
+                 if abs(x - c["x"]) < _WINDOW_SAME and abs(y - c["y"]) < _WINDOW_SAME),
+                None,
             )
-            if not duplicate:
-                found.append(candidate)
-    # Replace the per-pass notes with one total, or a reader sees "3 read off
-    # the drawing" twice and reasonably concludes six.
+            if hit is None:
+                clusters.append({"x": x, "y": y, "count": 1, "det": candidate})
+                counted.add(len(clusters) - 1)
+            elif hit not in counted:
+                # One vote per pass. A pass proposing two boxes over the same
+                # opening must not out-vote a pass that proposed one.
+                clusters[hit]["count"] += 1
+                counted.add(hit)
+
+    kept = [c["det"] for c in clusters if c["count"] >= agreement]
+    dropped = len(clusters) - len(kept)
+
+    # One note for the whole gate, replacing the per-pass ones: three passes each
+    # appending "4 window(s) read off the drawing" reads as twelve. The rejected
+    # count is stated rather than implied -- a pass that silently discards
+    # candidates is indistinguishable from one that never found them.
     notes[:] = [n for n in notes if "window(s) read off the drawing" not in n]
-    if found:
-        notes.append(f"adjudicator: {len(found)} window(s) read off the drawing")
-    return found
+    if kept:
+        notes.append(f"adjudicator: {len(kept)} window(s) read off the drawing")
+    if dropped:
+        notes.append(
+            f"adjudicator: {dropped} further window proposal(s) dropped for "
+            f"appearing in fewer than {agreement} of {passes} passes"
+        )
+    return kept
 
 
 def _find_windows_once(image, walls, detection_cls, notes) -> list:
