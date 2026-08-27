@@ -235,9 +235,26 @@ _WINDOW_PASS_LONG_EDGE = 896
 #: prompt forbids doors. Recall bought without measuring precision is a bigger
 #: number, not a better answer.
 #:
-#: So the union ships available and unassumed. Set this to 2 once it has been
-#: scored against the owner's five annotated markups, which are the only ground
-#: truth that exists for the missing-window failure.
+#: So the union ships available and unassumed, and the obvious way to settle it
+#: does not work. The acceptance artefact is ONE annotated image
+#: (realdecks/49b4f5f96a40c7bddf27e09915de195e) carrying five NUMBERED failures
+#: the owner marked, not five drawings, and its assertion for the missing window
+#: is "at least one Window opening detected on the exterior wall at (4)". That
+#: is a recall floor of one, at one location. The notes never enumerate the true
+#: windows, so there is no denominator: running it can confirm the window at (4)
+#: came back and can say nothing at all about the extra detections. Precision
+#: cannot hold there because it was never measurable there.
+#:
+#: And the doubt is worse than merely unresolved. Annotations 2 and 5 on that
+#: same image are both balcony confusions — a lobby wrongly sealed, a railing
+#: read as a wall — and the window at (4) sits at the ENCL BAL edge. The four
+#: new left-elevation detections land in the exact region this drawing is
+#: already documented to get wrong, which is also where balcony thresholds are,
+#: and a threshold is a door. Distinct centres prove they are not double-counts.
+#: They do not make them windows.
+#:
+#: What would settle it is an enumerated list of the real window openings on
+#: that elevation. Not another pass count, and not another run of the eval.
 WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "1"))
 
 #: Two windows nearer than this are the same window seen twice.
