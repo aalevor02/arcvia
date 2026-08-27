@@ -102,6 +102,90 @@ message, and nothing more.**
 
 Landed after most of this document was written. Where they conflict, these win.
 
+#### 2026-08-27 evening — the AI paths, and four ways a green summary lied
+
+0. **Nothing about the AI worked, and nothing said so.** The adjudicator's model
+   had been retired by NVIDIA the previous day (HTTP 410); `adjudicate.py` fails
+   open, so every call was swallowed as "went unanswered" while `/health`
+   reported the model by NAME. Naming a model is not reaching it. `/health` now
+   carries `adjudicator_liveness`, inferred from answered-vs-started counts —
+   `null` answering, `"unverified"` = no call since start and **NOT healthy**,
+   plus dead / degraded / sustained-rate / dead-window states. **Check this
+   first before believing any AI output.**
+
+   Also fixed on the way: `_encode` descended JPEG quality but never size, so a
+   full deck page could not be encoded at all and `/design` blamed the model for
+   an image it had never been shown — if `calls_started` does not move, the
+   model was never asked and the fault is upstream of the provider. And a burst
+   of concurrent calls made Windows' `getaddrinfo` fail on 35 of 79 calls, which
+   is now retried (resolver/connection only — never HTTP statuses, never
+   timeouts).
+
+1. **`/detect` output is NOT reproducible, and it matters for anything scored
+   against it.** Measured at n=5 with
+   `services/floorplan-ai/test/variance.py --runs N`:
+
+   ```
+   rooms 12 every run · named 6 every run     IDENTICAL
+   walls 50x1 51x4 · railing 0x1 1x3 2x1      VARIES
+   windows 4x3 5x1 7x1 · corrections 8x4 9x1  VARIES
+   ```
+
+   Only room detection is reproducible. `walls` is post-adjudication, so it
+   inherits verdict variance. **Sample geometry once, sample anything a verdict
+   touches many times, and never quote a verdict-derived figure without its
+   range.** Verdicts land on three separate segments (41%,64% · 38%,16% ·
+   73%,28%), two bimodal — a region containing none of them is verdict-free.
+
+2. **A balcony parapet is no longer built as a full-height wall — but the fix is
+   not complete and must not be described as stable.** `WallSegment.kind` now
+   carries the verdict, a `railing` wall type is built at 1.0 m (matching
+   `solidify.py`'s `PARAPET_HEIGHT`, so the two builders agree), and import
+   honours it. The verdict is asked twice and must agree with itself, because it
+   CHANGES GEOMETRY. That reduced the flicker and did not remove it: 3 of 5 runs
+   give 1 railing. **OPEN DECISION** — either cache the verdict per drawing
+   (true determinism, adds state, a wrong verdict becomes sticky) or surface it
+   for confirmation like the render→room flow (no new state, one click per
+   ambiguous segment). Nobody has chosen.
+
+   Note `solidify.py` does **not** have this defect — it SKIPS unpaired lines by
+   design. The CAD path's gap is the opposite: a balcony gets *no* railing at
+   all. `engine-blueprint.md` §736 designs the fix. **Load the `poche` skill
+   before touching `services/reconstruct`** — it is what surfaced this.
+
+3. **"0 failed" is not "everything ran", and it cost hours tonight in four
+   different disguises.** A BLOCKED suite (Poché's entire test suite had never
+   run — two missing pip packages, now 3 passed → 29 passed); two concurrent
+   runs reporting 426 of 485; a crashed file reporting 190 with exit 1; and a
+   skip fix that reported a half-run as clean. A summary with only pass/fail
+   cannot express "did not run", so it says the nearest thing, and the nearest
+   thing is green. **Check the blocked count, the exit code and the total — not
+   the word *failed*.** `services/api/test/detect.mjs` now counts and names
+   skips; `validate.mjs` already exits 1 on blocked, so trust its exit code
+   rather than reading its text.
+
+4. **Verify on the right input.** `/design` was demonstrated "working" on
+   `uploads/decks/*.png` — those are **floor plans, not renders**, and a weaker
+   model returned a confident, correctly-shaped DesignSpec hallucinated from
+   furniture symbols and the printed word BEDROOM. Verifying the *shape* of an
+   answer is not verifying it. Fixtures: real render =
+   `apps/web/public/hero/interior.webp`; real plan =
+   `A:\Tools\FloorplanModel\realdecks\49b4f5f96a40c7bddf27e09915de195e.png`.
+
+5. **Asset licensing — BIMobject is not usable.** Its EULA permits personal,
+   educational, or "inclusion in construction or building project documents"
+   use only, with no redistribution, so it cannot go in a shipped library
+   however free the downloads are. The hub took 201 CC-BY models from Sketchfab
+   instead, then pruned 76 of them (39%) as off-target, whole-room scenes, or
+   too heavy to condition — a furniture query returns a Xenomorph Queen Rig.
+   **The remaining catalogue slots are deliberately model-free**: pool, deck,
+   paving and lawn are floor SURFACES whose upgrade path is `materials.mjs`
+   (already generated and committed), a hedge is a 3 m run rather than one bush,
+   and both tree slots are pinned empty after photogrammetry foliage refused to
+   decimate. Read `from-hub.mjs --report` BEFORE fetching anything.
+
+#### Earlier — the CAD engine, from the sessions before this one
+
 1. **The sheet border was eating real wall faces — `6ea3fea`, the largest defect
    anyone found.** `pair_faces` processed longest-first, and on an architect's
    sheet the longest linework is the **drawing border**. It consumed real wall
