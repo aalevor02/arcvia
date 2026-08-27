@@ -1,5 +1,48 @@
+/**
+ * Referral codes and the password-reset round trip.
+ *
+ * ── Why this header exists ─────────────────────────────────────────────────
+ * Every assertion below used to be decorative. `ok()` was a bare
+ * `console.log` — it printed the word FAIL and then did nothing with it: no
+ * counter, no summary line, no exit code. The file therefore **could not
+ * fail**. A regression in referral codes or in password reset would have
+ * printed thirteen FAIL lines into a scrolling log and still exited 0, and the
+ * `&&` chain in package.json would have carried straight on to the next file
+ * and reported the suite green.
+ *
+ * It was found by counting rather than by reading: every other file in this
+ * directory ends with "N passed, M failed" and this one ended with a PASS
+ * line, so the run's total came up short of the 485 on the board. That is the
+ * only signal it ever gave.
+ *
+ * Two consequences, both deliberate:
+ *
+ *   - `ok()` counts, the file prints a summary, and a failure sets the exit
+ *     code. A test that cannot fail is worse than no test, because it occupies
+ *     the space where a real one would be noticed missing.
+ *   - No server means the HARNESS is wrong, not that there is nothing to test.
+ *     Unlike test/cad.mjs there is no legitimate skip here — this file needs no
+ *     separate install, only a server — so a dead fetch exits 1 and names the
+ *     command, rather than crashing with an uncaught TypeError the way it did
+ *     before.
+ *
+ * Needs the API running: `npm run dev:api`.
+ */
+
 const BASE = 'http://localhost:8787'
 const stamp = Date.now()
+
+// A dead fetch and a failing assertion are different answers and used to look
+// identical: an unguarded `await fetch` threw an uncaught TypeError, which
+// killed the &&-chain with a stack trace that named node internals rather than
+// the missing server.
+const reachable = await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false)
+if (!reachable) {
+  console.error(`FAIL  no API is listening on ${BASE} — start one before this suite:`)
+  console.error('        npm run dev:api')
+  console.error('\n0 passed, 1 failed (nothing was tested)')
+  process.exit(1)
+}
 
 async function call(path, opts = {}) {
   const res = await fetch(BASE + path, {
@@ -14,8 +57,13 @@ async function call(path, opts = {}) {
   return { status: res.status, json }
 }
 
-const ok = (label, cond, extra = '') =>
+let passed = 0
+let failed = 0
+const ok = (label, cond, extra = '') => {
+  if (cond) passed++
+  else failed++
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${extra ? '  ' + extra : ''}`)
+}
 
 // 1. Alice registers (the referrer)
 const alice = await call('/auth/register', {
@@ -127,3 +175,6 @@ const loginOld = await call('/auth/login', {
   body: { email: `alice${stamp}@example.com`, password: 'password123' },
 })
 ok('old password rejected', loginOld.status === 401)
+
+console.log(`\n${passed} passed, ${failed} failed`)
+process.exit(failed ? 1 : 0)

@@ -89,15 +89,56 @@ function runTypes() {
   ], ROOT, { family: 'types' })
 }
 
+// Two of the JS suites drive a running server rather than booting their own.
+// With nothing listening they used to report FAILED, which says "the code is
+// broken" about a machine that simply has no server started — and
+// docs/validation.md never mentioned the requirement, so `npm run validate` on
+// a clean checkout produced two red lines that no code change could fix.
+//
+// That is the same shape as every other defect in this repository's notes: the
+// summary could not express "did not run", so it said the nearest thing.
+// 'blocked' already means exactly this, already goes red, and already refuses
+// to count as a pass. The only thing missing was noticing the condition, and
+// saying which command fixes it.
+function serverUp(origin) {
+  const probe = spawnSync(
+    node,
+    ['-e', `fetch(${JSON.stringify(origin)}).then(() => process.exit(0)).catch(() => process.exit(1))`],
+    { cwd: ROOT, encoding: 'utf8', timeout: 8000 },
+  )
+  return probe.status === 0
+}
+
 function runJavaScript() {
-  for (const [label, command, args, cwd] of [
+  for (const [label, command, args, cwd, needs] of [
     ['js:brand', npm, ['test', '--workspace=packages/brand'], ROOT],
     ['js:studio', npm, ['test', '--workspace=apps/studio'], ROOT],
-    ['js:api', npm, ['test', '--workspace=services/api'], ROOT],
+    ['js:api', npm, ['test', '--workspace=services/api'], ROOT, {
+      origin: 'http://127.0.0.1:8787/health',
+      start: 'npm run dev:api',
+      what: 'the API',
+    }],
     ['js:asset-ingest', node, ['licence.test.mjs'], join(ROOT, 'tools', 'asset-ingest')],
     ['js:render-worker-atlas', node, ['check_atlas.test.mjs'], join(ROOT, 'services', 'render-worker')],
-    ['js:web-linkcheck', npm, ['run', 'linkcheck', '--workspace=apps/web'], ROOT],
+    ['js:web-linkcheck', npm, ['run', 'linkcheck', '--workspace=apps/web'], ROOT, {
+      origin: 'http://127.0.0.1:4321/',
+      start: 'npm run dev:web',
+      what: 'the marketing site',
+    }],
   ]) {
+    if (needs && !serverUp(needs.origin)) {
+      console.log(`\n=== ${label} ===`)
+      console.log(`BLOCKED  nothing is listening at ${needs.origin}`)
+      console.log(`         This suite drives a running server; it does not boot one.`)
+      console.log(`         Start ${needs.what} first:  ${needs.start}`)
+      results.push({
+        family: 'js',
+        label,
+        status: 'blocked',
+        detail: `needs ${needs.what} at ${needs.origin} — start it with \`${needs.start}\``,
+      })
+      continue
+    }
     run(label, command, args, cwd, { family: 'js' })
   }
 }

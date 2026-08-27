@@ -39,6 +39,54 @@ Every family prints a summary of passed, failed, and blocked suites and exits
 non-zero unless every requested suite passed. A blocked suite is never counted as
 a pass.
 
+## Two suites need a server, and one needs the detector
+
+`npm run validate` on a clean checkout **cannot be green on its own**, and for a
+while that looked like two code defects rather than a missing precondition. Two
+JS suites drive a running server instead of booting their own:
+
+| suite | needs | start it with |
+|---|---|---|
+| `js:api` | the API on `127.0.0.1:8787` | `npm run dev:api` |
+| `js:web-linkcheck` | the marketing site on `127.0.0.1:4321` | `npm run dev:web` |
+
+With nothing listening these now report **BLOCKED**, naming the origin and the
+command, rather than FAILED. The distinction is the whole point: `failed` sends
+a reader looking for a bug, and there was never one to find.
+
+⚠ **`js:api` is worth more with the detector up as well.** `test/detect.mjs`
+runs 32 assertions against a live detector and 19 without it — it skips the rest
+honestly, so the run is not wrong, just smaller. Start it with
+`npm run dev:detect`. Full green with all three services up is **507 assertions
+across 29 files**.
+
+⚠ **Check that exactly one process owns each port before trusting a result.**
+Windows lets a second process bind a port already in use — no error, the last
+binder just quietly starts answering. A second API appeared on `:8787` mid-run
+once and two suites reported 13 failures that did not exist; the same files were
+clean against a verified listener. The A: tree answers `/cad/health` with
+`{"ok":true,...}`; the un-versioned C: copy 404s on that route.
+
+```powershell
+Get-NetTCPConnection -LocalPort 8787 -State Listen |
+  ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)").CommandLine }
+curl :8787/cad/health     # 200 + an A:\ python path = the tree you meant
+```
+
+## `npm run dev:detect` starts the launcher, not uvicorn
+
+The script used to invoke uvicorn directly, which reads only `os.environ` and so
+started the detector with **no `FLOORPLAN_MODEL` and no `NVIDIA_API_KEY`** — the
+trained classifier off and the vision adjudicator degraded, both silently, from
+the command everyone types. It now runs `tools/dev-detect.ps1`, which loads
+`.env`, falls back to the shared NVIDIA key file, and warns by name when either
+value is missing or points at a path that is not a file.
+
+Confirm it took: `curl :8090/health` must report `classifier.state` as `ready`,
+not `not configured`. Note that `/health` describes the service **now** — to
+check what was live when an earlier run happened, read that run's saved response
+for its `detector:` notes instead.
+
 ## Python discovery
 
 The checked-in virtual environments are conveniences, not portable configuration:

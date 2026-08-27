@@ -19,7 +19,7 @@
     "dev:plan": "npm run dev --workspace=apps/planviewer",
     "dev:vis": "npm run dev --workspace=apps/visualisation",
     "dev:api": "npm run dev --workspace=services/api",
-    "dev:detect": "services/floorplan-ai/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8090 --app-dir services/floorplan-ai",
+    "dev:detect": "powershell -ExecutionPolicy Bypass -File tools/dev-detect.ps1",
     "check:types": "node tools/validate.mjs types",
     "test:js": "node tools/validate.mjs js",
     "test:python": "node tools/validate.mjs python",
