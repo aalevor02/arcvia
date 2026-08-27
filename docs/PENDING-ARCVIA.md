@@ -2222,7 +2222,7 @@ somebody else's. **Do not sweep them into a commit.** Use
 
 ```
 api      507 assertions · 29 files · 29 ok, 0 failed, 0 blocked, 0 silent
-studio   544 · brand 23 · asset-ingest + atlas green
+studio   867 (34 files) · brand 23 · asset-ingest + atlas green
 types      5 suites · python 30 suites / 982 assertions · bim 1 · build 4
 ```
 
@@ -2288,3 +2288,50 @@ resolution", and it is the one worth doing.
 
 n=1 deck. The recall-control movement is a two-sided observation on a specific
 known wall, which is why it is quoted; the markup ratios are not and are not.
+
+### 2026-08-28 (later still) — the three "browser-gated" items were never gated on sign-in
+
+`aalev-22`. This file has said for two sessions that the 360 panorama flow, the
+live post-edit render comparison and human visual approval of the stairs each
+"need the owner at the keyboard for the sign-in step". **That was wrong, twice
+over.**
+
+**1. There was nothing to sign in to.** Opening `localhost:5173` loaded straight
+into the project list as the owner's account. The earlier "Session expired. Sign
+in again." was measured against a **fresh, empty data directory that session had
+created for testing** — a correct answer about the wrong database. Against the
+real `.data/db.json` the token is valid. A blocker inferred from a disposable
+fixture, carried in this file as a fact about the product.
+
+**2. The real gate was that no local render could run at all.** The panorama job
+died with `Blender failed to run: spawn blender ENOENT`. Immediate cause was
+mine — an API started with a bare `node src/server.js` instead of the
+`--env-file-if-exists` form, so `.env` was never read and `BLENDER_PATH` was
+unset. The underlying gap was real and is fixed in `713e126`: `renderQueue`
+warned at boot about a missing render SCRIPT and said nothing about an
+unreachable BINARY, so the fault surfaced one dead job at a time, as a Node
+errno naming neither the setting nor the file.
+
+**Item 1 is now DONE, not blocked.** Studio → API → Blender → storage, verified
+on the artefact rather than on the status: **4096×2048, confirmed 2:1
+equirectangular, 7.3 MB, mean brightness 122.1** — neither black nor blown.
+Wall-clock about 80 s on this CPU-only box for an 11-object, 1,094-triangle IFC
+import.
+
+**Items 2 and 3 are unblocked and not yet run.** Both need a scene and a render,
+and both now have a working local Blender. Neither needs a person.
+
+**Refunds held, unprompted.** They were not what was under test: the failed
+panorama returned all 8 credits and a failed bake all 25, `settled: true`,
+`reason: render-failed`; the successful panorama has no refund. That is the
+idempotent settlement module doing its job on a real failure nobody staged.
+
+**The IFC import committed in `90d0fe1` renders in the browser** — 6 storeys,
+11 objects, 1,094 triangles, `web-ifc` wasm loaded, no console errors.
+
+⚠ **Lesson worth keeping, because it is the third instance in this file.** A
+limitation measured against a test fixture was written down as a limitation of
+the product. Trap 4 already says *"verify on the right input"* about a weaker
+vision model reading floor plans as renders; this is the same error committed
+against a database instead of an image. **Before recording something as blocked,
+check what it was blocked against.**
