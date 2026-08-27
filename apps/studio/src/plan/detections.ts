@@ -168,6 +168,11 @@ export function convertDetections(
       a: toWorld(wall.start, underlay),
       b: toWorld(wall.end, underlay),
       confidence: wall.confidence,
+      // The reader's verdict, carried rather than recomputed. Adding `kind` to
+      // the interfaces was not enough: this map built the segment without it,
+      // so every wall arrived at the editor undefined and the railing type was
+      // never applied. Every link was tested and the JOIN between them was not.
+      kind: wall.kind,
     }))
     .filter((s) => distance(s.a, s.b) >= config.minLength)
 
@@ -254,6 +259,8 @@ interface Segment {
   a: Vec2
   b: Vec2
   confidence: number
+  /** The reader's verdict, carried through pairing to the finished wall. */
+  kind?: 'wall' | 'railing' | 'boundary'
 }
 
 /**
@@ -302,7 +309,14 @@ function pairFaces(segments: Segment[], config: Required<ConversionOptions>): Pr
     if (best) {
       used.add(i)
       used.add(best.index)
-      walls.push(centreline(segment, segments[best.index], best.gap))
+      // Two faces of one wall. If either face was read as a railing, the wall
+      // is a railing: a parapet drawn as a pair should not lose the verdict
+      // because only one of its lines carried it.
+      const merged = centreline(segment, segments[best.index], best.gap)
+      merged.kind = segment.kind && segment.kind !== 'wall'
+        ? segment.kind
+        : segments[best.index].kind
+      walls.push(merged)
     } else {
       used.add(i)
       walls.push({
@@ -311,6 +325,7 @@ function pairFaces(segments: Segment[], config: Required<ConversionOptions>): Pr
         thickness: WALL_DEFAULTS.interior.thickness,
         paired: false,
         confidence: segment.confidence,
+        kind: segment.kind,
       })
     }
   }
