@@ -170,6 +170,23 @@ def main() -> int:
     check("an empty model still reports coverage", len(empty.coverage) == len(PREDICATES))
     check("counts always include unknown", "unknown" in us.counts)
 
+    # ---- CLI wiring ----------------------------------------------------------
+    # The package sat importable-but-uncalled for a while, which is the state
+    # `clearance` was in for weeks. These assert it is actually reachable.
+    print("\nCLI WIRING")
+    import cli
+    check("reconstruct writes a `compliance` block",
+          'model["compliance"]' in Path(ROOT / "cli.py").read_text(encoding="utf-8"))
+    check("a `comply` subcommand exists", '"comply"' in
+          Path(ROOT / "cli.py").read_text(encoding="utf-8"))
+    check("DEFAULT_JURISDICTION is NOT 'US federal'",
+          cli.DEFAULT_JURISDICTION != "US federal", cli.DEFAULT_JURISDICTION)
+    check("DEFAULT_RULESET points at a ruleset that exists",
+          Path(cli.DEFAULT_RULESET).exists(), str(cli.DEFAULT_RULESET))
+    check("the printer refuses to call a non-evaluated pass clean",
+          "This is not a pass" in
+          Path(ROOT / "cli.py").read_text(encoding="utf-8"))
+
     print()
     if FAILED:
         print(f"FAILED: {FAILED} of {PASSED + FAILED}")

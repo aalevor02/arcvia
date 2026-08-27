@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -1586,6 +1587,28 @@ def reconstruct(
     except Exception as error:  # pragma: no cover - never fail a build for this
         model["codecheck"] = {"error": f"{type(error).__name__}: {error}"}
 
+    # ---- And against the machine-extracted ruleset --------------------------
+    # Beside `codecheck`, never merged into it. The two answer the same shape of
+    # question from different sources: `codecheck` from a rulebook the architect
+    # of record works to, this from rules extracted out of the eCFR API that
+    # carry their clause, issue date and the regulation's own sentence.
+    #
+    # Keeping them separate is the point. A finding that cites 36 CFR 1191 is a
+    # different kind of claim from one citing an NBC transcription, and a reader
+    # has to be able to tell which they are looking at.
+    #
+    # Evaluates nothing unless the project's jurisdiction is in scope — see
+    # DEFAULT_JURISDICTION. Wrapped like clearance and codecheck for the same
+    # reason: a compliance pass must never fail a build.
+    try:
+        from comply import assess as comply_assess
+
+        report = comply_assess(model, DEFAULT_RULESET,
+                               jurisdiction=DEFAULT_JURISDICTION)
+        model["compliance"] = report.as_dict()
+    except Exception as error:  # pragma: no cover - never fail a build for this
+        model["compliance"] = {"error": f"{type(error).__name__}: {error}"}
+
     (out / f"{source.stem}.building.json").write_text(
         json.dumps(model, indent=2), encoding="utf-8"
     )
@@ -2046,6 +2069,40 @@ def _print_codecheck(report: dict) -> None:
     print(f"  {s['basis']}")
 
 
+def _print_comply(report: dict) -> None:
+    """Print a compliance pass. The not-applicable case is the important one:
+    it must read as a deliberate refusal, never as a clean bill of health."""
+    s = report["summary"]
+    print("")
+    print(f"COMPLY   {report['ruleset']}  v{report['rulesetVersion']}")
+    if not report["applicable"]:
+        print(f"         NOT EVALUATED — project jurisdiction "
+              f"{report['projectJurisdiction']!r} is outside this ruleset's "
+              f"{report['jurisdiction']} scope.")
+        print(f"         {s.get('note', '')}")
+        print("")
+        print("  Nothing was checked. This is not a pass.")
+        return
+    print(f"         {s['total']} findings · {s['checked']} checked · "
+          f"{s['passed']} met · {s['unknown']} not measurable")
+    print(f"         {s['rulesEvaluated']} rules evaluated of {s['rulesAvailable']} "
+          f"usable ({s['rejectedRules']} rejected before measurement)")
+    for finding in report["findings"][:20]:
+        where = finding["roomName"] or (
+            f"room {finding['room']}" if finding["room"] is not None else "-")
+        print(f"      !  [{where[:22]:<22}] {finding['message'][:96]}")
+        print(f"           {finding['cite']}")
+    if len(report["findings"]) > 20:
+        print(f"     ... {len(report['findings']) - 20} more")
+    skipped = [(row["rule"], sk) for row in report["coverage"] for sk in row["skipped"]]
+    for rule, sk in skipped[:8]:
+        print(f"      ?  {rule}: {sk}")
+    if len(skipped) > 8:
+        print(f"     ... {len(skipped) - 8} more unmeasured")
+    print("")
+    print(f"  {s['basis']}")
+
+
 def _print_clearance(report: dict) -> None:
     s = report["summary"]
     print("")
@@ -2402,6 +2459,22 @@ DEFAULT_RULEBOOK = (
     / "data" / "rulebooks" / "nbc-2016-residential.json"
 )
 
+#: The machine-extracted ruleset, for the `comply` pass that runs beside codecheck.
+DEFAULT_RULESET = (
+    Path(__file__).resolve().parents[2]
+    / "data" / "rulesets" / "building-rules-v0.1.0.json"
+)
+
+#: Jurisdiction the model is being built for. `comply` holds US FEDERAL rules, so it
+#: evaluates nothing unless the project is actually in that scope.
+#:
+#: The default is deliberately NOT "US federal". These are mostly Indian buildings, and a
+#: 0.75 m internal door is legal in India while falling short of ADA's 812.8 mm — running
+#: the pass by default would put dozens of true-but-inapplicable findings in front of
+#: someone, which is how a report teaches its reader to ignore it. Declaring the
+#: jurisdiction is a statement about the project and has to be made deliberately.
+DEFAULT_JURISDICTION = os.environ.get("ARCVIA_JURISDICTION", "IN")
+
 #: Mirrored from `quantify.rates` rather than imported, so this CLI still starts
 #: when the rate library is absent — `survey` and `reconstruct` do not need it.
 FRESH_DAYS_HINT = 7
@@ -2628,6 +2701,19 @@ def main() -> int:
                         "the architect must verify.")
     K.add_argument("--json", dest="json_out", default=None)
 
+    Y = sub.add_parser("comply",
+                       help="Measured against the machine-extracted ruleset. "
+                            "Clause, date and the regulation's own sentence on every "
+                            "finding. No verdict.")
+    Y.add_argument("--model", required=True, help="A building.json from reconstruct.")
+    Y.add_argument("--ruleset", default=str(DEFAULT_RULESET),
+                   help="A versioned ruleset JSON from data/rulesets/.")
+    Y.add_argument("--jurisdiction", default=DEFAULT_JURISDICTION,
+                   help="The project's jurisdiction. The ruleset is US FEDERAL law and "
+                        "evaluates nothing outside its scope, so this defaults to "
+                        f"{DEFAULT_JURISDICTION!r} — pass 'US federal' deliberately.")
+    Y.add_argument("--json", dest="json_out", default=None)
+
     Q = sub.add_parser("costing", help="A priced bill of quantities from a model.")
     Q.add_argument("--model", required=True, help="A building.json from reconstruct.")
     Q.add_argument("--rates", default=str(DEFAULT_RATES))
@@ -2812,6 +2898,17 @@ def main() -> int:
     if ns.command == "codecheck":
         report = codecheck_report(ns.model, ns.rulebook)
         _print_codecheck(report)
+        if ns.json_out:
+            Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        return 0
+
+    if ns.command == "comply":
+        from comply import assess as comply_assess
+
+        model = json.loads(Path(ns.model).read_text(encoding="utf-8"))
+        report = comply_assess(model, ns.ruleset,
+                               jurisdiction=ns.jurisdiction).as_dict()
+        _print_comply(report)
         if ns.json_out:
             Path(ns.json_out).write_text(json.dumps(report, indent=2), encoding="utf-8")
         return 0
