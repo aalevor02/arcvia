@@ -186,6 +186,45 @@ if Path(REAL).is_file():
 else:
     print(f"  (skipped the stamped-artefact cases: {REAL} is not on this machine)")
 
+# -- the whole point: this verdict does not move ------------------------------
+# The vision adjudicator's railing verdict was measured non-deterministic —
+# the same file through the same service gave 2 railings, then 1 boundary,
+# then 0, then 1, at shifting locations. That verdict CHANGES GEOMETRY, so a
+# client's balcony was open on one import and boxed in on the next. Asking
+# twice and requiring agreement reduced the flicker and did not remove it.
+#
+# A checkpoint is deterministic. These assertions are the reason this backend
+# exists, so they compare full results rather than counts: a count can match
+# while the classification moved between two segments.
+PLAN = r"A:\Tools\FloorplanModel\realdecks\49b4f5f96a40c7bddf27e09915de195e.png"
+if Path(REAL).is_file() and Path(PLAN).is_file():
+    import cv2  # noqa: PLC0415
+
+    seg = fresh(FLOORPLAN_MODEL=REAL)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import main as detector  # noqa: PLC0415
+
+    image = cv2.imread(PLAN)
+    runs = []
+    for _ in range(3):
+        walls, _o, _r, _s = detector.detect_heuristic(image)
+        walls, notes = seg.classify_walls(image, walls)
+        runs.append([
+            (w.kind, round(w.start.x, 4), round(w.start.y, 4)) for w in walls
+        ])
+
+    check("the classification is identical across repeated runs",
+          runs[0] == runs[1] == runs[2],
+          f"{sum(1 for a, b in zip(runs[0], runs[1]) if a != b)} segments differed")
+    railings = [k for k, _, _ in runs[0] if k == "railing"]
+    check("and it actually found railings, so the above is not vacuous",
+          len(railings) > 0, f"{len(railings)} railings")
+    check("while leaving the rest as walls",
+          sum(1 for k, _, _ in runs[0] if k == "wall") > len(railings),
+          str(len(runs[0])))
+else:
+    print("  (skipped the determinism cases: model or plan not on this machine)")
+
 print(f"\n{passed} passed, {failed} failed")
 if failed:
     sys.exit(1)

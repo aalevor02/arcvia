@@ -317,3 +317,80 @@ def preprocess(image: np.ndarray) -> np.ndarray:
         rgb = (rgb - np.array(mean, np.float32)) / np.array(std, np.float32)
 
     return np.transpose(rgb, (2, 0, 1))[None, ...]
+
+#: A wall must read at least this much Railing before the verdict is even
+#: considered. Not a tuned constant: on the owner's plan 50 of 55 proposals sit
+#: under 10% and the lowest genuine railing reads 33%, so anything in the teens
+#: is the model's noise floor rather than a quiet opinion. The floor sits below
+#: the lowest true positive and well above the band everything else occupies.
+RAILING_FLOOR = 0.20
+
+
+def classify_walls(image: np.ndarray, walls: list, samples: int = 48) -> tuple[list, list]:
+    """
+    Ask the trained model what each proposed wall actually is.
+
+    The heuristic decides WHERE — line extraction is solved in classical CV.
+    This decides WHAT, which is where morphology is weakest and where a balcony
+    parapet and an interior partition are the same two lines on a drawing.
+
+    ── Why this replaces the vision adjudicator for railings ──────────────────
+    The adjudicator's railing verdict was measured NON-DETERMINISTIC: the same
+    file through the same service gave 2 railings, then 1 boundary, then 0, then
+    1. That verdict changes geometry — a marked line is built at parapet height
+    rather than storey height — so a client's balcony was open on one import and
+    boxed in on the next, and no amount of asking twice removed the flicker.
+    A checkpoint is deterministic. The fix is not to make the vision model agree
+    with itself; it is to stop asking it.
+
+    ── Why the rule is a comparison and not a threshold ───────────────────────
+    A tuned cutoff is a constant that was right once, on one drawing. This asks
+    the model which of the two classes it prefers along that line, which is a
+    question it was trained to answer. Measured on the owner's plan: the three
+    genuine candidates read Railing 73/54/33% against Wall 0% for all three,
+    while the two near-misses read Railing 17% and 15% against Wall 44% and 83%
+    — the model is not ambivalent about them, it simply says wall. The floor
+    exists only to keep a 2%-vs-0% line from winning by default.
+
+    Returns the walls with `kind` set, and notes naming what changed and where.
+    """
+    session = load()
+    layout = json.loads(session.get_modelmeta().custom_metadata_map["head_layout"])
+    start, end = layout["rooms"]
+    indices = _extras.get("indices", {})
+    rail = indices.get("railing", 0) - start
+    wall = indices.get("wall", 0) - start
+
+    heads = session.run(None, {session.get_inputs()[0].name: preprocess(image)})[0]
+    # argmax over the ROOMS head only. The three heads are not comparable, so a
+    # global argmax across all 44 channels mixes junctions into room classes.
+    winner = heads[0, start:end].argmax(axis=0)
+    size = winner.shape[0]
+
+    notes: list[str] = []
+    for segment_ in walls:
+        xs = np.linspace(segment_.start.x, segment_.end.x, samples) * (size - 1)
+        ys = np.linspace(segment_.start.y, segment_.end.y, samples) * (size - 1)
+        along = winner[
+            np.clip(ys.astype(int), 0, size - 1),
+            np.clip(xs.astype(int), 0, size - 1),
+        ]
+        rail_share = float((along == rail).mean())
+        wall_share = float((along == wall).mean())
+
+        if rail_share >= RAILING_FLOOR and rail_share > wall_share:
+            segment_.kind = "railing"
+            mx = (segment_.start.x + segment_.end.x) / 2
+            my = (segment_.start.y + segment_.end.y) / 2
+            notes.append(
+                f"detector: a structure near {mx:.0%},{my:.0%} reads railing "
+                f"({rail_share:.0%}) rather than wall ({wall_share:.0%}) "
+                "- built to parapet height"
+            )
+
+    if not notes:
+        # Silence here is a real answer and it should look like one, because
+        # "no railings on this drawing" and "the classifier did not run" are
+        # indistinguishable to a reader otherwise.
+        notes.append("detector: no proposed structure read as railing")
+    return walls, notes
