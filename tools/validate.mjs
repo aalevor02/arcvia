@@ -35,8 +35,25 @@ function run(label, command, args, cwd = ROOT, options = {}) {
     if (result.stderr) process.stderr.write(result.stderr)
   }
 
-  const status = result.error ? 'blocked' : result.status === 0 ? 'passed' : 'failed'
-  const detail = result.error?.message ?? `exit ${result.status ?? 'unknown'}`
+  // Exit 3 means the suite RAN but could not complete a case -- today only
+  // "the machine did not have the memory to load the checkpoint". It is
+  // deliberately not 'passed': a run that skipped work is not a clean run, and
+  // it is deliberately not 'failed' either, because reporting a resource
+  // shortage as a regression is what sent two investigations looking for a bug
+  // that was never there. 'blocked' already means exactly this and already
+  // goes red, so the summary names the reason instead of hiding it.
+  const status = result.error
+    ? 'blocked'
+    : result.status === 0
+      ? 'passed'
+      : result.status === 3
+        ? 'blocked'
+        : 'failed'
+  const detail =
+    result.error?.message ??
+    (result.status === 3
+      ? 'ran, but skipped cases it could not complete -- see its output above'
+      : `exit ${result.status ?? 'unknown'}`)
   results.push({ family: options.family ?? mode, label, status, detail })
   return { ...result, validationStatus: status }
 }

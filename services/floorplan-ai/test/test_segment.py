@@ -22,6 +22,37 @@ passed = 0
 failed = 0
 
 
+#: Loading the checkpoint needs memory this box does not always have. When the
+#: live detector already holds a copy, a second one plus the OCR models exhausts
+#: the allocator and onnxruntime raises "bad allocation" -- which surfaces as a
+#: CRASHED FILE, so the runner reports exit 1 with no failing assertion. That is
+#: indistinguishable from a real regression, and it has now cost two separate
+#: investigations that both ended at "there was never a bug here".
+#:
+#: So the shortage is caught and NAMED. Skipped loudly, never passed: a suite
+#: that reports success when it could not run is the exact failure this service
+#: has spent the week being hardened against.
+skipped = 0
+
+
+def out_of_memory(error: BaseException) -> bool:
+    return isinstance(error, MemoryError) or "bad allocation" in str(error).lower()
+
+
+def note_skip(what: str, error: BaseException) -> None:
+    global skipped
+    skipped += 1
+    print("")
+    print("  SKIP  " + what + " -- not enough memory to load the checkpoint.")
+    # The wrapper re-raises with the whole traceback in its message, so the
+    # first 110 characters are the rapidocr import path and tell you nothing.
+    cause = [line for line in str(error).splitlines() if line.strip()]
+    print("        " + (cause[-1][:110] if cause else "no detail given"))
+    print("        Something else is probably holding a model. These assertions")
+    print("        are SKIPPED, not passed. Re-run with the detector stopped.")
+    print("")
+
+
 def check(label: str, condition: bool, detail: str = "") -> None:
     global passed, failed
     if condition:
@@ -120,8 +151,15 @@ else:
 # -- the STAMPED artefact, where the relative-to-absolute resolve is the point --
 if Path(REAL).is_file():
     seg = fresh(FLOORPLAN_MODEL=REAL)
-    loaded = seg.available()
-    check("the stamped v6 artefact loads", loaded is True)
+    try:
+        loaded = seg.available()
+    except Exception as error:  # noqa: BLE001
+        if not out_of_memory(error):
+            raise
+        loaded = False
+        note_skip("the stamped v6 artefact", error)
+    else:
+        check("the stamped v6 artefact loads", loaded is True)
     if loaded:
         classes = seg._classes
         idx = seg._extras.get("indices", {})
@@ -206,13 +244,20 @@ if Path(REAL).is_file() and Path(PLAN).is_file():
 
     image = cv2.imread(PLAN)
     runs = []
-    for _ in range(3):
-        walls, _o, _r, _s = detector.detect_heuristic(image)
-        walls, notes = seg.classify_walls(image, walls)
-        runs.append([
-            (w.kind, round(w.start.x, 4), round(w.start.y, 4)) for w in walls
-        ])
+    try:
+        for _ in range(3):
+            walls, _o, _r, _s = detector.detect_heuristic(image)
+            walls, notes = seg.classify_walls(image, walls)
+            runs.append([
+                (w.kind, round(w.start.x, 4), round(w.start.y, 4)) for w in walls
+            ])
+    except Exception as error:  # noqa: BLE001
+        if not out_of_memory(error):
+            raise
+        runs = []
+        note_skip("the determinism cases", error)
 
+if runs:
     check("the classification is identical across repeated runs",
           runs[0] == runs[1] == runs[2],
           f"{sum(1 for a, b in zip(runs[0], runs[1]) if a != b)} segments differed")
@@ -222,9 +267,12 @@ if Path(REAL).is_file() and Path(PLAN).is_file():
     check("while leaving the rest as walls",
           sum(1 for k, _, _ in runs[0] if k == "wall") > len(railings),
           str(len(runs[0])))
-else:
+elif not (Path(REAL).is_file() and Path(PLAN).is_file()):
     print("  (skipped the determinism cases: model or plan not on this machine)")
 
-print(f"\n{passed} passed, {failed} failed")
+print(f"\n{passed} passed, {failed} failed"
+      + (f", {skipped} SKIPPED -- this is NOT a clean run" if skipped else ""))
 if failed:
     sys.exit(1)
+if skipped:
+    sys.exit(3)  # ran, but could not complete -- the runner reads this as blocked

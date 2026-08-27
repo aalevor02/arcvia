@@ -42,6 +42,25 @@ if (-not $env:NVIDIA_API_KEY) {
   Write-Warning 'NVIDIA_API_KEY is not set. The detector will run, but the vision adjudicator and the deck design reader will both report themselves unavailable.'
 }
 
+# Same failure shape as the missing key above, one layer deeper. The trained
+# classifier is switched on by FLOORPLAN_MODEL alone. Without it the detector
+# still answers -- it just answers without the pass that makes railings
+# deterministic and drops furniture outlines, so a balcony edge goes back to
+# being whatever the vision model happened to say that run. /health reports
+# "not configured", and nothing else reports anything at all.
+#
+# This is not hypothetical. The value lived only in one shell's environment for
+# a day; the next restart of this service dropped the classifier silently, and
+# the only reason anyone noticed was reading /health line by line.
+if (-not $env:FLOORPLAN_MODEL) {
+  Write-Warning 'FLOORPLAN_MODEL is not set. The detector will run WITHOUT the trained classifier: railings fall back to the varying vision verdict and furniture outlines stay walls. Set it in .env.'
+} elseif (-not (Test-Path $env:FLOORPLAN_MODEL -PathType Leaf)) {
+  # -PathType Leaf, not a bare Test-Path. A truncated path very often still
+  # names a real DIRECTORY -- this guard was written, then immediately fooled
+  # by a value cut short at ...\kaggle, which exists and is not a model.
+  Write-Warning "FLOORPLAN_MODEL points at $($env:FLOORPLAN_MODEL), which is not on this machine. Same effect as leaving it unset, and just as quiet."
+}
+
 $python = Join-Path $repo 'services\floorplan-ai\.venv\Scripts\python.exe'
 if (-not (Test-Path $python)) { throw "No venv at $python. See services/floorplan-ai setup in START-HERE.md." }
 

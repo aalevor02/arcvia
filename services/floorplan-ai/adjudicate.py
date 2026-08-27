@@ -209,6 +209,40 @@ def usage() -> dict:
 _MAX_IMAGE_BYTES = 170_000
 _WINDOW_PASS_LONG_EDGE = 896
 
+#: How many times to ask for windows, taking the UNION of the answers.
+#:
+#: The problem is real. Six runs of one drawing returned 4, 4, 5, 2, 5, 4
+#: windows, and the training session saw a run return 1. The note count matched
+#: the window count every time, so nothing was being discarded by the wall gate
+#: — the model simply sees fewer on some passes. A run that finds one window is
+#: a run where the owner's annotated missing-window failure is back.
+#:
+#: Union is safe HERE and would be wrong elsewhere, and the difference is worth
+#: stating: a window is an ADDITIVE detection, so a second opinion can only add
+#: one, and every candidate still has to survive the 4%-of-width wall gate that
+#: refuses a window floating in the middle of a room. The railing verdict is not
+#: additive — it CHANGES a wall — so there the answer was to stop asking a
+#: source that varies, not to ask it more. More sampling helps a union and does
+#: nothing for a decision.
+#:
+#: And yet this DEFAULTS TO 1, leaving behaviour unchanged. Two was measured to
+#: lift the floor from 2 windows to 6, which does fix the near-empty run, and it
+#: also roughly doubled the count — the added centres are spatially distinct
+#: (closest pair 0.060 against a 0.03 dedup radius), so they are genuinely new
+#: detections and not one window counted twice. Whether they are WINDOWS is the
+#: part nobody here can answer: they land on real openings in the left
+#: elevation, but this drawing also has doors at its balcony thresholds, and the
+#: prompt forbids doors. Recall bought without measuring precision is a bigger
+#: number, not a better answer.
+#:
+#: So the union ships available and unassumed. Set this to 2 once it has been
+#: scored against the owner's five annotated markups, which are the only ground
+#: truth that exists for the missing-window failure.
+WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "1"))
+
+#: Two windows nearer than this are the same window seen twice.
+_WINDOW_SAME = 0.03
+
 
 def available() -> bool:
     return bool(KEY)
@@ -753,6 +787,28 @@ _WINDOW_PROMPT = (
 
 
 def _find_windows(image, walls, detection_cls, notes) -> list:
+    """Ask WINDOW_PASSES times and union, deduping by proximity."""
+    found: list = []
+    for _ in range(max(1, WINDOW_PASSES)):
+        for candidate in _find_windows_once(image, walls, detection_cls, notes):
+            x = candidate.bbox[0] + candidate.bbox[2] / 2
+            y = candidate.bbox[1] + candidate.bbox[3] / 2
+            duplicate = any(
+                abs(x - (c.bbox[0] + c.bbox[2] / 2)) < _WINDOW_SAME
+                and abs(y - (c.bbox[1] + c.bbox[3] / 2)) < _WINDOW_SAME
+                for c in found
+            )
+            if not duplicate:
+                found.append(candidate)
+    # Replace the per-pass notes with one total, or a reader sees "3 read off
+    # the drawing" twice and reasonably concludes six.
+    notes[:] = [n for n in notes if "window(s) read off the drawing" not in n]
+    if found:
+        notes.append(f"adjudicator: {len(found)} window(s) read off the drawing")
+    return found
+
+
+def _find_windows_once(image, walls, detection_cls, notes) -> list:
     # Two sizes, because the first run's full-image pass silently failed:
     # a 1024-edge plan JPEG can still overrun the endpoint's payload comfort
     # zone once base64 inflates it. Smaller is answered more reliably, and a
