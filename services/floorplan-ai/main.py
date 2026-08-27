@@ -346,7 +346,16 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
     model_notes: list[str] = []
     model_owns_railings = False
     if classify_pass.available():
-        walls, model_notes = classify_pass.classify_walls(image, walls)
+        # Measured on the owner's deck: 18 of 55 proposals read under 5%
+        # Wall and were dropped, all three railings survived (a railing
+        # reads ~0% Wall by design, so order matters), and SIX of six
+        # window candidates stayed reachable — the dropped proposals
+        # carried none. That last figure is the one that mattered: the
+        # window pass only accepts a window within 4% of a proposed wall,
+        # so a wrongly dropped wall costs a window that cannot be recovered.
+        walls, model_notes = classify_pass.classify_walls(
+            image, walls, drop_furniture=True,
+        )
         model_owns_railings = True
 
     # A vision model second-guesses the proposals against the picture itself —
@@ -358,6 +367,7 @@ async def detect(file: UploadFile = File(...)) -> DetectionResult:
         walls, objects, rooms, notes = adjudicate_pass.adjudicate(
             image, walls, objects, rooms, Detection,
             owns_railings=not model_owns_railings,
+            owns_furniture=not model_owns_railings,
         )
     # The classifier's notes first: they describe the walls the adjudicator's
     # notes then talk about.

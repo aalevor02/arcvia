@@ -341,8 +341,30 @@ def preprocess(image: np.ndarray) -> np.ndarray:
 #: the lowest true positive and well above the band everything else occupies.
 RAILING_FLOOR = 0.20
 
+#: A proposal reading LESS Wall than this is dropped as furniture outline.
+#:
+#: Deliberately far below the 0.15 the training session used, and the reason is
+#: the measurement rather than caution for its own sake. Their "two clean
+#: populations" (real 0.58-1.00, false 0.000-0.006) turned out to be a
+#: distribution read off its own tails; measured properly it is a CONTINUUM.
+#: Three samplers were swept — centreline, region, and a perpendicular search at
+#: reach 1/2/4/6/9 — and the ambiguous middle never collapses: 13-18 of 55 every
+#: time, while the extremes hold (~19 at 0-1%, ~17 at 60-100%).
+#:
+#: So there is no gap to sit a threshold in. What IS robust is the bottom group:
+#: the same ~19 proposals read essentially zero Wall under every geometry tried.
+#: This ceiling takes only those and leaves the entire ambiguous middle standing.
+#:
+#: The asymmetry is on purpose. A wrongly kept furniture outline is a stray line
+#: in a model somebody can delete; a wrongly dropped wall costs WINDOWS, because
+#: the window pass only accepts a window within 4% of a proposed wall. The two
+#: errors are not the same size, so the rule does not treat them as if they were.
+FURNITURE_CEILING = 0.05
 
-def classify_walls(image: np.ndarray, walls: list, samples: int = 48) -> tuple[list, list]:
+
+def classify_walls(
+    image: np.ndarray, walls: list, samples: int = 48, drop_furniture: bool = False,
+) -> tuple[list, list]:
     """
     Ask the trained model what each proposed wall actually is.
 
@@ -384,6 +406,8 @@ def classify_walls(image: np.ndarray, walls: list, samples: int = 48) -> tuple[l
     size = winner.shape[0]
 
     notes: list[str] = []
+    kept: list = []
+    dropped = 0
     for segment_ in walls:
         xs = np.linspace(segment_.start.x, segment_.end.x, samples) * (size - 1)
         ys = np.linspace(segment_.start.y, segment_.end.y, samples) * (size - 1)
@@ -394,19 +418,44 @@ def classify_walls(image: np.ndarray, walls: list, samples: int = 48) -> tuple[l
         rail_share = float((along == rail).mean())
         wall_share = float((along == wall).mean())
 
+        mx = (segment_.start.x + segment_.end.x) / 2
+        my = (segment_.start.y + segment_.end.y) / 2
+
         if rail_share >= RAILING_FLOOR and rail_share > wall_share:
             segment_.kind = "railing"
-            mx = (segment_.start.x + segment_.end.x) / 2
-            my = (segment_.start.y + segment_.end.y) / 2
+            kept.append(segment_)
             notes.append(
                 f"detector: a structure near {mx:.0%},{my:.0%} reads railing "
                 f"({rail_share:.0%}) rather than wall ({wall_share:.0%}) "
                 "- built to parapet height"
             )
+            continue
+
+        # A RAILING READS ~0% WALL BY DESIGN, so the furniture test has to come
+        # after the railing test and never see a segment it already claimed.
+        # Ordered the other way, this rule deletes every parapet the line above
+        # just identified — the two tests agree about the evidence and disagree
+        # about what it means.
+        if drop_furniture and wall_share < FURNITURE_CEILING:
+            dropped += 1
+            notes.append(
+                f"detector: a proposal near {mx:.0%},{my:.0%} reads "
+                f"{wall_share:.0%} wall - dropped as furniture outline"
+            )
+            continue
+
+        kept.append(segment_)
 
     if not notes:
         # Silence here is a real answer and it should look like one, because
         # "no railings on this drawing" and "the classifier did not run" are
         # indistinguishable to a reader otherwise.
         notes.append("detector: no proposed structure read as railing")
-    return walls, notes
+    if drop_furniture:
+        # Say the total as well as the individuals. A reader scanning for one
+        # missing wall needs to know how many went, not just to count lines.
+        notes.append(
+            f"detector: kept {len(kept)} of {len(walls)} proposals, "
+            f"dropped {dropped} reading under {FURNITURE_CEILING:.0%} wall"
+        )
+    return kept, notes
