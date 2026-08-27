@@ -248,38 +248,41 @@ _WINDOW_PASS_LONG_EDGE = 896
 #: to a model that learned windows as banded lines. That is not a weak
 #: classifier; it is the render domain supplying a near-perfect impostor.
 #:
-#: Why a false window costs more than a missed one, which is what sets the
-#: default: a missed window leaves a blank wall, and a false one punches an
-#: opening into a wall where an armchair is. The second contradicts the drawing
-#: and travels downstream into geometry.
+#: MEASURED, and the gate does not earn its cost. Twelve runs each, gate
+#: against single ask, on the same drawing, asking the one question the owner's
+#: ground truth can actually adjudicate — did the window at (4) come back:
 #:
-#: MEASURED, eight runs of the gate at 2 of 3, because the table above is three
-#: runs and three runs is not enough to set a default on:
+#:                  markup (4)      windows per run              floor
+#:   single ask     3 of 12  25%    5 5 4 5 5 3 7 4 4 4 6 4       3
+#:   gate 3-of-2    3 of 12  25%    4 3 4 1 2 1 2 1 4 3 3 0       0
 #:
-#:   windows kept   5, 2, 3, 2, 3, 2, 3, 2      floor 2, against a floor of 1
-#:                                              for a single ask (nine runs)
-#:   known FALSE    survived in 2 of 8 runs (D twice, G once), all in the
-#:                  first batch
-#:   markup (4)     kept in 4 of 8
+#: Recall on (4) is IDENTICAL. The gate halves the window count, which is
+#: consistent with it removing exactly the junk singletons — and that reading is
+#: unverifiable, which is the whole problem. What IS measurable is that it costs
+#: three vision calls instead of one, and that it produced a run with ZERO
+#: windows where twelve single asks never went below three. So: an unmeasurable
+#: benefit, a measured cost, and a worse worst case. DEFAULT BACK TO 1.
 #:
-#: So consensus REDUCES false positives and does not eliminate them, and the
-#: near-empty run is gone. Both halves matter: the first three runs alone would
-#: have said the gate lets junk through, and the last five alone would have said
-#: it is clean. Neither is true.
+#: Two earlier readings of this were wrong and both were small samples. "Single
+#: ask recovers (4) in 2 of 3, the gate in 4 of 8" suggested the gate cost
+#: recall; it does not. An eight-run gate sample showed a floor of 2 and no
+#: zero-runs; twelve more found a zero. The first sample is the one most likely
+#: to mislead, because it is taken before anyone knows what varies.
 #:
-#: It also surfaced a NINTH location the three-run table never contained:
+#: THE FINDING THAT MATTERS IS NOT THE AGGREGATION. Markup (4) is recovered a
+#: QUARTER of the time under both configurations. The owner's documented failure
+#: is still failing three runs in four, and no way of combining passes fixes
+#: that, because combining passes cannot add information a pass never had. Union
+#: and consensus were both arguments about how to aggregate a signal too weak to
+#: meet the one criterion that exists. The fix has to come from a better signal
+#: — the trained classifier carries a window channel of its own, and it is
+#: deterministic — not from asking this one more times.
 #:
-#:     I  0.212,0.215  white glazed band with a mullion, set into the
-#:                     TOILET-3 exterior wall between two wall segments
-#:                     -- a REAL window, verified by crop, kept in 4 of 5
-#:
-#: which is the useful reminder that the eight-location table is a lower bound
-#: on what exists, not an inventory. It only ever listed what some run proposed.
-#:
-#: Cost: N vision calls per detect instead of one, ~14 s against ~11 s on this
-#: drawing. ADJUDICATE_WINDOW_PASSES=1 returns to a single ask, in which case
-#: the agreement gate cannot apply and does not.
-WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "3"))
+#: The gate is kept because it is the better operation of the two when passes
+#: are spent at all: consensus keeps what agreed, union keeps every singleton,
+#: and a second session verified by crop that four of six singletons were an
+#: armchair, a potted plant, a staircase, and an empty balcony floor.
+WINDOW_PASSES = int(os.environ.get("ADJUDICATE_WINDOW_PASSES", "1"))
 
 #: How many passes must independently propose a candidate for it to survive.
 #: Clamped to WINDOW_PASSES, so a single-pass configuration still works.
