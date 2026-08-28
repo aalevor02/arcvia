@@ -267,6 +267,23 @@ if runs:
     check("while leaving the rest as walls",
           sum(1 for k, _, _ in runs[0] if k == "wall") > len(railings),
           str(len(runs[0])))
+
+    # BOUNDARY, added with the rule on 2026-08-28. This deck carries the premise
+    # line that markup 5 names, so finding NONE means the rule stopped running,
+    # not that the drawing is clean — which is why this is asserted positively.
+    boundaries = [k for k, _, _ in runs[0] if k == "boundary"]
+    check("the premise line is read as a boundary rather than a wall",
+          len(boundaries) > 0, f"{len(boundaries)} boundaries")
+
+    # The ordering is load-bearing in BOTH directions and this is the assertion
+    # that catches it being moved. Boundary before railing steals balcony
+    # parapets, which legitimately have open ground on both flanks and must
+    # still build at PARAPET_HEIGHT; boundary after the furniture test never
+    # fires at all, because a line with outdoor on both sides reads ~0% wall.
+    # Either mistake leaves one of these two lists empty.
+    check("boundary and railing verdicts coexist, so the rule order still holds",
+          len(boundaries) > 0 and len(railings) > 0,
+          f"{len(boundaries)} boundary, {len(railings)} railing")
 elif not (Path(REAL).is_file() and Path(PLAN).is_file()):
     print("  (skipped the determinism cases: model or plan not on this machine)")
 

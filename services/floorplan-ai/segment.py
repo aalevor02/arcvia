@@ -426,6 +426,14 @@ RAILING_FLOOR = 0.20
 #: errors are not the same size, so the rule does not treat them as if they were.
 FURNITURE_CEILING = 0.05
 
+#: A premise line reads OUTSIDE on both flanks; a real exterior wall reads Wall
+#: along its own centreline, because that is what the centreline is made of.
+#: That asymmetry is the whole discriminator, and it is why this samples the
+#: centreline rather than a band around it. 0.60 is hybrid.py's measured
+#: threshold, kept identical so the two agree by construction rather than by
+#: coincidence.
+BOUNDARY_FLOOR = 0.60
+
 
 def classify_walls(
     image: np.ndarray, walls: list, samples: int = 48, drop_furniture: bool = False,
@@ -463,6 +471,16 @@ def classify_walls(
     indices = _extras.get("indices", {})
     rail = indices.get("railing", 0) - start
     wall = indices.get("wall", 0) - start
+    # Outdoor and Background are NOT stamped as named indices the way wall and
+    # railing are, so they are resolved BY NAME out of the rooms slice. Not by
+    # position: hardcoding 0 and 1 is the exact bug the stamp cross-check above
+    # exists to catch, and it would read some other class silently the first
+    # time anyone reorders the class list.
+    _room_names = [c.lower() for c in (_classes or [])[start:end]]
+    _outside = [
+        i for i, n in enumerate(_room_names)
+        if n in ("outdoor", "background")
+    ]
 
     heads = session.run(None, {session.get_inputs()[0].name: preprocess(image)})[0]
     # argmax over the ROOMS head only. The three heads are not comparable, so a
@@ -495,6 +513,31 @@ def classify_walls(
                 "- built to parapet height"
             )
             continue
+
+        # BOUNDARY. A site or premise line is not a wall and must not be built
+        # as one — markup 5 on the acceptance deck is exactly this: the premise
+        # boundary taken for the MASTER BEDROOM's outer wall.
+        #
+        # Placed AFTER the railing test and BEFORE the furniture test, and that
+        # position is load-bearing in both directions. Before railing, it would
+        # steal balcony parapets, which legitimately have outdoor on both sides
+        # and must still be built at PARAPET_HEIGHT. After furniture, it would
+        # never run, because a line with outdoor on both flanks reads ~0% wall
+        # and the furniture rule would already have dropped it.
+        #
+        # The `> wall_share` guard is what protects genuine exterior walls: they
+        # have outdoor on ONE side, so their centreline still reads Wall.
+        if _outside:
+            outside_share = float(np.isin(along, _outside).mean())
+            if outside_share >= BOUNDARY_FLOOR and outside_share > wall_share:
+                segment_.kind = "boundary"
+                kept.append(segment_)
+                notes.append(
+                    f"detector: a line near {mx:.0%},{my:.0%} has open ground on "
+                    f"both sides ({outside_share:.0%} outdoor/background vs "
+                    f"{wall_share:.0%} wall) - read as a site boundary, not a wall"
+                )
+                continue
 
         # A RAILING READS ~0% WALL BY DESIGN, so the furniture test has to come
         # after the railing test and never see a segment it already claimed.
