@@ -122,7 +122,7 @@ export function ProposalReview({
         </p>
       ))}
 
-      {scale && scaleApplied && (
+      {scale && scaleApplied && scale.method !== 'inferred' && (
         <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
           Scale set from the sizes printed on the drawing
           {scale.samples > 1 ? <>, agreed across {scale.samples} rooms</> : ' — from one room only, so check it'}
@@ -136,10 +136,18 @@ export function ProposalReview({
         </p>
       )}
 
-      {scale && !scaleApplied && (
+      {scale && !scaleApplied && scale.method !== 'inferred' && (
         <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
           The drawing's printed sizes imply a different scale to the one you set.
           Yours was kept.
+        </p>
+      )}
+
+      {scale?.method === 'inferred' && (
+        <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+          Scale was inferred from {scale.agreed?.join(' and ') || 'wall and opening sizes'}.
+          It has not been applied. Calibrate against a known dimension before relying
+          on areas, quantities, or furniture fit.
         </p>
       )}
 

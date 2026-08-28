@@ -1,4 +1,5 @@
 import {
+  automaticScalePerPixel,
   convertDetections,
   summarise,
   toWorld,
@@ -21,6 +22,21 @@ const check = (label: string, cond: boolean, detail = '') => {
   }
 }
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) < tol
+
+{
+  const measured = { metres_per_unit: 12, samples: 2, spread: 0.01, method: 'measured' as const }
+  const legacy = { metres_per_unit: 12, samples: 2, spread: 0.01 }
+  const inferred = { ...measured, method: 'inferred' as const, agreed: ['door', 'brick'] }
+
+  check('measured scale may calibrate automatically',
+    automaticScalePerPixel(measured, 1200) === 0.01)
+  check('legacy measured scale remains compatible',
+    automaticScalePerPixel(legacy, 1200) === 0.01)
+  check('inferred scale never marks an underlay calibrated',
+    automaticScalePerPixel(inferred, 1200) === null)
+  check('implausible measured scale is still refused',
+    automaticScalePerPixel({ ...measured, metres_per_unit: 120 }, 1200) === null)
+}
 
 /**
  * An underlay where the arithmetic is easy to check by hand: a 1000x500 image

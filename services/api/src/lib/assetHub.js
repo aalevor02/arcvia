@@ -3,6 +3,12 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 
+import {
+  inferScale,
+  measureModel,
+  SCALE_VERSION,
+} from '../../../../tools/asset-ingest/scale.mjs'
+
 const run = promisify(execFile)
 
 /**
@@ -226,6 +232,23 @@ export class NotConditionable extends Error {
   }
 }
 
+export function reusableConditioning(report) {
+  return report?.scale?.ok === true && report.scale.version === SCALE_VERSION
+}
+
+export function requireTrustworthyScale(scale, name) {
+  if (
+    scale?.ok &&
+    scale.version === SCALE_VERSION &&
+    Number.isFinite(scale.factor) &&
+    scale.factor > 0
+  ) return scale
+  throw new NotConditionable(
+    `"${name}" has no trustworthy physical scale (${scale?.reason ?? 'unknown'}); ` +
+      'refusing to preserve an unverified authored scale.',
+  )
+}
+
 /**
  * The licence-bearing model record persisted on a plan placement.
  *
@@ -286,25 +309,54 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
     const report = await readFile(metadata, 'utf8')
       .then((text) => JSON.parse(text))
       .catch(() => null)
-    return {
-      file: output,
-      name,
-      triangles: report?.decimate?.after ?? null,
-      bytes: existing.size,
-      cached: true,
-      report,
-      asset,
+    if (reusableConditioning(report)) {
+      return {
+        file: output,
+        name,
+        triangles: report?.decimate?.after ?? null,
+        bytes: existing.size,
+        cached: true,
+        report,
+        scale: report.scale,
+        asset,
+      }
     }
   }
 
   const script =
     conditionScript ?? resolve(process.cwd(), '../render-worker/condition_asset.py')
 
+  /**
+   * How big is it, really?
+   *
+   * `condition_asset.py` documents that without `--width/--depth/--height` it
+   * "keeps the model's authored scale". This path used to pass none of them, so
+   * every hub asset arrived in a room at whatever scale its author happened to
+   * work in — fine for The Base Mesh, which authors in metres, and a hundred
+   * times wrong for a model authored in centimetres. The failure is silent:
+   * nothing errors, and the first symptom is a sofa the size of a house in a
+   * client's walkthrough.
+   *
+   * `scale.mjs` measures the geometry and decides which authored unit is
+   * plausible. The conditioner receives that one uniform factor, avoiding any
+   * claim that an outside glTF bounding box has the same axes as Blender's
+   * imported box. If the unit is not decisive, conditioning refuses.
+   */
+  let scale = { ok: false, reason: 'not-attempted' }
+  try {
+    scale = inferScale(asset.name ?? ref, await measureModel(source))
+  } catch (cause) {
+    scale = { ok: false, reason: 'measure-failed', detail: String(cause?.message ?? cause) }
+  }
+
+  scale = requireTrustworthyScale(scale, asset.name ?? ref)
+  const sizeArgs = ['--scale', String(scale.factor)]
+
   const { stdout } = await conditionQueued(() =>
     run(
       BLENDER,
       ['-b', '--python', script, '--', '--input', source, '--output', output,
-        '--budget', String(capped)],
+        '--budget', String(capped), ...sizeArgs],
       { maxBuffer: 64 * 1024 * 1024, timeout: 5 * 60 * 1000 },
     ),
   )
@@ -315,6 +367,8 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
 
   const written = await stat(output).catch(() => null)
   if (!written) throw new NotConditionable('Conditioning wrote no file.', 500)
+  // Carried on the report so cache hits can reject stale scale algorithms.
+  conditioned.scale = scale
   // The sidecar makes cache hits carry the same facing and triangle metadata as
   // the first run. It is not served; only the authenticated route reads it.
   await writeFile(metadata, JSON.stringify(conditioned, null, 2), 'utf8')
@@ -326,6 +380,7 @@ export async function conditionModel(ref, { budget = 5000, conditionScript } = {
     bytes: written.size,
     cached: false,
     report: conditioned,
+    scale,
     asset,
   }
 }

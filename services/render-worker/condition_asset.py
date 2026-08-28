@@ -52,6 +52,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=float, default=None)
     parser.add_argument("--depth", type=float, default=None)
     parser.add_argument("--height", type=float, default=None)
+    # A uniform scale factor, for the caller that knows the model is in the
+    # wrong UNIT rather than the wrong size.
+    #
+    # ── Why this exists alongside the width/depth/height trio ──────────────────
+    # The trio is right for the catalogue ingest: a slot is authoritative about
+    # size, and "make this asset 2.1 m wide" is exactly the instruction. It is
+    # WRONG for a unit correction, and measurably so.
+    #
+    # A caller outside Blender that measures a glTF and concludes "this is in
+    # centimetres" has learned one number — 0.01. To express that as a target
+    # box it has to name which of its measured axes is width, which is depth and
+    # which is height, and it cannot: measured on three real hub assets, the
+    # relationship between a glTF-space bounding box and what this script sees
+    # after import is not a fixed mapping.
+    #
+    #     asset      glTF reader                Blender here
+    #     TV         1.060, 0.649, 0.068        1.060, 0.068, 0.649   y/z swapped
+    #     Bathtub    186.15, 71.35, 89.30       186.15, 71.35, 89.30  identical
+    #     Wardrobe   1.416, 2.365, 1.778        1.604, 2.283, 0.678   neither
+    #
+    # The wardrobe is the one that settles it: 0.678 against 1.778 is not a
+    # permutation of anything. A world-space axis-aligned box is not preserved
+    # across a frame change when nodes carry rotations, so the outside measurer
+    # and this script are not measuring the same box at all.
+    #
+    # Since the scaling applied below is uniform anyway, a scalar loses nothing
+    # and removes the whole question. Prefer it for unit corrections.
+    parser.add_argument("--scale", type=float, default=None)
     # Textures at 4K are common and pointless on a chair seen from two metres
     # away in a room lit by a baked atlas.
     # 512, not 1024. These are seen from across a room, in a scene whose
@@ -153,7 +181,9 @@ def extent(obj) -> mathutils.Vector:
     return mathutils.Vector((highs[0] - lows[0], highs[1] - lows[1], highs[2] - lows[2]))
 
 
-def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=None) -> dict:
+def orient_and_fit(
+    obj, width: float, depth: float, height: float, force_rotate=None, uniform=None
+) -> dict:
     """
     Scale to the catalogue's dimensions and sit the model on its origin.
 
@@ -180,12 +210,18 @@ def orient_and_fit(obj, width: float, depth: float, height: float, force_rotate=
         if force_rotate is True:
             obj.data.transform(mathutils.Matrix.Rotation(math.radians(90), 4, "X"))
             obj.data.update()
+        # A unit correction: one factor, applied to every axis, no target box and
+        # therefore no shape-match rotation — there is still no slot to
+        # reconcile against, only a model whose author worked in centimetres.
+        if uniform is not None:
+            obj.scale = (uniform, uniform, uniform)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
         obj.location = (0, 0, extent(obj).z / 2)
         bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
         return {
             "rotated": force_rotate is True,
-            "scale": 1.0,
+            "scale": round(uniform, 5) if uniform is not None else 1.0,
             "size": [round(v, 4) for v in extent(obj)],
         }
 
@@ -452,7 +488,17 @@ def main() -> int:
     sizes = [args.width, args.depth, args.height]
     if any(v is not None for v in sizes) and not all(v is not None for v in sizes):
         raise SystemExit("--width, --depth and --height come as a trio or not at all.")
-    report["placement"] = orient_and_fit(obj, args.width, args.depth, args.height, args.rotate)
+    if args.scale is not None:
+        # Refused rather than resolved by precedence. The two say different
+        # things about the same model, and a caller passing both has a bug that
+        # a silent winner would hide.
+        if any(v is not None for v in sizes):
+            raise SystemExit("--scale and the --width/--depth/--height trio are alternatives.")
+        if not args.scale > 0:
+            raise SystemExit("--scale must be positive.")
+    report["placement"] = orient_and_fit(
+        obj, args.width, args.depth, args.height, args.rotate, args.scale
+    )
     # Before decimation: the heuristic reads vertex heights, and collapsing the
     # mesh first would blur exactly the silhouette it is measuring.
     report["facing"] = detect_facing(obj)

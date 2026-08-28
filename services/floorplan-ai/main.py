@@ -38,6 +38,7 @@ import numpy as np
 import adjudicate as adjudicate_pass
 import deck
 import design
+import plan_scale
 import labels as text_labels
 import json
 
@@ -46,7 +47,7 @@ import segment as classify_pass
 import pdfbackend
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 BACKEND: Literal["heuristic", "yolo"] = os.environ.get("FLOORPLAN_BACKEND", "heuristic")  # type: ignore[assignment]
 MODEL_PATH = os.environ.get("FLOORPLAN_MODEL", "")
@@ -154,6 +155,17 @@ class PlanScale(BaseModel):
     # with the sheet, and the caller should say so rather than pick one. None
     # from a single room, which has nothing to disagree with.
     spread: float | None
+    # Where the number came from. "measured" means the architect printed the
+    # dimensions and we read them; "inferred" means nothing was printed and the
+    # scale was deduced from features of known size (see `plan_scale.py`).
+    #
+    # Defaulted so every existing consumer sees the shape it always saw — but a
+    # deduced scale and a measured one are NOT the same claim, and anything
+    # quoting an area or a quantity should be able to say which it had.
+    method: Literal["measured", "inferred"] = "measured"
+    # For an inferred scale, which rulers agreed — so a reviewer can check the
+    # claim against the drawing instead of taking it on trust.
+    agreed: list[str] = Field(default_factory=list)
 
 
 class DetectionResult(BaseModel):
@@ -691,7 +703,49 @@ def detect_heuristic(
         ),
     )
 
-    return best.walls, detect_openings(best.walls), best.rooms, best.scale
+    openings = detect_openings(best.walls)
+    return best.walls, openings, best.rooms, best.scale or deduce_scale(
+        best.walls, openings
+    )
+
+
+def deduce_scale(
+    walls: list[WallSegment], openings: list[Detection]
+) -> PlanScale | None:
+    """
+    A scale for plans that printed no dimensions.
+
+    Strictly a fallback: it runs only when `text_labels.infer_scale` found no
+    printed room sizes to read, so a measured scale is never displaced by a
+    deduced one. That ordering is the same `measured > header > extent` rule
+    `classify/units.py` documents for the CAD side.
+
+    Without this, a plan with no captions — a brochure page, a scan, a photo of
+    a drawing — comes back with `scale=None`, and everything downstream is
+    unitless: no areas, no quantities, no compliance check, and furniture that
+    cannot be checked for fit because there is nothing to fit it against.
+
+    Returns None when the drawing does not support a confident answer, which is
+    most of what `plan_scale` spends its effort on. A wrong scale is worse than
+    no scale: every area and quantity inherits it silently and still looks
+    entirely plausible.
+    """
+    thicknesses = [wall.thickness for wall in walls if wall.thickness]
+    # An opening's span along the wall is its long side; which axis that is
+    # depends on whether the wall runs horizontally or vertically.
+    widths = [max(o.bbox[2], o.bbox[3]) for o in openings if len(o.bbox) >= 4]
+
+    got = plan_scale.infer_scale_from_features(thicknesses, widths)
+    if not isinstance(got, plan_scale.InferredScale):
+        return None
+
+    return PlanScale(
+        metres_per_unit=round(got.metres_per_unit, 4),
+        samples=got.samples,
+        spread=got.spread,
+        method="inferred",
+        agreed=got.agreed,
+    )
 
 
 class Reading(NamedTuple):

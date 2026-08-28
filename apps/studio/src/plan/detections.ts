@@ -72,14 +72,27 @@ export interface DetectedRoom {
   also: string[]
 }
 
-/** The scale read off the sizes the architect printed on the drawing. */
+/** A measured or feature-inferred scale reported by the plan reader. */
 export interface DetectedScale {
-  /** Metres per 1.0 of normalised x — that is, across the whole image. */
+  /** Metres per 1.0 of normalised x - that is, across the whole image. */
   metres_per_unit: number
-  /** How many labelled rooms agreed on it. */
+  /** How many independent readings agreed on it. */
   samples: number
-  /** How far apart they were. Null from a single room. */
+  /** How far apart they were. Null from a single reading. */
   spread: number | null
+  /** Older readers omitted this; omission means the original measured method. */
+  method?: 'measured' | 'inferred'
+  /** Feature rulers that agreed when method is inferred. */
+  agreed?: string[]
+}
+
+export function automaticScalePerPixel(
+  scale: DetectedScale | null | undefined,
+  imageWidth: number,
+): number | null {
+  if (!scale || scale.method === 'inferred' || imageWidth <= 0) return null
+  if (scale.metres_per_unit < 3 || scale.metres_per_unit > 48) return null
+  return scale.metres_per_unit / imageWidth
 }
 
 export interface DetectionResult {

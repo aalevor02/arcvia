@@ -68,8 +68,8 @@ import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
 import {
-  convertDetections,
-  type DetectedRoom,
+  automaticScalePerPixel,
+  convertDetections,  type DetectedRoom,
   type DetectedScale,
   type ProposedWall,
 } from '../plan/detections'
@@ -640,12 +640,12 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // person who knows the building.
       let traced = underlay
       let scaleApplied = false
-      const printed = result.scale
-      // Reject an implausible OCR scale. A single misread dimension can shrink
-      // every room and object by 10x; let the user calibrate those sheets.
-      const plausibleSheetWidth = printed && printed.metres_per_unit >= 3 && printed.metres_per_unit <= 48
-      if (plausibleSheetWidth && !underlay.calibrated && result.width > 0) {
-        const metresPerPixel = printed.metres_per_unit / result.width
+      const detectedScale = result.scale
+      // Only printed, measured dimensions can calibrate automatically. A scale
+      // inferred from wall and door priors remains useful evidence, but it must
+      // be confirmed by the person who knows the drawing.
+      const metresPerPixel = automaticScalePerPixel(detectedScale, result.width)
+      if (metresPerPixel !== null && !underlay.calibrated) {
         traced = { ...underlay, scale: metresPerPixel, calibrated: true }
         apply((current) => rescaleUnderlay(current, metresPerPixel))
         scaleApplied = true
@@ -654,7 +654,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       let walls = convertDetections(result, traced)
       setReading({
         rooms: result.rooms ?? [],
-        scale: printed ?? null,
+        scale: detectedScale ?? null,
         scaleApplied,
         notes: result.notes ?? [],
       })

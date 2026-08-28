@@ -23,6 +23,8 @@ import {
   hubPathOf,
   manifest,
   pickPreview,
+  requireTrustworthyScale,
+  reusableConditioning,
   search,
 } from '../src/lib/assetHub.js'
 
@@ -36,6 +38,31 @@ const ok = (label, condition, extra = '') => {
     failed++
     console.log(`FAIL  ${label}${extra ? '  ' + extra : ''}`)
   }
+}
+
+ok('only current, verified scale reports are reusable',
+  reusableConditioning({ scale: { ok: true, version: 1 } }))
+ok('legacy scale sidecars are regenerated',
+  !reusableConditioning({ scale: { ok: true } }) && !reusableConditioning({}))
+{
+  let refusal = null
+  try {
+    requireTrustworthyScale({ ok: false, reason: 'ambiguous' }, 'Test sofa')
+  } catch (error) {
+    refusal = error
+  }
+  ok('ambiguous authored scale is refused, not silently preserved',
+    refusal instanceof NotConditionable && /ambiguous/.test(refusal.message))
+}
+{
+  let refusal = null
+  try {
+    requireTrustworthyScale({ ok: true, version: 1 }, 'Malformed asset')
+  } catch (error) {
+    refusal = error
+  }
+  ok('a success report without a positive factor is refused',
+    refusal instanceof NotConditionable)
 }
 
 // ---- Containment ------------------------------------------------------------
