@@ -18,3 +18,13 @@ reports/rates/
 # written here to be looked at once — which is how this directory started
 # showing up as untracked with a GLB in it.
 .runtime-logs/
+
+# Local coordination and research inputs. These are deliberately outside the
+# product artefact: the ledger contains machine/session history; the two loose
+# IFCs do not yet carry exact source and redistribution attribution in this
+# repository; and sample-bim is a nested third-party checkout. Keep the inputs
+# locally for provenance review without silently shipping them.
+/COORDINATION.md
+/Building-Architecture.ifc
+/Duplex_A_20110907.ifc
+/sample-bim/
