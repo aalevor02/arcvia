@@ -2422,3 +2422,65 @@ recorded.
 passed two and stamped the third `ARCVIA_SUSPECT: 73% blown out`. That check was
 added for renders nobody would look at; here it correctly flagged one a human was
 about to look at.
+
+
+---
+
+## 2026-08-28 (later still) — the backlog was finished, and two items refuted themselves
+
+`claude-d8fec1`, working the detector/evidence lane while Codex held the
+Arcvia reconstruction/queue/repo lanes. Claims taken on every file before
+editing; nothing swept into a bare commit.
+
+### ⚠ The queue-persistence flake needed NO change, and this file's advice was wrong
+
+The entry said: *"if it recurs, widen the `until(…, 15000)`"*. **Do not.** That
+was already considered and rejected inside the test file itself, and the
+rejection is right:
+
+> "the tempting remedy is to widen the window. That would hide the only
+> evidence there is."
+
+The fix that shipped instead reports the **margin on success**, so a wait that
+has crept from 5 s to 13 s of a 15 s budget is visible while the assertion still
+says PASS. Widening the window would have deleted exactly that signal and left
+the flake undiagnosable for good.
+
+Re-run 2026-08-28: **23 passed, 0 failed**, and branch 2 reports
+`5.0s of 15s` — a third of budget, comfortable. Nothing to fix. **This is the
+sixth entry in this file recommending work that is already done, and the first
+one whose recommendation was actively harmful.**
+
+### The trained-model backlog is closed
+
+| item | outcome |
+|---|---|
+| window denominator | **exists.** `realdecks/*.windows-groundtruth.md` — 3 exterior windows, enumerated off the drawing with no detector involved. Precision is computable for the first time; re-scored, **7 of 9 recorded runs were over-detecting** and the old recall-floor metric called them good |
+| furniture-drop policy | **dissolved.** Measured a no-op: 37 in, 37 kept, 0 dropped. The ambiguous middle was measured when the heuristic proposed 51 |
+| full-resolution hybrid | **done.** The `maxdim=768` cap was innocent — identical to four decimals |
+| the hybrid itself | **do not build it.** Four of its five wins are now delivered by the shipped pass. Only the premise edge remained, and that is now shipped as a rule (`f2d3405`) |
+| v8 generator | **training.** Kaggle kernel v8, T4. Unproven until scored on `realdecks` |
+| C: orphan tree | **removed**, archive-first and byte-reconciled |
+
+### The boundary rule, and why it deliberately scores lower than the hybrid
+
+`f2d3405`. Markup 5 goes 21.16 → 11.43 (1.9x), all four recall controls
+identical to two decimals, all three enumerated windows keep a supporting wall,
+and the three railings survive.
+
+The offline hybrid scored **5.3x** here. Matching it was possible and would have
+been wrong: it got there by demoting a second segment, and that segment reads
+**83% Wall**. Of the three proposals in the premise region the model reads
+outdoor 0.02 / 0.04 / 0.85 — two populations with nothing between them, so 0.60
+is not a tuned threshold and there is no ambiguous middle to argue about.
+
+**A number that can be matched by deleting a real wall is not a target.**
+
+### One risk closed outside this repo
+
+`A:\Tools\FloorplanModel` had **no git at all** — synth_plan.py, train.py, the
+acceptance test and every checkpoint, unversioned. That is the same condition
+that lost 14,272 bytes of finished research from `A:\Research\BIM` on 26 August
+when a session died between "the evidence is complete" and the Edit that would
+have written it down. Now versioned (`bb4bfb1`), code and docs and the
+acceptance test only, weights and datasets deliberately excluded.
