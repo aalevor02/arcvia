@@ -74,19 +74,9 @@ function runTypes() {
     family: 'types',
   })
 
-  // This tracked contract is not an npm workspace and has no tsconfig yet.
-  // Check it explicitly so it cannot disappear from the green workspace build.
-  run('types:building-model (standalone contract)', node, [
-    tsc,
-    '--noEmit',
-    '--strict',
-    '--skipLibCheck',
-    '--module', 'ESNext',
-    '--moduleResolution', 'bundler',
-    '--target', 'ES2022',
-    'packages/building-model/src/schema.ts',
-    'packages/building-model/src/buildplan.ts',
-  ], ROOT, { family: 'types' })
+  run('types:building-model', npm, ['run', 'check', '--workspace=@arcvia/building-model'], ROOT, {
+    family: 'types',
+  })
 }
 
 // Two of the JS suites drive a running server rather than booting their own.
@@ -111,6 +101,7 @@ function serverUp(origin) {
 
 function runJavaScript() {
   for (const [label, command, args, cwd, needs] of [
+    ['js:building-model', npm, ['test', '--workspace=@arcvia/building-model'], ROOT],
     ['js:brand', npm, ['test', '--workspace=packages/brand'], ROOT],
     ['js:studio', npm, ['test', '--workspace=apps/studio'], ROOT],
     ['js:api', npm, ['test', '--workspace=services/api'], ROOT, {

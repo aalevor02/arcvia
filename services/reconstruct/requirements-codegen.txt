@@ -1,0 +1,7 @@
+# Development-only generator for model/types.py. Runtime dependencies remain
+# in requirements.txt.
+#
+# From the repository root:
+#   python -m pip install -r services/reconstruct/requirements-codegen.txt
+#   python -m datamodel_code_generator --input packages/building-model/schema/building-1.json --input-file-type jsonschema --output services/reconstruct/model/types.py --output-model-type pydantic_v2.BaseModel --target-python-version 3.12 --use-standard-collections --use-union-operator --use-annotated --field-constraints --disable-timestamp
+datamodel-code-generator==0.75.1

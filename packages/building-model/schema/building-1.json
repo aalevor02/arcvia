@@ -1,0 +1,2036 @@
+{
+  "$ref": "#/definitions/BuildingModel",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Annotation": {
+      "additionalProperties": false,
+      "description": "THE highest-leverage thing nothing in Arcvia reads today. A DIMENSION entity carries the architect's own explicit assertion of a distance plus its two definition points. It has a DUAL ROLE:   (a) the unit minimising median |value - drawnDistance * scale| across all       DimObs is the decisive unit estimator (weight 0.40, section 4 stage 3);   (b) each one becomes a direct residual (measured - model) in the       relaxation and again in the pre-GPU verify gate (stage 7).",
+      "properties": {
+        "at": {
+          "$ref": "#/definitions/P2"
+        },
+        "frameId": {
+          "$ref": "#/definitions/Id"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "mtext",
+            "dimension",
+            "roomTag",
+            "levelMarker",
+            "title",
+            "north"
+          ],
+          "type": "string"
+        },
+        "measure": {
+          "additionalProperties": false,
+          "properties": {
+            "axis": {
+              "enum": [
+                "x",
+                "y",
+                "aligned",
+                "radial"
+              ],
+              "type": "string"
+            },
+            "from": {
+              "$ref": "#/definitions/P2"
+            },
+            "overridden": {
+              "type": "boolean"
+            },
+            "to": {
+              "$ref": "#/definitions/P2"
+            },
+            "value": {
+              "$ref": "#/definitions/M"
+            }
+          },
+          "required": [
+            "value",
+            "axis",
+            "from",
+            "to",
+            "overridden"
+          ],
+          "type": "object"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "refersTo": {
+          "$ref": "#/definitions/Id"
+        },
+        "rotation": {
+          "$ref": "#/definitions/Rad"
+        },
+        "storeyId": {
+          "$ref": "#/definitions/Id"
+        },
+        "text": {
+          "type": "string"
+        },
+        "textHeight": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "at",
+        "text",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "Axis": {
+      "additionalProperties": false,
+      "properties": {
+        "theta": {
+          "$ref": "#/definitions/Rad"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "theta",
+        "weight"
+      ],
+      "type": "object"
+    },
+    "BuildingModel": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "items": {
+            "$ref": "#/definitions/Annotation"
+          },
+          "type": "array"
+        },
+        "definitions": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Definition"
+          },
+          "type": "object"
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/definitions/Frame"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "northAngle": {
+          "$ref": "#/definitions/Rad"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/definitions/ModelPatch"
+          },
+          "type": "array"
+        },
+        "quality": {
+          "additionalProperties": false,
+          "properties": {
+            "blocking": {
+              "type": "number"
+            },
+            "closedSpaceFraction": {
+              "type": "number"
+            },
+            "dimAgreement": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "dimSamples": {
+              "type": "number"
+            },
+            "meanWallResidual": {
+              "$ref": "#/definitions/M"
+            },
+            "mitreFallbacks": {
+              "type": "number"
+            },
+            "openingsUnassigned": {
+              "type": "number"
+            },
+            "solved": {
+              "type": "boolean"
+            },
+            "unitMargin": {
+              "type": "number"
+            },
+            "unpairedRuns": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "solved",
+            "closedSpaceFraction",
+            "meanWallResidual",
+            "dimAgreement",
+            "dimSamples",
+            "unitMargin",
+            "mitreFallbacks",
+            "unpairedRuns",
+            "openingsUnassigned",
+            "blocking"
+          ],
+          "type": "object"
+        },
+        "residuals": {
+          "items": {
+            "$ref": "#/definitions/Residual"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "const": "arcvia.building/1",
+          "type": "string"
+        },
+        "sourceOrigin": {
+          "additionalProperties": {
+            "$ref": "#/definitions/P2"
+          },
+          "description": "Subtracted ONCE PER SOURCE, not per frame. Shifting each frame to its own min-corner destroys exactly the relative alignment that storey registration exists to recover — the contradiction that made a rival design's registration stage unreachable.",
+          "type": "object"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/SourceRef"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "surveying",
+            "needs-unit",
+            "needs-frames",
+            "needs-levels",
+            "needs-review",
+            "ready",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "storeyLinks": {
+          "items": {
+            "$ref": "#/definitions/StoreyLink"
+          },
+          "type": "array"
+        },
+        "storeys": {
+          "items": {
+            "$ref": "#/definitions/Storey"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/definitions/UnitDecision"
+        },
+        "units": {
+          "const": "m",
+          "type": "string"
+        },
+        "up": {
+          "const": "z",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "name",
+        "units",
+        "up",
+        "status",
+        "sources",
+        "frames",
+        "unit",
+        "sourceOrigin",
+        "northAngle",
+        "storeys",
+        "storeyLinks",
+        "definitions",
+        "annotations",
+        "residuals",
+        "patches",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "Column": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/definitions/P2"
+        },
+        "base": {
+          "additionalProperties": false,
+          "properties": {
+            "offset": {
+              "$ref": "#/definitions/M"
+            },
+            "storeyId": {
+              "$ref": "#/definitions/Id"
+            }
+          },
+          "required": [
+            "storeyId",
+            "offset"
+          ],
+          "type": "object"
+        },
+        "height": {
+          "$ref": "#/definitions/M"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "profile": {
+          "enum": [
+            "rect",
+            "round"
+          ],
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "size": {
+          "items": {
+            "$ref": "#/definitions/M"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "yaw": {
+          "$ref": "#/definitions/Rad"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "yaw",
+        "profile",
+        "size",
+        "base",
+        "height",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "LOW MARGIN, not low score, is the ask-a-human signal. A parser that is 0.6 confident and has no rival is fine; two rivals at 0.55 and 0.54 is not.",
+      "properties": {
+        "alternatives": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "label",
+              "score"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "margin": {
+          "type": "number"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "score",
+        "margin"
+      ],
+      "type": "object"
+    },
+    "Curve2": {
+      "additionalProperties": false,
+      "description": "A baseline. Arcs stay arcs; chording is a BUILD-time choice at a stated sagitta, never a READ-time loss. cad.py:200 skips ARC today only because it had nowhere to put one. LWPOLYLINE bulges MUST be read with e.get_points('xyb') — get_points('xy') is the single commonest way a curved wall silently becomes a straight one.",
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        },
+        "spans": {
+          "items": {
+            "$ref": "#/definitions/Span"
+          },
+          "type": "array"
+        },
+        "start": {
+          "$ref": "#/definitions/P2"
+        }
+      },
+      "required": [
+        "start",
+        "spans"
+      ],
+      "type": "object"
+    },
+    "Definition": {
+      "additionalProperties": false,
+      "description": "One per block TYPE. One D750 definition, 88 instances.",
+      "properties": {
+        "anchor": {
+          "enum": [
+            "centre",
+            "base-centre",
+            "insert-point"
+          ],
+          "type": "string"
+        },
+        "catalogueItem": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "licence": {
+          "additionalProperties": false,
+          "description": "REQUIRED whenever meshUrl is set. Copy the CONSTRAINT from apps/studio/src/catalogue/types.ts:86 — it is what makes CC-BY compliance structurally impossible to forget.",
+          "properties": {
+            "author": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "spdx": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "spdx",
+            "author",
+            "source"
+          ],
+          "type": "object"
+        },
+        "meshUrl": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "openingSpec": {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "$ref": "#/definitions/M"
+            },
+            "kind": {
+              "$ref": "#/definitions/OpeningKind"
+            },
+            "width": {
+              "$ref": "#/definitions/M"
+            }
+          },
+          "required": [
+            "width",
+            "height",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "size": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "$ref": "#/definitions/M"
+            },
+            "height": {
+              "$ref": "#/definitions/M"
+            },
+            "width": {
+              "$ref": "#/definitions/M"
+            }
+          },
+          "required": [
+            "width",
+            "depth",
+            "height"
+          ],
+          "type": "object"
+        },
+        "source": {
+          "enum": [
+            "dxf-block",
+            "catalogue",
+            "glb"
+          ],
+          "type": "string"
+        },
+        "yaw": {
+          "$ref": "#/definitions/Rad"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source",
+        "size",
+        "anchor",
+        "yaw"
+      ],
+      "type": "object"
+    },
+    "Emitter": {
+      "enum": [
+        "facePair",
+        "perimeterTrace",
+        "blockSized",
+        "blockHint",
+        "rasterGap",
+        "rasterRegion",
+        "dimension",
+        "mtext",
+        "ocr",
+        "openingCluster",
+        "stackPrior",
+        "ifcElement",
+        "default",
+        "user"
+      ],
+      "type": "string"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "Where a number came from. Never optional: an element with no evidence is a bug, and the schema validator enforces evidence.length >= 1.",
+      "properties": {
+        "emitter": {
+          "$ref": "#/definitions/Emitter"
+        },
+        "ref": {
+          "additionalProperties": false,
+          "properties": {
+            "bbox": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "block": {
+              "type": "string"
+            },
+            "blockPath": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "entity": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "index": {
+              "type": "number"
+            },
+            "layer": {
+              "type": "string"
+            },
+            "page": {
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "src": {
+          "$ref": "#/definitions/Id"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "src",
+        "emitter",
+        "weight"
+      ],
+      "type": "object"
+    },
+    "Fixture": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "enum": [
+            "floor",
+            "wall",
+            "in-wall",
+            "ceiling"
+          ],
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/definitions/P2"
+        },
+        "customUrl": {
+          "type": "string"
+        },
+        "definitionId": {
+          "$ref": "#/definitions/Id"
+        },
+        "hostWallId": {
+          "$ref": "#/definitions/Id"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "mirrored": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "size": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "$ref": "#/definitions/M"
+            },
+            "height": {
+              "$ref": "#/definitions/M"
+            },
+            "width": {
+              "$ref": "#/definitions/M"
+            }
+          },
+          "required": [
+            "width",
+            "depth",
+            "height"
+          ],
+          "type": "object"
+        },
+        "yaw": {
+          "$ref": "#/definitions/Rad"
+        },
+        "z": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "definitionId",
+        "at",
+        "yaw",
+        "z",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "Frame": {
+      "additionalProperties": false,
+      "description": "ONE plan drawing on ONE sheet. A sheet holding four villa types yields four Frames. This stage is MANDATORY and runs before anything else touches geometry: without it, a DWG model space collapses five buildings into one wall graph and every downstream cycle is nonsense.",
+      "properties": {
+        "bboxSource": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "entityCount": {
+          "type": "number"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "enum": [
+            "plan",
+            "section",
+            "elevation",
+            "detail",
+            "site",
+            "titleblock",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/Id"
+        },
+        "storeyId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "unitId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wallLength": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "bboxSource",
+        "kind",
+        "unitId",
+        "storeyId",
+        "wallLength",
+        "entityCount"
+      ],
+      "type": "object"
+    },
+    "Id": {
+      "type": "string"
+    },
+    "M": {
+      "description": "Derived from provenance so a re-import diffs instead of duplicating: 'w:dxf:LATEST#2F3A' | 'w:pair:s3-f0-0117' | 'op:blk:D750#41' | 'w:plan:v12-v13'",
+      "type": "number"
+    },
+    "Measured": {
+      "additionalProperties": false,
+      "description": "A fused belief about one scalar. The disagreement is kept, not averaged.",
+      "properties": {
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/Evidence"
+          },
+          "type": "array"
+        },
+        "residual": {
+          "type": "number"
+        },
+        "sigma": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "sigma",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ModelPatch": {
+      "additionalProperties": false,
+      "description": "The ONLY way a human edits the model. Replayed on every re-solve, so a decision is permanent and re-running after a better DXF arrives never asks the same question twice.",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "by": {
+          "enum": [
+            "user",
+            "solver"
+          ],
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "setUnit",
+            "setLayerRole",
+            "setFrameKind",
+            "setWallRole",
+            "setSpaceKind",
+            "moveVertex",
+            "setStoreyElevation",
+            "setRegistration",
+            "acceptAlternative",
+            "suppressElement",
+            "addWall",
+            "nameSpace",
+            "setOpeningKind",
+            "setOpeningHinge"
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/definitions/Id"
+        },
+        "value": {}
+      },
+      "required": [
+        "op",
+        "target",
+        "value",
+        "by",
+        "at"
+      ],
+      "type": "object"
+    },
+    "Opening": {
+      "additionalProperties": false,
+      "description": "HOSTED AT ARC-LENGTH along its wall's baseline, not at a world position. A world XY goes stale the instant the wall moves, and drifting doors are the first thing to break. `hinge`/`swing` live here and are read by BOTH the 2D symbol and the 3D leaf, which is the fix for build.ts:227 hard-coding pivot.rotation.y = -Math.PI * 0.42 and rendering every door left-hung.",
+      "properties": {
+        "along": {
+          "$ref": "#/definitions/M"
+        },
+        "definitionId": {
+          "$ref": "#/definitions/Id"
+        },
+        "head": {
+          "$ref": "#/definitions/Measured"
+        },
+        "hinge": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "$ref": "#/definitions/OpeningKind"
+        },
+        "panels": {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "number"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "const": "rect",
+              "type": "string"
+            },
+            {
+              "const": "arch",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "poly": {
+                  "items": {
+                    "$ref": "#/definitions/P2"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "poly"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "reveal": {
+          "$ref": "#/definitions/M"
+        },
+        "sill": {
+          "$ref": "#/definitions/Measured"
+        },
+        "swing": {
+          "$ref": "#/definitions/Rad"
+        },
+        "wallId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width": {
+          "$ref": "#/definitions/Measured"
+        }
+      },
+      "required": [
+        "id",
+        "wallId",
+        "along",
+        "width",
+        "sill",
+        "head",
+        "kind",
+        "profile",
+        "reveal",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "OpeningKind": {
+      "enum": [
+        "door",
+        "double-door",
+        "window",
+        "glazing",
+        "opening",
+        "arch"
+      ],
+      "type": "string"
+    },
+    "P2": {
+      "items": {
+        "$ref": "#/definitions/M"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Attached to every element. `locked` and `suppressed` are what make re-importing a revised DWG safe over a drawing a human has already fixed.",
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/Confidence"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "primary": {
+          "$ref": "#/definitions/Evidence"
+        },
+        "suppressed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "primary",
+        "confidence",
+        "locked"
+      ],
+      "type": "object"
+    },
+    "Rad": {
+      "type": "number"
+    },
+    "Residual": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "patch": {
+                "$ref": "#/definitions/ModelPatch"
+              }
+            },
+            "required": [
+              "label",
+              "patch"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "code": {
+          "$ref": "#/definitions/ResidualCode"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "message": {
+          "type": "string"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "expected": {
+                  "type": "number"
+                },
+                "observed": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "observed",
+                "expected",
+                "unit"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "high",
+            "low",
+            "info"
+          ],
+          "type": "string"
+        },
+        "targets": {
+          "additionalProperties": false,
+          "properties": {
+            "elementIds": {
+              "items": {
+                "$ref": "#/definitions/Id"
+              },
+              "type": "array"
+            },
+            "frameId": {
+              "$ref": "#/definitions/Id"
+            },
+            "storeyId": {
+              "$ref": "#/definitions/Id"
+            }
+          },
+          "required": [
+            "elementIds"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "code",
+        "message",
+        "targets",
+        "metric"
+      ],
+      "type": "object"
+    },
+    "ResidualCode": {
+      "enum": [
+        "CONVERTER_DROPPED_MODELSPACE",
+        "UNIT_AMBIGUOUS",
+        "UNIT_CONFLICT",
+        "NO_FRAMES",
+        "FRAME_KIND_UNKNOWN",
+        "STOREY_UNREGISTERED",
+        "OPEN_CYCLE",
+        "NO_PERIMETER",
+        "WALL_OR_RAILING",
+        "WALL_CONFLICT",
+        "OPENING_ORPHAN",
+        "SPACE_MERGED",
+        "DIM_CONFLICT",
+        "DIM_AGREEMENT_LOW",
+        "CURVE_CHORDED",
+        "BLOCK_GEOMETRY_HIDDEN",
+        "LAYER_UNCHOSEN",
+        "SOLVER_DIVERGED",
+        "GEOMETRY_DEGRADED",
+        "UNVERIFIED"
+      ],
+      "type": "string"
+    },
+    "Roof": {
+      "additionalProperties": false,
+      "description": "v1 supports flat only, plus the half-plane clip that blender_build.py:524 already does. Pitched/hipped forms are absent until something extracts them.",
+      "properties": {
+        "form": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "const": "flat",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "keep": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "n": {
+                      "$ref": "#/definitions/P2"
+                    },
+                    "p": {
+                      "$ref": "#/definitions/P2"
+                    }
+                  },
+                  "required": [
+                    "p",
+                    "n"
+                  ],
+                  "type": "object"
+                },
+                "type": {
+                  "const": "clip",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "keep"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "holes": {
+          "items": {
+            "$ref": "#/definitions/Curve2"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "outline": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "overhang": {
+          "$ref": "#/definitions/M"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "thickness": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "outline",
+        "holes",
+        "thickness",
+        "overhang",
+        "form",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "SiteFeature": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "$ref": "#/definitions/M"
+        },
+        "feature": {
+          "enum": [
+            "pool",
+            "deck",
+            "lawn",
+            "path",
+            "road",
+            "planting",
+            "compound-wall"
+          ],
+          "type": "string"
+        },
+        "holes": {
+          "items": {
+            "$ref": "#/definitions/Curve2"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "outline": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "z": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "feature",
+        "outline",
+        "holes",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "Slab": {
+      "additionalProperties": false,
+      "properties": {
+        "function": {
+          "enum": [
+            "floor",
+            "terrace",
+            "deck",
+            "landing",
+            "plinth"
+          ],
+          "type": "string"
+        },
+        "holes": {
+          "items": {
+            "$ref": "#/definitions/Curve2"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "mode": {
+          "enum": [
+            "contour",
+            "hull",
+            "rooms"
+          ],
+          "type": "string"
+        },
+        "outline": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "thickness": {
+          "$ref": "#/definitions/M"
+        },
+        "topOffset": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "outline",
+        "holes",
+        "thickness",
+        "topOffset",
+        "function",
+        "mode",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "SourceKind": {
+      "enum": [
+        "dwg",
+        "dxf",
+        "pdf-vector",
+        "pdf-raster",
+        "raster",
+        "ifc",
+        "human"
+      ],
+      "type": "string"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "number"
+        },
+        "converter": {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "modelSpaceEntities": {
+              "type": "number"
+            },
+            "tool": {
+              "const": "libredwg",
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "version",
+            "modelSpaceEntities",
+            "args"
+          ],
+          "type": "object"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "$ref": "#/definitions/SourceKind"
+        },
+        "page": {
+          "type": "number"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "storageKey": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "storageKey",
+        "sha256",
+        "bytes",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "Space": {
+      "additionalProperties": false,
+      "description": "A room. Derived from the graph, but PERSISTED with its fused label so a user-typed name survives a re-solve. `id` is roomId(loop) — the rotation- invariant cycle hash from apps/studio/src/plan/rooms.ts:172.",
+      "properties": {
+        "alsoNamed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "area": {
+          "$ref": "#/definitions/M"
+        },
+        "boundary": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "boundedBy": {
+          "description": "WHICH STRETCH of which wall faces this room. This is the topology the planar graph only implies, and it is what lets skirting be cut at a doorway (buildGeometry.ts:373 currently runs straight through one).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "s0": {
+                "$ref": "#/definitions/M"
+              },
+              "s1": {
+                "$ref": "#/definitions/M"
+              },
+              "wallId": {
+                "$ref": "#/definitions/Id"
+              }
+            },
+            "required": [
+              "wallId",
+              "s0",
+              "s1"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ceiling": {
+          "$ref": "#/definitions/Measured"
+        },
+        "derivedFrom": {
+          "enum": [
+            "graph-cycle",
+            "solid-interior-ring",
+            "raster-region",
+            "manual"
+          ],
+          "type": "string"
+        },
+        "holes": {
+          "items": {
+            "$ref": "#/definitions/Curve2"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "enum": [
+            "room",
+            "wet",
+            "circulation",
+            "service",
+            "outdoor",
+            "shaft",
+            "fitting"
+          ],
+          "type": "string"
+        },
+        "loop": {
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "type": "array"
+        },
+        "name": {
+          "additionalProperties": false,
+          "properties": {
+            "provenance": {
+              "$ref": "#/definitions/Provenance"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        "printedSize": {
+          "items": {
+            "$ref": "#/definitions/M"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        }
+      },
+      "required": [
+        "id",
+        "loop",
+        "boundary",
+        "holes",
+        "area",
+        "name",
+        "kind",
+        "ceiling",
+        "boundedBy",
+        "derivedFrom",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "to": {
+              "$ref": "#/definitions/P2"
+            }
+          },
+          "required": [
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bulge": {
+              "type": "number"
+            },
+            "to": {
+              "$ref": "#/definitions/P2"
+            }
+          },
+          "required": [
+            "to",
+            "bulge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ccw": {
+              "type": "boolean"
+            },
+            "large": {
+              "type": "boolean"
+            },
+            "r": {
+              "$ref": "#/definitions/M"
+            },
+            "to": {
+              "$ref": "#/definitions/P2"
+            }
+          },
+          "required": [
+            "to",
+            "r",
+            "large",
+            "ccw"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Storey": {
+      "additionalProperties": false,
+      "properties": {
+        "axes": {
+          "items": {
+            "$ref": "#/definitions/Axis"
+          },
+          "type": "array"
+        },
+        "clearHeight": {
+          "$ref": "#/definitions/Measured"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Column"
+          },
+          "type": "object"
+        },
+        "elevation": {
+          "$ref": "#/definitions/Measured"
+        },
+        "fixtures": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Fixture"
+          },
+          "type": "object"
+        },
+        "floorToFloor": {
+          "$ref": "#/definitions/Measured"
+        },
+        "footprint": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "area": {
+                  "$ref": "#/definitions/M"
+                },
+                "mode": {
+                  "enum": [
+                    "contour",
+                    "hull",
+                    "rooms"
+                  ],
+                  "type": "string"
+                },
+                "outline": {
+                  "$ref": "#/definitions/Curve2"
+                }
+              },
+              "required": [
+                "outline",
+                "area",
+                "mode"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "index": {
+          "description": "CANONICAL order from title text, never sheet y. One real sheet ascends and another descends; ordering by y stacks half the villas upside down.",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "openings": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Opening"
+          },
+          "type": "object"
+        },
+        "reconstructed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registration": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "accepted": {
+                  "enum": [
+                    "auto",
+                    "user",
+                    "pending"
+                  ],
+                  "type": "string"
+                },
+                "against": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "method": {
+                  "enum": [
+                    "stacking",
+                    "maskCorrelation",
+                    "annotation",
+                    "user",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                "offset": {
+                  "$ref": "#/definitions/P2"
+                },
+                "peak": {
+                  "type": "number"
+                },
+                "runnerUp": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "method",
+                "offset",
+                "against",
+                "peak",
+                "runnerUp",
+                "accepted"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "THE MARGIN IS THE CONFIDENCE. build_villas.py:350 prints peak and runner-up; here it is data, and below 1.25x it becomes a question, never an auto-accept."
+        },
+        "roofs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Roof"
+          },
+          "type": "object"
+        },
+        "site": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SiteFeature"
+          },
+          "type": "object"
+        },
+        "slabThickness": {
+          "$ref": "#/definitions/Measured"
+        },
+        "slabs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Slab"
+          },
+          "type": "object"
+        },
+        "spaces": {
+          "items": {
+            "$ref": "#/definitions/Space"
+          },
+          "type": "array"
+        },
+        "vertices": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Vertex"
+          },
+          "type": "object"
+        },
+        "walls": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Wall"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "index",
+        "elevation",
+        "floorToFloor",
+        "slabThickness",
+        "clearHeight",
+        "axes",
+        "frames",
+        "vertices",
+        "walls",
+        "openings",
+        "spaces",
+        "columns",
+        "slabs",
+        "roofs",
+        "fixtures",
+        "site",
+        "footprint",
+        "registration",
+        "reconstructed"
+      ],
+      "type": "object"
+    },
+    "StoreyLink": {
+      "additionalProperties": false,
+      "properties": {
+        "fromStoreyId": {
+          "$ref": "#/definitions/Id"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "kind": {
+          "enum": [
+            "stair",
+            "lift",
+            "void",
+            "duct",
+            "atrium"
+          ],
+          "type": "string"
+        },
+        "polygon": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "toStoreyId": {
+          "$ref": "#/definitions/Id"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "polygon",
+        "fromStoreyId",
+        "toStoreyId"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "m",
+        "mm",
+        "cm",
+        "in",
+        "ft"
+      ],
+      "type": "string"
+    },
+    "UnitDecision": {
+      "additionalProperties": false,
+      "description": "cad.py:310's scaleCandidates, generalised. Offered, never auto-decided: a wrong unit builds the villa 1000x too small and looks perfectly fine.",
+      "properties": {
+        "agreement": {
+          "additionalProperties": false,
+          "properties": {
+            "conflict": {
+              "type": "boolean"
+            },
+            "dimension": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Unit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "wallThickness": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Unit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "dimension",
+            "wallThickness",
+            "conflict"
+          ],
+          "type": "object"
+        },
+        "candidates": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "extent": {
+                "$ref": "#/definitions/M"
+              },
+              "label": {
+                "type": "string"
+              },
+              "scale": {
+                "type": "number"
+              },
+              "suggested": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "scale",
+              "label",
+              "extent",
+              "suggested"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "decidedBy": {
+          "enum": [
+            "dimension",
+            "wallThickness",
+            "printedRoomSize",
+            "header",
+            "extent",
+            "user"
+          ],
+          "type": "string"
+        },
+        "margin": {
+          "type": "number"
+        },
+        "posterior": {
+          "additionalProperties": false,
+          "properties": {
+            "cm": {
+              "type": "number"
+            },
+            "ft": {
+              "type": "number"
+            },
+            "in": {
+              "type": "number"
+            },
+            "m": {
+              "type": "number"
+            },
+            "mm": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "m",
+            "mm",
+            "cm",
+            "in",
+            "ft"
+          ],
+          "type": "object"
+        },
+        "scale": {
+          "type": "number"
+        },
+        "unit": {
+          "$ref": "#/definitions/Unit"
+        }
+      },
+      "required": [
+        "unit",
+        "scale",
+        "posterior",
+        "margin",
+        "decidedBy",
+        "candidates",
+        "agreement"
+      ],
+      "type": "object"
+    },
+    "Vertex": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "sigma": {
+          "$ref": "#/definitions/M"
+        },
+        "x": {
+          "$ref": "#/definitions/M"
+        },
+        "y": {
+          "$ref": "#/definitions/M"
+        }
+      },
+      "required": [
+        "id",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "Wall": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "$ref": "#/definitions/Id"
+        },
+        "align": {
+          "enum": [
+            "centre",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        "axisFamily": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "b": {
+          "$ref": "#/definitions/Id"
+        },
+        "base": {
+          "additionalProperties": false,
+          "properties": {
+            "offset": {
+              "$ref": "#/definitions/M"
+            },
+            "storeyId": {
+              "$ref": "#/definitions/Id"
+            }
+          },
+          "required": [
+            "storeyId",
+            "offset"
+          ],
+          "type": "object"
+        },
+        "baseline": {
+          "$ref": "#/definitions/Curve2"
+        },
+        "height": {
+          "$ref": "#/definitions/Measured"
+        },
+        "id": {
+          "$ref": "#/definitions/Id"
+        },
+        "layer": {
+          "type": "string"
+        },
+        "openingIds": {
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "type": "array"
+        },
+        "paired": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "$ref": "#/definitions/Provenance"
+        },
+        "role": {
+          "$ref": "#/definitions/WallRole"
+        },
+        "stackedWith": {
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "type": "array"
+        },
+        "thickness": {
+          "$ref": "#/definitions/Measured"
+        }
+      },
+      "required": [
+        "id",
+        "baseline",
+        "a",
+        "b",
+        "align",
+        "thickness",
+        "height",
+        "base",
+        "role",
+        "paired",
+        "axisFamily",
+        "openingIds",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "WallRole": {
+      "description": "An unpaired single line is a RAILING. Extrude it to ceiling height and every balcony becomes a sealed box that blacks out the rooms behind it. This is a named role with its own height, not a boolean.",
+      "enum": [
+        "masonry",
+        "partition",
+        "perimeter",
+        "parapet",
+        "railing",
+        "kerb",
+        "rejected"
+      ],
+      "type": "string"
+    }
+  }
+}
