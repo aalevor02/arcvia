@@ -651,7 +651,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         scaleApplied = true
       }
 
-      const walls = convertDetections(result, traced)
+      let walls = convertDetections(result, traced)
       setReading({
         rooms: result.rooms ?? [],
         scale: printed ?? null,
@@ -677,22 +677,60 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // together, and that snapping is precisely what decides whether a
       // detection closes any rooms — a prediction that skipped it would report
       // zero rooms for a perfectly good import.
-      const rooms = detectRooms(
-        activeFloor(
-          walls.reduce(
-            (draft, w) =>
-              addWall(draft, w.a, w.b, {
-                thickness: w.thickness,
-                height: WALL_DEFAULTS.interior.height,
-                snapRadius: 0.15,
-              }),
-            emptyPlan(),
+      const encloses = (candidate: typeof walls) =>
+        detectRooms(
+          activeFloor(
+            candidate.reduce(
+              (draft, w) =>
+                addWall(draft, w.a, w.b, {
+                  thickness: w.thickness,
+                  height: WALL_DEFAULTS.interior.height,
+                  snapRadius: 0.15,
+                }),
+              emptyPlan(),
+            ),
           ),
-        ),
-      ).length
+        ).length
+
+      let rooms = encloses(walls)
+
+      // Last resort, and only from a standing start of nothing.
+      //
+      // A styled presentation sheet hides most of its walls under furniture and
+      // shading, so the face pass can return a dozen strokes that enclose
+      // nothing at all. Measured on a real upload: 12 walls, 13 of 17 vertices
+      // dangling, a median gap of 1.71 m between them. No corner tolerance
+      // closes that -- the walls are metres apart, not centimetres -- but the
+      // same response carried nine closed room outlines.
+      //
+      // Deliberately NOT the default: those outlines are a contour pass, and on
+      // markup 2 the contour calls an open lift lobby a room. Running this when
+      // the walls already enclose something would seal circulation that is
+      // visibly open. Gated on zero, it cannot: markup 2's walls close the lift
+      // shaft, so this never executes there.
+      let closedFromOutlines = false
+      if (rooms === 0 && (result.rooms?.length ?? 0) > 0) {
+        const fromOutlines = convertDetections(result, traced, { useRoomPolygons: true })
+        const enclosed = encloses(fromOutlines)
+        if (enclosed > 0) {
+          walls = fromOutlines
+          rooms = enclosed
+          closedFromOutlines = true
+        }
+      }
 
       const verdict = assessDetection(walls, rooms)
-      if (!verdict.ok) {
+      if (closedFromOutlines) {
+        // Said plainly, because it changes what the user is accepting. These
+        // walls trace the reader's room outlines rather than lines measured on
+        // the drawing, so they are a starting point to correct, not a survey.
+        setError(
+          `No walls in this drawing enclosed a room, so the plan was closed ` +
+          `using the ${rooms} room outline${rooms === 1 ? '' : 's'} the reader ` +
+          `found instead. Those are traced from shaded areas rather than ` +
+          `measured from lines — check the walls before you build on them.`,
+        )
+      } else if (!verdict.ok) {
         setError(`${verdict.reason} ${verdict.detail}`)
       }
       // Shown either way. A poor detection is still a starting point somebody

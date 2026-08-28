@@ -130,6 +130,21 @@ export interface ConversionOptions {
    * that is already close.
    */
   cornerTolerance?: number
+  /**
+   * Two segments closer than this, and near enough to parallel, are the same
+   * wall. Used to stop a room-polygon edge duplicating a wall the face pass
+   * already found. Metres.
+   */
+  roomEdgeTolerance?: number
+  /**
+   * Draw the reader's room polygons as walls where no wall was found.
+   *
+   * On a clean CAD export this changes almost nothing: every polygon edge sits
+   * on a wall the face pass already produced and is dropped as a duplicate. It
+   * exists for the styled presentation plan, where it is the difference between
+   * a usable plan and an empty one. See `wallsFromRooms`.
+   */
+  useRoomPolygons?: boolean
 }
 
 const DEFAULTS: Required<ConversionOptions> = {
@@ -138,6 +153,8 @@ const DEFAULTS: Required<ConversionOptions> = {
   minLength: 0.35,
   angleToleranceDeg: 6,
   cornerTolerance: 0.6,
+  roomEdgeTolerance: 0.12,
+  useRoomPolygons: false,
 }
 
 /**
@@ -176,7 +193,124 @@ export function convertDetections(
     }))
     .filter((s) => distance(s.a, s.b) >= config.minLength)
 
-  return joinCorners(pairFaces(segments, config), config.cornerTolerance)
+  const paired = joinCorners(pairFaces(segments, config), config.cornerTolerance)
+  if (!config.useRoomPolygons) return paired
+
+  const filled = wallsFromRooms(result, underlay, config, paired)
+  if (!filled.length) return paired
+
+  // NOT joined again. Each polygon arrives closed and its consecutive edges
+  // already share exact endpoints, which `addWall` welds. Passing them through
+  // joinCorners moves those endpoints onto crossings with unrelated walls and
+  // reopens the loop the polygon was providing.
+  return [...paired, ...filled]
+}
+
+/**
+ * Walls along the reader's room polygons, minus everything already found.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * Measured on the owner's own uploaded plan, a rendered presentation drawing:
+ * the reader returned 12 walls and NINE room polygons. Those 12 walls convert
+ * to 11 proposals, and 13 of the resulting 17 vertices are dangling ends. The
+ * median distance from a dangling end to its nearest neighbour is 1.71 m, and
+ * only 2 of 13 gaps fall under the 0.6 m `cornerTolerance`.
+ *
+ * That number is the whole argument. `joinCorners` was built for a plan whose
+ * walls miss each other by centimetres, and it closes those. Here the walls are
+ * METRES apart, because on a styled drawing most of them were never detected at
+ * all — furniture, shading and hatching hide them. No corner tolerance reaches
+ * 3.9 m without welding walls across unrelated rooms, so widening it cannot be
+ * the fix and would make the output worse while appearing to try.
+ *
+ * The missing structure is not missing from the RESPONSE, only from the walls
+ * array: the same reader returned nine closed polygons carrying 88 edges and
+ * 73.83 m2. The plan reported zero rooms over a drawing whose rooms the reader
+ * had already outlined.
+ *
+ * So this draws them. Edges duplicating a wall the face pass found are dropped,
+ * which is what makes it safe to run always: on a clean export nearly every
+ * edge is a duplicate and the result is unchanged.
+ *
+ * These are marked `paired: false`, because they are not a matched pair of
+ * drawn faces and `summarise` counts them separately. A user accepting them
+ * should be able to see how much of the plan was inferred rather than measured.
+ */
+export function wallsFromRooms(
+  result: DetectionResult,
+  underlay: Underlay,
+  config: Required<ConversionOptions>,
+  existing: ProposedWall[],
+): ProposedWall[] {
+  const rooms = result.rooms ?? []
+  if (!rooms.length) return []
+
+  // Thickness is not observable from a polygon edge, so it is borrowed from
+  // what the face pass measured on this very drawing rather than guessed from
+  // a constant. Falling back to the interior default only when nothing paired.
+  const measured = existing.filter((w) => w.paired).map((w) => w.thickness).sort((a, b) => a - b)
+  const thickness = measured.length
+    ? measured[Math.floor(measured.length / 2)]
+    : WALL_DEFAULTS.interior.thickness
+
+  const kept: ProposedWall[] = []
+
+  for (const room of rooms) {
+    const polygon = (room.polygon ?? []).map((point) => toWorld(point, underlay))
+    if (polygon.length < 3) continue
+
+    // EVERY edge, including short ones. A polygon is only useful while it is
+    // closed, and a loop with one edge missing encloses nothing at all -- the
+    // same all-or-nothing property that makes `minLength` right for loose
+    // segments and wrong here.
+    for (let index = 0; index < polygon.length; index += 1) {
+      const a = polygon[index]
+      const b = polygon[(index + 1) % polygon.length]
+      if (distance(a, b) < 1e-6) continue // a repeated point, not an edge
+
+      const candidate: ProposedWall = {
+        a,
+        b,
+        thickness,
+        paired: false,
+        confidence: 0.5,
+      }
+
+      // Dropped only when the face pass already drew THIS EDGE -- both ends
+      // within `roomEdgeTolerance`, not merely running alongside. Adjacent
+      // rooms are separated by a wall thickness, so a proximity test deletes
+      // real boundaries. Deliberately no dedupe between polygons for the same
+      // reason: two rooms sharing a partition legitimately contribute two
+      // walls, one per inside face, which is what a partition is.
+      if (existing.some((wall) => alreadyDrawn(candidate, wall, config))) continue
+
+      kept.push(candidate)
+    }
+  }
+
+  return kept
+}
+
+/**
+ * Did the face pass already draw THIS edge?
+ *
+ * Identity, not proximity. Both endpoints of the candidate must lie on the
+ * other wall, which two boundaries a partition apart do not satisfy. An earlier
+ * version asked only "parallel and close", and on this plan that deleted six of
+ * the nine rooms by removing one wall from each of their loops.
+ */
+function alreadyDrawn(
+  candidate: ProposedWall,
+  other: ProposedWall,
+  config: Required<ConversionOptions>,
+): boolean {
+  if (!isParallel(candidate, other, config.angleToleranceDeg * 2)) return false
+
+  const tolerance = config.roomEdgeTolerance
+  return (
+    distanceToSegment(candidate.a, other) <= tolerance &&
+    distanceToSegment(candidate.b, other) <= tolerance
+  )
 }
 
 /**

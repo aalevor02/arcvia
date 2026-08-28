@@ -331,6 +331,88 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
   check('markup 2 keeps the foyer open to circulation',
     near(rooms[0]?.area ?? 0, 4, 0.05),
     `closed area=${rooms[0]?.area?.toFixed(2)} m2`)
+
+  // The default is load-bearing, so prove it costs something. Turning the
+  // outlines on here seals the foyer — 9 m2 of circulation the owner marked as
+  // open. This assertion exists so anyone tempted to flip `useRoomPolygons` on
+  // by default sees the price, on ground truth, in the same run.
+  let sealed = emptyPlan()
+  for (const wall of convertDetections(detected, UNDERLAY, { useRoomPolygons: true })) {
+    sealed = addWall(sealed, wall.a, wall.b, { thickness: wall.thickness, snapRadius: 0.15 })
+  }
+  const sealedRooms = detectRooms(activeFloor(sealed))
+  check('and the outlines are NOT trusted here, because they would seal it',
+    sealedRooms.length > rooms.length,
+    `outlines gave ${sealedRooms.length} rooms against ${rooms.length} from walls`)
+}
+
+// ---- Zero enclosure: the outlines are the last resort, not the default ------
+// A styled presentation sheet hides most of its walls under furniture and
+// shading, so the face pass can return strokes that enclose nothing whatever.
+// Measured on a real upload: 12 walls, 13 of 17 vertices dangling, a median gap
+// of 1.71 m between them and only 2 of 13 gaps inside the 0.6 m corner
+// tolerance. No corner tolerance closes metres. Zero rooms over a drawing with
+// nine is not a cautious answer, it is an unusable one.
+{
+  const detected = result([
+    // Three strokes, metres apart. Whatever they are, they enclose nothing.
+    face(1, -1, 3, -1),
+    face(6, -2, 8, -2),
+    face(2, -4, 4, -4),
+  ])
+  detected.rooms = [
+    {
+      polygon: [
+        { x: 0.1, y: 0.2 }, { x: 0.4, y: 0.2 },
+        { x: 0.4, y: 0.6 }, { x: 0.1, y: 0.6 },
+      ],
+      area: 0.12,
+      name: 'Bedroom',
+      kind: 'room',
+      size: [3, 2],
+      also: [],
+    },
+  ]
+
+  const enclosedBy = (options?: { useRoomPolygons: boolean }) => {
+    let plan = emptyPlan()
+    for (const wall of convertDetections(detected, UNDERLAY, options)) {
+      plan = addWall(plan, wall.a, wall.b, { thickness: wall.thickness, snapRadius: 0.15 })
+    }
+    return detectRooms(activeFloor(plan))
+  }
+
+  const fromWalls = enclosedBy()
+  check('by default the walls decide, and here they enclose nothing',
+    fromWalls.length === 0, `${fromWalls.length} rooms`)
+
+  const fromOutlines = enclosedBy({ useRoomPolygons: true })
+  check('the reader outlines close the plan when the walls cannot',
+    fromOutlines.length === 1, `${fromOutlines.length} rooms`)
+
+  // Not merely "a room appeared". It has to be the room the reader described:
+  // a closure that encloses the wrong 6 m2 is not a fix, it is a coincidence.
+  check('and it measures the area the outline described',
+    near(fromOutlines[0]?.area ?? 0, 6, 0.05),
+    `area=${fromOutlines[0]?.area?.toFixed(2)} m2`)
+
+  // Short edges are kept on purpose. A polygon is only useful while it is
+  // closed, so discarding one edge as a dimension tick — correct for a loose
+  // segment — opens the loop and loses the whole room.
+  const withTick = result([face(1, -1, 3, -1)])
+  withTick.rooms = [{
+    polygon: [
+      { x: 0.1, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.22 },
+      { x: 0.4, y: 0.6 }, { x: 0.1, y: 0.6 },
+    ],
+    area: 0.12, name: 'Bedroom', kind: 'room', size: [3, 2], also: [],
+  }]
+  let ticked = emptyPlan()
+  for (const wall of convertDetections(withTick, UNDERLAY, { useRoomPolygons: true })) {
+    ticked = addWall(ticked, wall.a, wall.b, { thickness: wall.thickness, snapRadius: 0.15 })
+  }
+  check('a 0.1 m edge in an outline is kept, because a loop needs all of them',
+    detectRooms(activeFloor(ticked)).length === 1)
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
