@@ -286,5 +286,52 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
     `${rooms[0]?.area?.toFixed(1)} m2`)
 }
 
+// ---- Markup 2: a lift closes; its open lobby must not -----------------------
+// The held-out owner markup names an open lift lobby that the raster reader's
+// contour pass reports as a room. Those reported room polygons are evidence for
+// naming and scale, not geometry: Studio must derive enclosure from converted
+// walls. Trusting the contour here seals circulation that is visibly open.
+{
+  const detected = result([
+    // The real lift shaft: one closed 2 m square.
+    face(6, -1, 8, -1),
+    face(8, -1, 8, -3),
+    face(8, -3, 6, -3),
+    face(6, -3, 6, -1),
+    // The foyer: three sides only, with a 3 m opening towards the stair.
+    face(2, -1, 5, -1),
+    face(2, -1, 2, -4),
+    face(2, -4, 5, -4),
+  ])
+  detected.rooms = [
+    {
+      polygon: [
+        { x: 0.2, y: 0.2 }, { x: 0.5, y: 0.2 },
+        { x: 0.5, y: 0.8 }, { x: 0.2, y: 0.8 },
+      ],
+      area: 0.18,
+      name: 'Foyer',
+      kind: 'room',
+      size: [1.93, 2.51],
+      also: [],
+    },
+  ]
+
+  let plan = emptyPlan()
+  for (const wall of convertDetections(detected, UNDERLAY)) {
+    plan = addWall(plan, wall.a, wall.b, {
+      thickness: wall.thickness,
+      snapRadius: 0.15,
+    })
+  }
+  const rooms = detectRooms(activeFloor(plan))
+
+  check('markup 2 closes the real lift shaft only', rooms.length === 1,
+    `${rooms.length} downstream rooms`)
+  check('markup 2 keeps the foyer open to circulation',
+    near(rooms[0]?.area ?? 0, 4, 0.05),
+    `closed area=${rooms[0]?.area?.toFixed(2)} m2`)
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
