@@ -52,6 +52,12 @@ const wallMeshes = (plan: Plan) =>
   const door = itemById('door')!
   check('a door is a real door', near(door.size.width, 0.9) && near(door.size.height, 2.1))
 
+  const appliances = ['ceiling-fan', 'ac-split', 'washing-machine'].map((id) => itemById(id)!)
+  check('the core appliance types are present',
+    appliances.every((item) => item.category === 'Appliances'))
+  check('standard appliance dimensions are fitted exactly at runtime',
+    appliances.every((item) => item.model?.fitFootprint === true))
+
   check('search finds by name', searchCatalogue('sofa').length >= 2)
   check('search filters by category',
     searchCatalogue('', 'Bathroom').every((i) => i.category === 'Bathroom'))

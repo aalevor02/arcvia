@@ -21,6 +21,7 @@ export const CATEGORIES = [
   'Beds',
   'Storage',
   'Kitchen',
+  'Appliances',
   'Bathroom',
   'Doors & windows',
   'Lighting',
@@ -484,6 +485,84 @@ export const CATALOGUE: CatalogueItem[] = [
       source:
         'https://sketchfab.com/3d-models/kitchen-cabinets-east-wall-814d9a58e9a44288a37e78b5c3d3d776',
       triangles: 5000,
+    },
+  },
+
+  // ---- Appliances ----------------------------------------------------------
+  //
+  // Added 2026-08-28 because a census of the catalogue found these missing
+  // entirely rather than merely unfilled — and all three are in essentially
+  // every Indian residential room this product will ever draw. A bedroom
+  // rendered without a ceiling fan does not read as an Indian bedroom.
+  //
+  // Sizes are the standards, not round numbers: a ceiling fan is sold by its
+  // SWEEP and 1200 mm is the domestic default; a split AC indoor unit is about
+  // a metre of wall at high level; a front-load washer is the 600 mm cube the
+  // plumbing is roughed in for.
+  {
+    id: 'ceiling-fan',
+    name: 'Ceiling fan',
+    category: 'Appliances',
+    placement: 'ceiling',
+    // Drop to the blades. Indian ceilings are typically 3.0–3.2 m and a fan
+    // hangs on a downrod, which is why this is not flush like a ceiling light.
+    mountHeight: 0.3,
+    size: { width: 1.2, depth: 1.2, height: 0.35 },
+    shape: 'pendant',
+    tone: 'metal',
+    note: '1200 mm sweep, the domestic standard',
+    model: {
+      url: '/models/ceiling-fan.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'lucaboechat',
+      source:
+        'https://sketchfab.com/3d-models/ceiling-fan-7fe2a7dd27b2467da79c935a32de0eb2',
+      triangles: 3926,
+      fitFootprint: true,
+    },
+  },
+  {
+    id: 'ac-split',
+    name: 'Air conditioner, split',
+    category: 'Appliances',
+    placement: 'wall',
+    // High level, above door head. 2.1 m is the door, so the unit sits clear.
+    mountHeight: 2.2,
+    size: { width: 1.0, depth: 0.22, height: 0.3 },
+    shape: 'box',
+    tone: 'white',
+    model: {
+      url: '/models/ac-split.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'Auspicious Art and Graphics (AAG)',
+      source:
+        'https://sketchfab.com/3d-models/ac-air-conditioner-7d6b5831b43546c0ac82b878a78f8434',
+      triangles: 3808,
+      fitFootprint: true,
+      // The author modelled the unit running along its own Y rather than X, so
+      // it was conditioned in that orientation — scaling it into a
+      // width-major box would have produced a 5 cm air conditioner, since the
+      // fit is uniform and the wrong axis binds. A quarter turn puts its face
+      // into the room.
+      yaw: 90,
+    },
+  },
+  {
+    id: 'washing-machine',
+    name: 'Washing machine',
+    category: 'Appliances',
+    placement: 'floor',
+    size: { width: 0.6, depth: 0.6, height: 0.85 },
+    shape: 'appliance',
+    tone: 'white',
+    model: {
+      url: '/models/washing-machine.glb',
+      licence: 'CC Attribution 4.0',
+      author: 'sixpence',
+      source:
+        'https://sketchfab.com/3d-models/washing-machine-4949ac257c7848c7a6c9149218ecfaae',
+      triangles: 3390,
+      fitFootprint: true,
     },
   },
 
