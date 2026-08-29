@@ -20,6 +20,8 @@ left to a preset:
 
 from __future__ import annotations
 
+import os
+
 #: id -> (view transform, world kind, material kind, freestyle, look)
 #:
 #: `raw` is NOT a picture and is not meant to be legible on its own. Flat world
@@ -430,8 +432,41 @@ def apply_surface_materials(bpy, bridge: dict, aliases: dict | None = None) -> d
             "classes": sorted(applied)}
 
 
-def _build_material(bpy, klass: str, entry: dict):
+# Surface maps are tiled across large architectural areas. Keeping every 2K
+# source decoded can consume more than a gigabyte before Cycles starts. A 1024
+# longest-edge budget preserved valid dressed frames in the measured villa run.
+MAX_TEXTURE = int(os.environ.get("ARCVIA_MAX_TEXTURE", "1024"))
+
+
+def _load_texture(bpy, path: str, role: str):
+    """Load, role-stamp, and memory-bound one shared surface texture."""
+    image = bpy.data.images.load(path, check_existing=True)
+    image["arcvia_role"] = role
+
+    # check_existing=True returns the same Blender datablock to every material.
+    # Scale it once; otherwise a shared map is repeatedly halved.
+    if not image.get("arcvia_scaled") and MAX_TEXTURE > 0:
+        width, height = image.size
+        longest = max(width, height)
+        if longest > MAX_TEXTURE:
+            factor = MAX_TEXTURE / longest
+            image.scale(
+                max(1, int(width * factor)),
+                max(1, int(height * factor)),
+            )
+            image["arcvia_scaled"] = True
+            print(
+                f"ARCVIA_TEXTURE_SCALED:{role} {width}x{height} -> "
+                f"{image.size[0]}x{image.size[1]}",
+                flush=True,
+            )
+
+    return image
+
+
     """One Principled BSDF from a bridge entry, tiled at its real size."""
+def _build_material(bpy, klass: str, entry: dict):
+
     mat = bpy.data.materials.new(f"arcvia_{klass}")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
@@ -473,7 +508,7 @@ def _build_material(bpy, klass: str, entry: dict):
         links.new(coord.outputs["UV"], mapping.inputs["Vector"])
 
         image = nodes.new("ShaderNodeTexImage")
-        image.image = bpy.data.images.load(maps["base_color"], check_existing=True)
+        image.image = _load_texture(bpy, maps["base_color"], "base_color")
         # The role is recorded ON the image, because the FILENAME cannot
         # carry it: `white_rough_plaster_diff_2K.jpg` is a diffuse map
         # whose name contains "rough". Auditing on the name flagged it as
@@ -485,8 +520,7 @@ def _build_material(bpy, klass: str, entry: dict):
 
         if maps.get("roughness"):
             rough = nodes.new("ShaderNodeTexImage")
-            rough.image = bpy.data.images.load(maps["roughness"],
-                                               check_existing=True)
+            rough.image = _load_texture(bpy, maps["roughness"], "roughness")
             # A roughness map is DATA, not a colour: reading it through the
             # sRGB transform lightens it and every surface comes out glossier
             # than the material says.

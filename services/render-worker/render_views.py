@@ -77,6 +77,12 @@ def parse():
                    help="Material bridge JSON: dress meshes by their "
                         "extras.surfaceClass. Only meaningful with a style "
                         "that keeps materials.")
+    p.add_argument("--fixtures", default=None,
+                   help="building.json: replace the dimensioned fixture boxes "
+                        "with the catalogue's own models.")
+    p.add_argument("--catalogue", default=None,
+                   help="data/catalogue-models.json. Defaults beside the repo "
+                        "when --fixtures is given.")
     p.add_argument("--skip-tight", action="store_true", default=True)
     return p.parse_args(argv())
 
@@ -91,6 +97,199 @@ def import_glb(path: str) -> int:
     if not meshes:
         raise SystemExit("ARCVIA_ERROR: the GLB imported no meshes.")
     return len(meshes)
+
+
+#: The mesh carrying the dimensioned stand-in boxes, from
+#: `build/solidify.py:build_fixtures`. Named rather than detected, because
+#: guessing which mesh is furniture from its geometry is exactly the kind of
+#: inference that goes wrong quietly.
+FIXTURE_MESH = "storey0_fixtures"
+
+
+#: An axis whose extent is this small a fraction of the model's largest carries
+#: no information about scale. Same value and same reasoning as the studio
+#: loader and `condition_asset.py`: flat is a PROPORTION, not a measurement ?
+#: 12 mm is flat on a rug and is the whole object on a sheet of paper.
+FLAT = 0.02
+
+
+def _fit_to_catalogue(obj, entry: dict) -> None:
+    """
+    Scale one imported model to the catalogue's dimensions.
+
+    ?? Why the renderer has to do this at all ????????????????????????????????
+    Measured, and it is the whole reason the first version of this drew an
+    eight-metre sink. The shipped catalogue GLBs are NOT at catalogue size:
+    `sink-unit.glb` is 7.06 x 8.49 x 5.43 against a catalogue 1.2 x 0.6 x 0.9,
+    `plant.glb` is 0.01 across against 0.55, `bed-king.glb` is 0.91 against
+    1.83. That is not a defect ? `catalogue/types.ts` states the contract, that
+    a model "is an upgrade layered on top, never a replacement for the
+    dimensions" ? so every consumer fits the mesh to the entry, and the studio
+    loader (`catalogue/models.ts`) has done exactly this all along. This
+    function is that same fit, in Blender's Z-up rather than three.js's Y-up.
+
+    Deliberately mirrors the studio rather than inventing a second rule: two
+    fits that disagree would put a bed in the plan at one size and the same bed
+    in the render at another, and nothing would report it.
+    """
+    bpy.context.view_layer.update()
+    dims = obj.dimensions
+    extent = (dims.x, dims.y, dims.z)
+    largest = max(extent)
+    if largest <= 0:
+        return
+
+    size = entry["size"]
+    # A quarter turn swaps which catalogue dimension the model's local x will
+    # end up spanning, so the fit has to target the dimensions the model ENDS
+    # UP in. The rotation is still applied afterwards; only the meaning of
+    # "width" changes here.
+    yaw = entry.get("yaw") or 0
+    quarter = abs(round(yaw / 90)) % 2 == 1
+    target = (size["d"], size["w"], size["h"]) if quarter else (size["w"], size["d"], size["h"])
+
+    carries = [e / largest > FLAT for e in extent]
+    if not any(carries):
+        return  # every axis flat: a point, not a model. Leave it alone.
+
+    own = [t / e if e > 0 else 0.0 for t, e in zip(target, extent)]
+    informed = [own[i] for i in range(3) if carries[i]]
+
+    if entry.get("fitFootprint"):
+        # Every informed axis meets its own target; a flat axis has no opinion
+        # and follows the mean of the ones that do.
+        mean = sum(informed) / len(informed)
+        factors = [own[i] if carries[i] else mean for i in range(3)]
+    else:
+        # Uniform, and under-filling rather than distorting. Stretching each
+        # axis to hit the box exactly guarantees the footprint and deforms the
+        # object, and a sofa squashed along its length is more obviously wrong
+        # than one leaving a few centimetres spare.
+        factors = [min(informed)] * 3
+
+    obj.scale = (obj.scale.x * factors[0],
+                 obj.scale.y * factors[1],
+                 obj.scale.z * factors[2])
+    bpy.context.view_layer.update()
+
+
+def place_fixtures(model_path: str, catalogue_path: str) -> dict:
+    """
+    Swap the fixture boxes for the catalogue's own models.
+
+    ?? Why this belongs here and not in the reconstruction ????????????????????
+    `build/solidify.py:build_fixtures` draws a BOX per identified fixture and
+    says why: "a correctly *dimensioned* stand-in is what makes clearances
+    checkable, which is the job at this stage", with `Definition.meshUrl` named
+    as "the seam where a real GLB replaces one without anything else changing".
+    That is right ? a clearance check wants a footprint, not a mesh, and the
+    reconstruction GLB should stay small and semantic.
+
+    The renderer is the consumer that wants the mesh. It already has everything
+    needed: the reconstruction resolved each block to a CATALOGUE ID with a
+    confidence (measured on the villa: 21 fixtures, `bed-king` x5, `bed-queen`
+    x2, `wc`, `hob`, `sink-unit`, `plant` x2), and every one of those ids has a
+    conditioned GLB shipped in `apps/studio/public/models`. Until now the render
+    drew the boxes: 120 triangles for the lot.
+
+    ?? Coordinates ???????????????????????????????????????????????????????????
+    `build/glb.py` emits `v(x, y, h) -> (x, h, -y)`, and Blender's importer
+    converts Y-up to Z-up, so a plan point (px, py) at height h lands at Blender
+    (px, py, h). Fixture positions are in that same plan space, which is why no
+    conversion appears below ? but it is stated because a silent identity
+    transform is indistinguishable from a forgotten one.
+
+    Returns a report rather than printing, so the caller decides what to say.
+    """
+    import math
+
+    with open(model_path, encoding="utf-8") as handle:
+        model = json.load(handle)
+    with open(catalogue_path, encoding="utf-8") as handle:
+        catalogue = json.load(handle)["items"]
+
+    fixtures = (model.get("elements") or {}).get("fixtures") or []
+    report = {"placed": 0, "boxed": 0, "unknown": 0, "items": {}, "missing": {}}
+
+    # The boxes go only if something replaces them. A run that resolves nothing
+    # must leave the scene exactly as it found it rather than deleting the
+    # furniture and rendering an empty house.
+    placeable = [
+        f for f in fixtures
+        if catalogue.get(f.get("item") or "", {}).get("file")
+    ]
+    if not placeable:
+        for f in fixtures:
+            item = f.get("item") or "?"
+            if item in catalogue:
+                report["boxed"] += 1
+                report["missing"][item] = report["missing"].get(item, 0) + 1
+            else:
+                report["unknown"] += 1
+        return report
+
+    boxes = bpy.data.objects.get(FIXTURE_MESH)
+    if boxes is not None:
+        bpy.data.objects.remove(boxes, do_unlink=True)
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(catalogue_path)))
+    public = os.path.join(root, "apps", "studio", "public")
+
+    for fixture in fixtures:
+        item = fixture.get("item") or ""
+        entry = catalogue.get(item)
+        if entry is None:
+            report["unknown"] += 1
+            continue
+        if not entry.get("file"):
+            # A real catalogue item with no mesh ? a door is an opening, not an
+            # object. Counted separately from an id nobody recognises, because
+            # the two want different fixes.
+            report["boxed"] += 1
+            report["missing"][item] = report["missing"].get(item, 0) + 1
+            continue
+
+        path = os.path.join(public, entry["file"].lstrip("/").replace("/", os.sep))
+        if not os.path.exists(path):
+            report["boxed"] += 1
+            report["missing"][item] = report["missing"].get(item, 0) + 1
+            continue
+
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=path)
+        fresh = [o for o in bpy.data.objects if o not in before and o.type == "MESH"]
+        if not fresh:
+            report["boxed"] += 1
+            continue
+
+        px = fixture["position"]["x"]
+        py = fixture["position"]["y"]
+        rot = float(fixture.get("rotation") or 0.0)
+        mount = entry.get("mountHeight") or 0.0
+
+        for obj in fresh:
+            obj.rotation_mode = "XYZ"
+            if entry.get("upAxis") == "z":
+                # Recorded per item in `items.ts` as "its own proportions match
+                # the catalogue only when Z is up". The importer has already
+                # applied a Y-up to Z-up conversion, so such a model arrives a
+                # quarter turn out about X and has to be turned back.
+                obj.rotation_euler[0] += math.radians(-90)
+                bpy.context.view_layer.update()
+
+            _fit_to_catalogue(obj, entry)
+
+            # The catalogue's yaw first, then the plan's rotation. The yaw says
+            # which way the MODEL faces and the rotation says which way the
+            # object should face in the room; composing them in the other order
+            # turns the correction by the placement.
+            obj.rotation_euler[2] += math.radians(entry.get("yaw") or 0) + rot
+            obj.location = (px, py, mount)
+
+        report["placed"] += 1
+        report["items"][item] = report["items"].get(item, 0) + 1
+
+    return report
 
 
 def place_camera(view: dict):
@@ -357,6 +556,36 @@ def main():
                   "meshes carry no surface class or no material for it")
     elif args.materials:
         print(f"ARCVIA_MATERIALS_SKIPPED:style {args.style} overrides materials")
+
+    # After materials, deliberately. A catalogue model arrives with its own
+    # conditioned materials and must NOT be dressed by surface class ? the
+    # bridge paints by `extras.surfaceClass`, a bed carries none, and running
+    # this first would hand the dresser a scene full of meshes it would report
+    # as untouched.
+    if args.fixtures:
+        catalogue = args.catalogue or str(
+            Path(__file__).resolve().parents[2] / "data" / "catalogue-models.json"
+        )
+        if not Path(catalogue).exists():
+            print(f"ARCVIA_FIXTURES_SKIPPED:no catalogue at {catalogue}")
+        else:
+            placed = place_fixtures(args.fixtures, catalogue)
+            detail = ", ".join(
+                f"{k}={v}" for k, v in sorted(placed["items"].items())
+            )
+            print(f"ARCVIA_FIXTURES:{placed['placed']} placed"
+                  + (f" ({detail})" if detail else ""))
+            if placed["missing"]:
+                # Named, not counted. "3 fixtures kept their box" cannot be
+                # acted on; "door=4" says which catalogue entry needs a mesh.
+                miss = ", ".join(
+                    f"{k}={v}" for k, v in sorted(placed["missing"].items())
+                )
+                print(f"ARCVIA_FIXTURES_BOXED:{placed['boxed']} kept the "
+                      f"dimensioned box ({miss})")
+            if placed["unknown"]:
+                print(f"ARCVIA_FIXTURES_UNKNOWN:{placed['unknown']} fixture(s) "
+                      "carry an id the catalogue does not have")
 
     stem = Path(args.glb).stem
     print(f"ARCVIA_SCENE:{meshes} meshes, style={args.style}, "

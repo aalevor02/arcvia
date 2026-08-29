@@ -109,6 +109,26 @@ ok("the camera is not aimed at its own position",
    (big.eye[0], big.eye[1]) != (big.target[0], big.target[1]))
 ok("interiors are shot wide", big.fov > 60, f"{big.fov}°")
 
+furnished = cameras.interior_views(
+    [spaces[1]],
+    walls=walls,
+    fixtures=[
+        {"item": "plant", "position": {"x": 2.0, "y": 2.0},
+         "footprint": {"w": 0.5, "d": 0.5}},
+        {"item": "bed-king", "position": {"x": 4.0, "y": 3.0},
+         "footprint": {"w": 2.0, "d": 2.0}},
+        {"item": "neighbour-bed", "position": {"x": 7.0, "y": 3.0},
+         "footprint": {"w": 4.0, "d": 4.0}},
+    ],
+)[0]
+ok("without glazing the camera aims at the largest contained fixture",
+   furnished.target[:2] == (4.0, 3.0), str(furnished.target))
+ok("a neighbour's larger fixture is excluded by room containment",
+   furnished.target[:2] != (7.0, 3.0))
+ok("the camera aims down at furniture rather than over it",
+   furnished.target[2] == cameras.FURNITURE_AIM_HEIGHT
+   and "aimed at furniture" in furnished.notes)
+
 print("\n-- the rest of the rig --")
 orbit = cameras.exterior_views(walls, count=4)
 ok("an orbit has the requested number of stops", len(orbit) == 4)
