@@ -567,3 +567,68 @@ export function summarise(walls: ProposedWall[]): {
       : WALL_DEFAULTS.interior.thickness,
   }
 }
+
+/**
+ * Names for imported rooms, taken from what the architect printed inside them.
+ *
+ * Deliberately keyed on the reader's own regions rather than re-running text
+ * matching here. The reader read the labels, decided which region each one fell
+ * in, and even chose between its two binarisations by counting how many named
+ * rooms each one closed. Re-deriving that in the studio would be a second,
+ * worse implementation of a decision already made on better evidence.
+ *
+ * A region whose centroid lands inside a derived room gives that room its name.
+ * Larger regions are applied first so that when a big outline and a small one
+ * both fall inside the same derived room -- which happens when two spaces read
+ * as one -- the room takes the name of the space that dominates it rather than
+ * of a cupboard inside it.
+ */
+export function namesFromDrawing(
+  rooms: Array<{ id: string; polygon: Vec2[] }>,
+  outlines: DetectedRoom[],
+  underlay: Underlay,
+): Record<string, string> {
+  const named = (outlines ?? [])
+    // A fitting is joinery, not a space. The reader draws that distinction
+    // deliberately -- "`fitting` is joinery the drawing labelled -- a wardrobe,
+    // a dresser" -- and ignoring it names a room after the cupboard standing in
+    // it. Measured on the owner's own plan: the Wardrobe outline claimed a
+    // 13 m2 room, which is the bedroom the wardrobe is inside.
+    .filter((region) => region.kind !== 'fitting')
+    .filter((region) => (region.name ?? '').trim().length > 0)
+    .slice()
+    .sort((a, b) => (b.area ?? 0) - (a.area ?? 0))
+
+  const out: Record<string, string> = {}
+  if (!named.length || !rooms.length) return out
+
+  for (const region of named) {
+    const points = (region.polygon ?? []).map((point) => toWorld(point, underlay))
+    if (points.length < 3) continue
+    const centre = {
+      x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+      y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+    }
+    for (const room of rooms) {
+      if (out[room.id]) continue
+      if (!contains(room.polygon, centre)) continue
+      out[room.id] = (region.name ?? '').trim()
+      break
+    }
+  }
+  return out
+}
+
+/** Ray casting. A point on the boundary may fall either way and that is fine. */
+function contains(polygon: Vec2[], point: Vec2): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i]
+    const b = polygon[j]
+    const straddles = a.y > point.y !== b.y > point.y
+    if (!straddles) continue
+    const x = ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
+    if (point.x < x) inside = !inside
+  }
+  return inside
+}

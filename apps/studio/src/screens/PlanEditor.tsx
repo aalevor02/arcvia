@@ -69,7 +69,8 @@ import { assessDetection } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
 import {
   automaticScalePerPixel,
-  convertDetections,  type DetectedRoom,
+  convertDetections,
+  namesFromDrawing,  type DetectedRoom,
   type DetectedScale,
   type ProposedWall,
 } from '../plan/detections'
@@ -802,6 +803,26 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         })
       }, current),
     )
+
+    // Give the rooms the names the drawing already carries. The CAD path does
+    // this (cadPlan.ts) and the IFC path does this (ifcPlanProposal.ts); the
+    // raster path did not, so a plan that plainly reads SHOWER / TOILET / PATIO
+    // arrived as Room 1, Room 2, Room 3 -- after the reader had gone to the
+    // trouble of OCRing those very labels and using them to pick which
+    // binarisation to trust.
+    const outlines = reading?.rooms ?? []
+    const traced = activeFloor(plan).underlay
+    if (outlines.length > 0 && traced) {
+      apply((current) => {
+        const floor = activeFloor(current)
+        const names = namesFromDrawing(detectRooms(floor), outlines, traced)
+        return Object.entries(names).reduce<typeof current>(
+          (next, [roomId, name]) => nameRoom(next, roomId, String(name)),
+          current,
+        )
+      })
+    }
+
     setProposal(null)
   }
 
