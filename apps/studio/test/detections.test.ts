@@ -531,5 +531,64 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
     names.notch === undefined, JSON.stringify(names))
 }
 
+// ---- one region's needle eats its NEIGHBOUR's wall ---------------------------
+// The reader's outlines are traced contours, not drafted polygons, and one of
+// them can run out to a point and come straight back along the same line. The
+// damage is not local. These two polygons are lifted verbatim from the owner's
+// Avarana Basement, in the order the reader returns them.
+//
+// Region [3] is unnamed and carries a single needle: it reaches y 0.8932 ->
+// 0.678 -> 0.8932, a 2.69 m spike lying at x 0.345, which is 6 cm from the
+// TOILET's right wall at x 0.3412. addWall snaps within 0.15 m, so the spike
+// lands on top of the Toilet's wall and consumes it -- the two rooms collapse
+// into ONE face, and the drawing's word TOILET has no room left to name.
+//
+// Measured, this is what the owner saw: the reader read TOILET and the plan
+// showed neither the room nor the label. The Toilet's own two needles are
+// harmless; removing them alone changes nothing. It is the NEIGHBOUR's needle
+// that has to go, which is why needles are removed from every outline and not
+// from the one that looks wrong.
+//
+// Removing a needle tip does not weaken the rule that every edge of an outline
+// is kept. A tip is not an edge of the enclosed shape: the loop stays closed and
+// gets shorter, where dropping a real edge would open it.
+{
+  const AVARANA = {
+    url: 'x', width: 2400, height: 1826, origin: { x: 0, y: 0 },
+    scale: 0.006848875, invert: true, locked: true, opacity: 0.85, calibrated: true,
+  } as unknown as Underlay
+  const region = (name: string | null, xy: number[][]) => ({
+    polygon: xy.map(([x, y]) => ({ x, y })),
+    area: 0, name, kind: 'room' as const, size: null, also: [],
+  })
+  const neighbourWithNeedle = region(null, [
+    [0.3429, 0.6177], [0.3429, 0.8932],
+    [0.3450, 0.6780], [0.3458, 0.8932], // <- out 2.69 m and straight back
+    [0.5692, 0.8932], [0.5692, 0.6172],
+  ])
+  const toilet = region('Toilet', [
+    [0.2117, 0.7722], [0.2117, 0.8209], [0.2462, 0.8215], [0.2150, 0.8220],
+    [0.2158, 0.8510], [0.2462, 0.8521], [0.2117, 0.8532], [0.2117, 0.8932],
+    [0.3304, 0.8932], [0.3308, 0.8434], [0.3412, 0.8423], [0.3412, 0.7722],
+  ])
+  const regions = [neighbourWithNeedle, toilet]
+
+  const detected = result([face(1, -1, 3, -1)])
+  detected.rooms = regions
+  let plan = emptyPlan()
+  for (const wall of convertDetections(detected, AVARANA, { useRoomPolygons: true })) {
+    plan = addWall(plan, wall.a, wall.b, { thickness: wall.thickness, snapRadius: 0.15 })
+  }
+  const rooms = detectRooms(activeFloor(plan))
+
+  check('a needle does not merge its neighbour away', rooms.length === 2,
+    `${rooms.length} faces, expected 2`)
+
+  // The user-visible half: the drawing says TOILET and the plan must show it.
+  const names = namesFromDrawing(rooms, regions, AVARANA)
+  check('so the room the drawing named still exists to be named',
+    Object.values(names).includes('Toilet'), JSON.stringify(names))
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
