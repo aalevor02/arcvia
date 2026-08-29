@@ -2523,3 +2523,64 @@ the prior 22 commits, not these later commits.
 4. The bounded live OpenAI comparison requires a deliberately supplied
    server-side key and spending approval.
 5. The two new commits require explicit push authorization.
+
+
+---
+
+## 2026-08-29 — final continuation audit
+
+The stale five-item list immediately above has now been reconciled against the
+code, the supplied drawings, the shared environment, and the external model
+repository.
+
+### Completed in the continuation branch
+
+- Exact source-evidenced anonymous fixture identities are mapped without a
+  fuzzy fallback (`7cf974c`).
+- Reviewed roof choices are product-reachable for CAD, raster and document
+  imports. Gables require an explicit 5–60 degree pitch and unsupported
+  footprints refuse visibly (`5329411`).
+- Production startup now fails before serving traffic unless the complete
+  origins, secrets, persistence, delivery, storage, frontend, reconstruction
+  and render contract is present (`95177f4`).
+- Lightmap atlas size now follows imported scene complexity and refuses work
+  above the configured memory ceiling (`e8c002b`).
+- Access-coded walkthrough manifests no longer disclose owned bucket paths.
+  They return 15-minute signed proxy URLs whose signatures are revoked by
+  changing the code, changing the asset, or unpublishing (`3442e53`).
+- Live integration tests can target an isolated API checkout, and the asset-hub
+  cache test consumes the exported scale-schema version (`bd0a7bd`).
+
+Final validation on this checkout: type families 5/5, Python families 32/32,
+BIM 1/1, production builds 4/4; focused isolated reruns passed access codes
+27/27, bake contract 32/32, the real villa CAD path 54/54, asset hub 21/21, and
+the built marketing site had zero broken links across 17 same-origin URLs.
+
+### The trained-model item is closed by rejection, not deployment
+
+`A:\Tools\FloorplanModel` records the completed v8 run in commit `b354c32`.
+The intended hard-negative generator trained for 107 minutes on a T4, but v8
+found 0/3 real windows and retained the lift-door false positive; wall metrics
+also regressed from 4-better/1-worse to 2-better/3-worse. The hypothesis is
+refuted, v6 correctly remains shipped, and another v8 rerun is not pending.
+
+### Remaining inputs that cannot be manufactured in code
+
+1. The supplied source set has no marks proving winders, spiral, L-shaped or
+   three-flight stairs, irregular wells, strings/soffits, or their exact guards.
+   OpenAI permission permits reading evidence; it does not create absent
+   geometry. Those forms remain evidence-gated until a marked plan, section or
+   explicit owner specification is supplied.
+2. The current shared environment contains the approved OpenAI key/model but
+   fails production preflight on 24 named deployment settings: real HTTPS
+   domains/origins, signing secrets, persistent SQLite path, S3 bucket/region/
+   public URL and staging path, Twilio credentials/number, Resend key/sender,
+   built frontend URLs, and the floor-plan service URL. Selecting Twilio,
+   Resend, S3 and remote GPU seams is complete; creating those external accounts,
+   domains and resources requires their real owner-supplied identifiers and
+   credentials.
+3. The adaptive atlas policy is unit-tested up to its configured capacity. A
+   maximum-size Blender bake on the target production CPU/GPU remains a deploy
+   acceptance test because this host cannot safely supply that capacity.
+
+These are explicit external/evidence gates, not unfinished hidden fallbacks.
