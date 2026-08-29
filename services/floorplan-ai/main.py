@@ -1491,14 +1491,37 @@ def detect_openings(walls: list[WallSegment]) -> list[Detection]:
     vertical = [w for w in walls if w not in horizontal]
 
     for group, axis in ((horizontal, "h"), (vertical, "v")):
-        # Bucket by the wall's fixed coordinate so only genuinely collinear
+        # Group by the wall's fixed coordinate so only genuinely collinear
         # segments are compared, then order along the running axis.
-        buckets: dict[int, list[WallSegment]] = {}
-        for wall in group:
-            fixed = wall.start.y if axis == "h" else wall.start.x
-            buckets.setdefault(round(fixed * 200), []).append(wall)
+        #
+        # The tolerance is A WALL THICKNESS, not a constant. A fixed 0.005 was
+        # used here and, measured on the acceptance deck where the median
+        # thickness is 0.0061, that is 0.8 of a wall -- so two halves of one
+        # doorway whose centrelines differ by a single thickness were never
+        # compared. The effect was total rather than partial: at that tolerance
+        # the horizontal walls produced ZERO pairable groups, so no horizontal
+        # doorway could be found at all, and both openings this returned were
+        # vertical.
+        #
+        # Every member is compared to its lane's ANCHOR, never to a running
+        # mean. Single-link chaining on a moving centre silently exceeds its own
+        # tolerance -- measured elsewhere in this project the same day -- and
+        # anchoring bounds the whole span by construction.
+        def fixed_of(wall: WallSegment) -> float:
+            return wall.start.y if axis == "h" else wall.start.x
 
-        for segments in buckets.values():
+        lanes: list[list[WallSegment]] = []
+        for wall in sorted(group, key=fixed_of):
+            for lane in lanes:
+                anchor = lane[0]
+                reach = max(anchor.thickness, wall.thickness, 0.005)
+                if abs(fixed_of(wall) - fixed_of(anchor)) <= reach:
+                    lane.append(wall)
+                    break
+            else:
+                lanes.append([wall])
+
+        for segments in lanes:
             if len(segments) < 2:
                 continue
 
