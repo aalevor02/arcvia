@@ -161,6 +161,32 @@ ok("a genuinely meaningless short name is still refused",
             room_name="LIVING").signals["block"]["item"] is None)
 
 
+# ---- Exact aliases established from source geometry -----------------------
+print("\n-- source-evidence aliases --")
+deck_table = classify(width=1.401, depth=1.400, block="A$C47227FD2",
+                      layer="A5 FURN", room_name="DECK", against_wall=True)
+ok("the observed deck set resolves to a four-seat dining table",
+   deck_table.item == "dining-table-4", str(deck_table.item))
+ok("the deck set records that its exact alias supplied the identity",
+   deck_table.signals["block"]["viaAlias"] is True)
+
+tufted_chair = classify(width=0.871, depth=0.714, block="A$C6AB358AA",
+                        layer="0", room_name="BEDROOM")
+ok("the observed tufted chair resolves to an armchair",
+   tufted_chair.item == "armchair", str(tufted_chair.item))
+
+foyer_chair = classify(width=0.380, depth=0.445, block="CNCNC",
+                       layer="A5 FURN", room_name="FOYER", against_wall=True)
+ok("the repeated foyer block resolves to a dining chair",
+   foyer_chair.item == "dining-chair", str(foyer_chair.item))
+
+unseen_anonymous = classify(width=1.401, depth=1.400, block="A$C47227FD3",
+                            layer="A5 FURN", room_name="DECK", against_wall=True)
+ok("a neighbouring anonymous id does not inherit an evidence alias",
+   unseen_anonymous.signals["block"]["item"] is None,
+   str(unseen_anonymous.signals["block"]))
+
+
 # ---- Anonymous blocks: what signal 3 exists for ---------------------------
 # `guess_item` correctly refuses these. The footprint still identifies them.
 print("\n-- anonymous blocks --")

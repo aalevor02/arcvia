@@ -197,7 +197,7 @@ def classify_layer(layer: str) -> str:
     return "other"
 
 
-#: Short block names that are words, not noise.
+#: Exact block-name aliases that are known from source evidence.
 #:
 #: The vendored kernel refuses to guess at anything matching `^[a-z]{1,3}\d*$`,
 #: which is the right call — `VXCBX` and `ewa` and `TC` really are the residue
@@ -209,10 +209,16 @@ def classify_layer(layer: str) -> str:
 #:
 #: `_SIZED_OPENING` was given an explicit escape above `_MEANINGLESS` for
 #: exactly this reason — `D750` shares its shape with noise too. This is the
-#: same escape for short words rather than sized openings. It stays a closed
+#: same escape for observed names rather than sized openings. It stays a closed
 #: list: every entry is a name observed in a real drawing, because the moment
 #: this becomes a pattern it starts guessing at the noise again.
-_SHORT_ALIASES: dict[str, str] = {
+#:
+#: The three longer entries came from DOWN VILLA -WD 22-1-24.dxf. Their raw
+#: entities were rendered independently and classified from geometry: a table
+#: with four chairs, a tufted armchair, and three repeated dining chairs. They
+#: deliberately remain exact aliases; other AutoCAD A$C names and keyboard
+#: residue must still route through footprint inference or review.
+_EXACT_ALIASES: dict[str, str] = {
     "tv": "tv",
     "wc": "wc",
     "ewc": "wc",
@@ -220,6 +226,9 @@ _SHORT_ALIASES: dict[str, str] = {
     "cp": "wc",       # "closet pan"
     "st": "sink-unit",
     "ac": "annotation",   # air-conditioning symbol, not furniture
+    "a$c47227fd2": "dining-table-4",
+    "a$c6ab358aa": "armchair",
+    "cncnc": "dining-chair",
 }
 
 
@@ -377,9 +386,9 @@ def classify_footprint(
     via_alias = False
     if block:
         key = block.strip().lower()
-        if key in _SHORT_ALIASES:
-            # The kernel would refuse this one as noise — see _SHORT_ALIASES.
-            named = _SHORT_ALIASES[key]
+        if key in _EXACT_ALIASES:
+            # The kernel would refuse this one as noise; see _EXACT_ALIASES.
+            named = _EXACT_ALIASES[key]
             via_alias = True
         elif guess_item is not None:
             named = guess_item(block)
