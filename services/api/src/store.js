@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { createSqliteDb } from './lib/sqliteStore.js'
 
 /**
  * Persistence.
@@ -16,7 +17,17 @@ import { dirname, resolve } from 'node:path'
  * prerequisite for writing code.
  */
 
-const DB_PATH = resolve(process.env.DB_PATH ?? './.data/db.json')
+const DB_PROVIDER = String(
+  process.env.DB_PROVIDER ??
+    (process.env.NODE_ENV === 'production' ? 'sqlite' : 'json'),
+).toLowerCase()
+if (!['json', 'sqlite'].includes(DB_PROVIDER)) {
+  throw new Error(`DB_PROVIDER=${DB_PROVIDER} is unsupported; use json or sqlite`)
+}
+const DB_PATH = resolve(
+  process.env.DB_PATH ??
+    (DB_PROVIDER === 'sqlite' ? './.data/arcvia.sqlite' : './.data/db.json'),
+)
 
 const EMPTY = {
   users: [],
@@ -112,7 +123,7 @@ function flush() {
   return writeQueue
 }
 
-export const db = {
+const jsonDb = {
   async find(collection, predicate = () => true) {
     const data = await load()
     return data[collection].filter(predicate)
@@ -156,5 +167,8 @@ export const db = {
     return before !== data[collection].length
   },
 }
+
+export const db =
+  DB_PROVIDER === 'sqlite' ? createSqliteDb(DB_PATH, () => nanoid(12)) : jsonDb
 
 export { nanoid }

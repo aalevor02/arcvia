@@ -4,6 +4,11 @@ import { grantMonthly } from '../lib/credits.js'
 import { recordReferral, generateReferralCode } from './referral.js'
 import plansConfig from '@arcvia/brand/plans'
 import { createLimiter } from '../lib/rateLimit.js'
+import {
+  deliveryConfiguration,
+  sendOtp,
+  sendPasswordReset,
+} from '../lib/delivery.js'
 
 const { defaultPlanId } = plansConfig
 
@@ -31,11 +36,10 @@ const OTP_TTL_MS = 5 * 60 * 1000
 const OTP_MAX_ATTEMPTS = 5
 const OTP_RESEND_COOLDOWN_MS = 30 * 1000
 
-/** True once a real SMS provider is configured. */
-const SMS_CONFIGURED = Boolean(process.env.SMS_PROVIDER)
-/** True once a real mail provider is configured. */
-const MAIL_CONFIGURED = Boolean(process.env.MAIL_PROVIDER)
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+const DELIVERY = deliveryConfiguration()
+const SMS_CONFIGURED = Boolean(DELIVERY.sms)
+const MAIL_CONFIGURED = Boolean(DELIVERY.mail)
 
 /**
  * How long a password-reset link stays usable.
@@ -109,7 +113,7 @@ function generateOtp() {
  */
 async function deliverOtp(app, phone, code) {
   if (SMS_CONFIGURED) {
-    // TODO: call your SMS provider here.
+    await sendOtp(phone, code, DELIVERY)
     app.log.info({ phone }, 'otp dispatched')
     return { devCode: undefined }
   }
@@ -138,7 +142,7 @@ async function deliverPasswordReset(app, user, token) {
   const url = `${process.env.PUBLIC_SITE_URL ?? 'http://localhost:4321'}/reset-password/?token=${token}`
 
   if (MAIL_CONFIGURED) {
-    // TODO: call your mail provider here.
+    await sendPasswordReset(user.email, url, DELIVERY)
     app.log.info({ email: user.email }, 'password reset dispatched')
     return
   }

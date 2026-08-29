@@ -57,8 +57,11 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 /** Explicit, ordered, and the same sequence the `&&` chain used. */
 const ORDER = [
   'store-durability.mjs',
+  'delivery.mjs',
+  'origins-production.mjs',
   'static-urls.mjs',
   'publications.mjs',
+  'sqlite-store.mjs',
   'comments.mjs',
   'render-partial.mjs',
   'scene-patch.mjs',
@@ -67,6 +70,7 @@ const ORDER = [
   'referral-and-reset.mjs',
   'uploads.mjs',
   'detect.mjs',
+  'detect-storage-key.mjs',
   'bake.mjs',
   'access-code.mjs',
   'cad.mjs',
@@ -83,6 +87,7 @@ const ORDER = [
   'queue-persistence.mjs',
   'queue-lanes.mjs',
   'storage-put.mjs',
+  'storage-s3.mjs',
   'asset-hub.mjs',
   'held-credits.mjs',
   'realtime.mjs',

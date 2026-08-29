@@ -9,16 +9,51 @@
  */
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+const CONFIGURED_ORIGINS = process.env.ALLOWED_ORIGINS
+const CONFIGURED_SITE = process.env.PUBLIC_SITE_URL
+
+if (IS_PRODUCTION && !CONFIGURED_ORIGINS) {
+  throw new Error('ALLOWED_ORIGINS is required in production')
+}
+if (IS_PRODUCTION && !CONFIGURED_SITE) {
+  throw new Error('PUBLIC_SITE_URL is required in production')
+}
+
 
 // Origins allowed to call this API. One list, one place — as opposed to the
 // eight separate CORS configurations the reference architecture needed.
 export const ORIGINS = (
-  process.env.ALLOWED_ORIGINS ??
+  CONFIGURED_ORIGINS ??
   'http://localhost:4321,http://localhost:5173,http://localhost:5174,http://localhost:5175'
 )
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
+
+if (IS_PRODUCTION) {
+  for (const origin of ORIGINS) {
+    let parsed
+    try {
+      parsed = new URL(origin)
+    } catch {
+      throw new Error(`ALLOWED_ORIGINS contains an invalid origin: ${origin}`)
+    }
+    if (parsed.origin !== origin || parsed.protocol !== 'https:') {
+      throw new Error(`Production origins must be exact HTTPS origins: ${origin}`)
+    }
+  }
+
+  let site
+  try {
+    site = new URL(CONFIGURED_SITE)
+  } catch {
+    throw new Error('PUBLIC_SITE_URL must be a valid URL')
+  }
+  if (site.origin !== CONFIGURED_SITE.replace(/\/$/, '') || site.protocol !== 'https:') {
+    throw new Error('PUBLIC_SITE_URL must be an HTTPS origin without a path')
+  }
+}
+
 
 /** Loopback, or an RFC1918 private LAN address. */
 const PRIVATE_HOST =

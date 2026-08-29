@@ -1,3 +1,10 @@
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
@@ -30,9 +37,57 @@ import { fileURLToPath } from 'node:url'
  */
 
 const ROOT = resolve(process.env.UPLOAD_DIR ?? './.data/uploads')
+const STORAGE_PROVIDER = String(
+  process.env.STORAGE_PROVIDER ??
+    (process.env.NODE_ENV === 'production' ? 's3' : 'local'),
+).toLowerCase()
+if (!['local', 's3'].includes(STORAGE_PROVIDER)) {
+  throw new Error(`STORAGE_PROVIDER=${STORAGE_PROVIDER} is unsupported; use local or s3`)
+}
+
+const S3_BUCKET = process.env.S3_BUCKET
+const S3_REGION = process.env.S3_REGION
+const S3_ENDPOINT = process.env.S3_ENDPOINT
+const S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID
+const S3_SECRET_ACCESS_KEY =
+  process.env.S3_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY
+
+if (STORAGE_PROVIDER === 's3') {
+  const missing = [
+    !S3_BUCKET && 'S3_BUCKET',
+    !S3_REGION && 'S3_REGION',
+    !process.env.S3_PUBLIC_URL && 'S3_PUBLIC_URL',
+  ].filter(Boolean)
+  if (Boolean(S3_ACCESS_KEY_ID) !== Boolean(S3_SECRET_ACCESS_KEY)) {
+    missing.push(
+      'both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY (or neither for workload identity)',
+    )
+  }
+  if (missing.length) {
+    throw new Error(`S3 storage is missing: ${missing.join(', ')}`)
+  }
+}
+
+let s3Client
+function s3() {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: S3_REGION,
+      endpoint: S3_ENDPOINT || undefined,
+      forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+      credentials: S3_ACCESS_KEY_ID
+        ? { accessKeyId: S3_ACCESS_KEY_ID, secretAccessKey: S3_SECRET_ACCESS_KEY }
+        : undefined,
+    })
+  }
+  return s3Client
+}
+
 
 /** Public URL prefix. In production this is a CDN in front of the bucket. */
-const PUBLIC_PREFIX = process.env.UPLOAD_PUBLIC_PREFIX ?? '/uploads'
+const PUBLIC_PREFIX = String(
+  process.env.S3_PUBLIC_URL ?? process.env.UPLOAD_PUBLIC_PREFIX ?? '/uploads',
+).replace(/\/+$/, '')
 
 /**
  * What may be stored, and what extension each type gets.
@@ -71,6 +126,13 @@ const ALLOWED = new Map([
   ['application/json', '.json'],
 ])
 
+function isSafeObjectKey(key) {
+  if (typeof key !== 'string' || pathFor(key) === null) return false
+  const extension = extname(key).toLowerCase()
+  return [...ALLOWED.values()].includes(extension)
+}
+
+
 export const allowedTypes = () => [...ALLOWED.keys()]
 
 export class UnsupportedType extends Error {
@@ -94,6 +156,32 @@ export async function put(buffer, contentType, { prefix = '' } = {}) {
 
   const digest = createHash('sha256').update(buffer).digest('hex').slice(0, 32)
   const key = join(prefix, `${digest}${extension}`).split(sep).join('/')
+  if (STORAGE_PROVIDER === 's3') {
+    let complete = false
+    try {
+      const existing = await s3().send(
+        new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }),
+      )
+      complete = Number(existing.ContentLength) === buffer.length
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode !== 404 && error?.name !== 'NotFound') {
+        throw error
+      }
+    }
+    if (!complete) {
+      await s3().send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType,
+          CacheControl: 'public, max-age=31536000, immutable',
+        }),
+      )
+    }
+    return { key, url: `${PUBLIC_PREFIX}/${key}`, bytes: buffer.length, contentType }
+  }
+
   const path = pathFor(key)
 
   await mkdir(dirname(path), { recursive: true })
@@ -130,6 +218,10 @@ export async function put(buffer, contentType, { prefix = '' } = {}) {
 }
 
 export function remove(key) {
+  if (!isSafeObjectKey(key)) return Promise.resolve()
+  if (STORAGE_PROVIDER === 's3') {
+    return s3().send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })).then(() => {})
+  }
   return unlink(pathFor(key)).catch(() => {
     /* already gone is the desired end state */
   })
@@ -143,6 +235,23 @@ export function remove(key) {
  * to escape the directory" — which would confirm the traversal was understood.
  */
 export async function open(key) {
+  if (!isSafeObjectKey(key)) return null
+  if (STORAGE_PROVIDER === 's3') {
+    try {
+      const object = await s3().send(
+        new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }),
+      )
+      if (!object.Body) return null
+      return {
+        stream: object.Body,
+        size: Number(object.ContentLength ?? 0),
+        contentType: object.ContentType ?? 'application/octet-stream',
+      }
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey') return null
+      throw error
+    }
+  }
   const path = pathFor(key)
   if (!path) return null
 
@@ -173,6 +282,30 @@ export async function open(key) {
  * the caller answers 404 without confirming that a traversal was understood.
  */
 export async function pathOf(key) {
+  if (!isSafeObjectKey(key)) return null
+  if (STORAGE_PROVIDER === 's3') {
+    const path = pathFor(key)
+    if (!path) return null
+    try {
+      const object = await s3().send(
+        new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }),
+      )
+      if (!object.Body) return null
+      const bytes = await object.Body.transformToByteArray()
+      await mkdir(dirname(path), { recursive: true })
+      const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`
+      await writeFile(tmp, bytes)
+      await rename(tmp, path)
+      return {
+        path,
+        size: bytes.length,
+        contentType: object.ContentType ?? 'application/octet-stream',
+      }
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey') return null
+      throw error
+    }
+  }
   const path = pathFor(key)
   if (!path) return null
 
@@ -283,6 +416,10 @@ export function resolveUrl(url) {
   }
 
   if (!url.startsWith(`${PUBLIC_PREFIX}/`)) return url
+
+  if (STORAGE_PROVIDER === 's3') {
+    return url
+  }
 
   return pathFor(url.slice(PUBLIC_PREFIX.length + 1))
 }

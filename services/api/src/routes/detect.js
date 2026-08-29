@@ -29,7 +29,16 @@ const TIMEOUT_MS = 30_000
 const DOCUMENT_TIMEOUT_MS = 120_000
 
 /** Public prefix that stored files are served under, mirrored from storage.js. */
-const PUBLIC_PREFIX = process.env.UPLOAD_PUBLIC_PREFIX ?? '/uploads'
+const PUBLIC_BASE =
+  process.env.S3_PUBLIC_URL ?? process.env.UPLOAD_PUBLIC_PREFIX ?? '/uploads'
+let PUBLIC_ORIGIN = null
+let PUBLIC_PREFIX = PUBLIC_BASE
+if (PUBLIC_BASE.includes('://')) {
+  const parsed = new URL(PUBLIC_BASE)
+  PUBLIC_ORIGIN = parsed.origin
+  PUBLIC_PREFIX = parsed.pathname
+}
+PUBLIC_PREFIX = PUBLIC_PREFIX.replace(/\/$/, '') || '/'
 
 export async function registerDetectRoutes(app) {
   app.get('/health', async () => {
@@ -390,7 +399,7 @@ async function proxyDocument(request, reply, path, file, { raw = false } = {}) {
  * refused outright rather than being "cleaned up", since a caller pointing this
  * at another host is not a formatting mistake.
  */
-function storageKey(input) {
+export function storageKey(input) {
   if (!input) return null
   const value = String(input)
 
@@ -399,7 +408,13 @@ function storageKey(input) {
 
   let path
   try {
-    path = value.includes('://') ? new URL(value).pathname : value
+    if (value.includes('://')) {
+      const parsed = new URL(value)
+      if (PUBLIC_ORIGIN && parsed.origin !== PUBLIC_ORIGIN) return null
+      path = parsed.pathname
+    } else {
+      path = value
+    }
   } catch {
     return null
   }
