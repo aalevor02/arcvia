@@ -1,5 +1,6 @@
 import {
   alternativesFor,
+  placementEnvelope,
   composeFlooringOptions,
   offerableFinishes,
   variantGroupId,
@@ -103,6 +104,24 @@ check('grass specifically is not offerable', !offerable.some((f) => f.id === 'gr
   // a choice, so only modelled items qualify.
   check('all of them carry a model', alts.every((a) => Boolean(itemById(a.id)?.model)))
   check('an unknown item has none', alternativesFor('no-such-item').length === 0)
+
+  const sofa = itemById('sofa-3')!
+  const sofaEnvelope = placementEnvelope(
+    { id: 'placed-sofa', item: sofa.id, position: { x: 0, y: 0 }, rotation: 0 },
+    sofa,
+  )
+  const fitting = alternativesFor(sofa.id, sofaEnvelope)
+  check('fit-aware alternatives keep smaller modelled seating',
+    fitting.some((alternative) => alternative.id === 'sofa-2'))
+
+  const armchair = itemById('armchair')!
+  const chairEnvelope = placementEnvelope(
+    { id: 'placed-armchair', item: armchair.id, position: { x: 0, y: 0 }, rotation: 0 },
+    armchair,
+  )
+  const tight = alternativesFor(armchair.id, chairEnvelope)
+  check('fit-aware alternatives reject a sofa larger than the occupied footprint',
+    !tight.some((alternative) => alternative.id === 'sofa-3'))
 }
 
 {

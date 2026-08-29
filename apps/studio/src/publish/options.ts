@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { CLEARANCE, fitToEnvelope, type FitEnvelope } from '@arcvia/building-model/fit'
 
 import { buildObject } from '../catalogue/build'
 import { CATALOGUE, itemById } from '../catalogue/items'
@@ -6,7 +7,7 @@ import { upgradeModels, modelsSettled } from '../catalogue/models'
 import { exportGlb } from '../plan/exportGlb'
 import { FLOOR_FINISHES, type FloorFinish, type Plan } from '../plan/types'
 import { surfaceMapsFor, type SurfaceMaps } from '../catalogue/surfaces'
-import type { PlacedObject } from '../catalogue/types'
+import type { CatalogueItem, PlacedObject } from '../catalogue/types'
 
 /**
  * Client options — what a visitor may reconfigure on the published page.
@@ -170,12 +171,27 @@ export const variantGroupId = (objectId: string, itemId: string): string =>
  * a model because a parametric stand-in swapped in next to real furniture
  * reads as a bug, not a choice.
  */
-export function alternativesFor(itemId: string): { id: string; name: string }[] {
+export function placementEnvelope(object: PlacedObject, item: CatalogueItem): FitEnvelope {
+  const size = object.size ?? item.size
+  return {
+    width: size.width + CLEARANCE,
+    depth: size.depth + CLEARANCE,
+    height: size.height,
+  }
+}
+
+export function alternativesFor(
+  itemId: string,
+  envelope?: FitEnvelope,
+): { id: string; name: string }[] {
   const item = itemById(itemId)
   if (!item) return []
   return CATALOGUE.filter(
     (candidate) =>
-      candidate.category === item.category && candidate.id !== itemId && Boolean(candidate.model),
+      candidate.category === item.category &&
+      candidate.id !== itemId &&
+      Boolean(candidate.model) &&
+      (!envelope || fitToEnvelope(candidate, envelope).action !== 'refused'),
   ).map((candidate) => ({ id: candidate.id, name: candidate.name }))
 }
 
@@ -216,6 +232,7 @@ export async function composeObjectOptions(
 
     const original = itemById(placed.object.item)
     if (!original) continue
+    const envelope = placementEnvelope(placed.object, original)
 
     const choices: ObjectChoice[] = [{ id: 'original', name: original.name }]
 
@@ -224,7 +241,9 @@ export async function composeObjectOptions(
       // Silently dropping a request is the failure this repo collects, but so
       // is shipping a button for an item that no longer exists. Skip AND keep
       // going: the group survives with the alternatives that are real.
-      if (!item || !item.model) continue
+      if (!item || !item.model || item.category !== original.category) continue
+      const fit = fitToEnvelope(item, envelope)
+      if (fit.action === 'refused' || fit.action === 'swapped') continue
 
       const variant = buildObject(
         {
@@ -234,7 +253,7 @@ export async function composeObjectOptions(
           // The alternative keeps ITS OWN catalogue size — a visitor comparing
           // a 2.1 m sofa with a 1.5 m one should see the difference, not two
           // objects stretched to agree.
-          size: undefined,
+          size: fit.action === 'scaled' ? fit.size : undefined,
         },
         placed.elevation,
       )

@@ -7,6 +7,8 @@ import {
   measureGltf,
   measureModel,
   resolve,
+  SAFE_BAND_MAX,
+  SAFE_BAND_MIN,
   scaleOf,
 } from './scale.mjs'
 
@@ -184,6 +186,22 @@ ok('degenerate input is refused',
 ok('resolve picks a lone candidate', resolve([{ unit: 'm' }]).pick.unit === 'm')
 ok('resolve refuses none', resolve([]).pick === null)
 ok('resolve refuses several', resolve([{ unit: 'm' }, { unit: 'in' }]).pick === null)
+ok('resolve refuses a lone candidate near the band floor',
+  resolve([{ unit: 'm', bandPosition: SAFE_BAND_MIN - 0.001 }]).reason === 'band-edge')
+ok('resolve refuses a lone candidate near the band ceiling',
+  resolve([{ unit: 'm', bandPosition: SAFE_BAND_MAX + 0.001 }]).reason === 'band-edge')
+ok('resolve accepts the measured safe-band boundaries',
+  resolve([{ unit: 'm', bandPosition: SAFE_BAND_MIN }]).pick?.unit === 'm' &&
+  resolve([{ unit: 'm', bandPosition: SAFE_BAND_MAX }]).pick?.unit === 'm')
+
+{
+  // Bread at 1.2 authored units previously "won" as inches only because the
+  // metre reading missed the broad food band. At 3 cm it sits almost exactly
+  // on the floor and was one of the labelled evaluator's concrete failures.
+  const r = inferScale('Bread', { x: 1.2, y: 0.5, z: 0.3 })
+  ok('a real edge-of-band false positive is refused',
+    !r.ok && r.reason === 'band-edge', `${r.reason} at ${r.bandPosition}`)
+}
 
 // ---------------------------------------------------------------------------
 // Against real conditioned assets

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@arcvia/brand": "*",
+    "@arcvia/building-model": "*",
     "@arcvia/publication": "*",
     "@arcvia/viewer": "*",
     "react": "^18.3.1",

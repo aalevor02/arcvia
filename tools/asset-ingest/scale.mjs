@@ -185,7 +185,17 @@ export const UNITS = [
 
 // Increment whenever the interpretation written to conditioning sidecars
 // changes. Cache entries without this version must be regenerated.
-export const SCALE_VERSION = 1
+export const SCALE_VERSION = 2
+
+/**
+ * A lone unit reading is still weak evidence when it only just enters the
+ * plausibility band. The independent labelled evaluation in
+ * `scale-eval.mjs` measured 91% correctness in the middle 60% and roughly
+ * coin-flip correctness in the outer quintiles. Refuse those edge winners:
+ * an empty slot is cheaper than a confidently mis-scaled client asset.
+ */
+export const SAFE_BAND_MIN = 0.2
+export const SAFE_BAND_MAX = 0.8
 
 /**
  * Plausible size of a real thing, by the words its name might use.
@@ -286,7 +296,16 @@ export function bandFor(name) {
  * one is a sofa through a wall in front of a client.
  */
 export function resolve(candidates) {
-  if (candidates.length === 1) return { pick: candidates[0], reason: 'decisive' }
+  if (candidates.length === 1) {
+    const candidate = candidates[0]
+    if (
+      Number.isFinite(candidate.bandPosition) &&
+      (candidate.bandPosition < SAFE_BAND_MIN || candidate.bandPosition > SAFE_BAND_MAX)
+    ) {
+      return { pick: null, reason: 'band-edge' }
+    }
+    return { pick: candidate, reason: 'decisive' }
+  }
   if (candidates.length === 0) return { pick: null, reason: 'no-plausible-unit' }
   return { pick: null, reason: 'ambiguous' }
 }
@@ -307,9 +326,15 @@ export function inferScale(name, extents) {
   const band = bandFor(name)
   if (!band) return { ok: false, reason: 'unknown-kind', name, largest }
 
-  const candidates = UNITS.filter(({ factor }) => {
+  const candidates = UNITS.flatMap(({ unit, factor }) => {
     const metres = largest * factor
-    return metres >= band.min && metres <= band.max
+    if (metres < band.min || metres > band.max) return []
+    return [{
+      unit,
+      factor,
+      metres,
+      bandPosition: (metres - band.min) / (band.max - band.min),
+    }]
   })
 
   const { pick, reason } = resolve(candidates)
@@ -321,6 +346,7 @@ export function inferScale(name, extents) {
       category: band.category,
       largest,
       considered: candidates.map((c) => c.unit),
+      bandPosition: candidates.length === 1 ? candidates[0].bandPosition : undefined,
     }
   }
 
@@ -332,6 +358,7 @@ export function inferScale(name, extents) {
     category: band.category,
     unit: pick.unit,
     factor: pick.factor,
+    bandPosition: pick.bandPosition,
   }
 }
 

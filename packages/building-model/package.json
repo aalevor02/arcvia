@@ -18,6 +18,10 @@
       "types": "./src/buildplan.ts",
       "default": "./src/buildplan.ts"
     },
+    "./fit": {
+      "types": "./src/fit.d.mts",
+      "default": "./src/fit.mjs"
+    },
     "./schema/building-1.json": "./schema/building-1.json"
   },
   "files": [

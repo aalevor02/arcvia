@@ -4,6 +4,7 @@ import { uploadImage, uploadScene } from '../lib/api'
 import { itemById } from '../catalogue/items'
 import {
   alternativesFor,
+  placementEnvelope,
   composeFlooringOptions,
   composeObjectOptions,
   offerableFinishes,
@@ -57,7 +58,10 @@ export default function OptionsPanel({ plan, value, onSave }: Props) {
   const switchable = plan.floors.flatMap((floor) =>
     Object.values(floor.objects)
       .map((object) => ({ object, item: itemById(object.item) }))
-      .filter((entry) => entry.item?.model && alternativesFor(entry.item.id).length > 0),
+      .filter((entry) =>
+        entry.item?.model &&
+        alternativesFor(entry.item.id, placementEnvelope(entry.object, entry.item)).length > 0,
+      ),
   )
 
   const storedGroups: Record<string, string[]> = {}
@@ -158,7 +162,10 @@ export default function OptionsPanel({ plan, value, onSave }: Props) {
                   ? ` — ${objectGroups[object.id].length} alternative(s)`
                   : ''}
               </summary>
-              {alternativesFor(item!.id).map((alt) => (
+              {alternativesFor(
+                item!.id,
+                placementEnvelope(object, item!),
+              ).map((alt) => (
                 <label
                   key={alt.id}
                   style={{
