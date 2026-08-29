@@ -58,6 +58,44 @@ const READABLE = new Set([
   'image/webp',
 ])
 
+/**
+ * Validate a reviewer-supplied roof choice.
+ *
+ * A floor plan does not prove roof form. "none" therefore remains the default,
+ * while a gable is accepted only with an explicit, bounded pitch.
+ */
+export function cadRoofOptions(body = {}) {
+  const requested = body.roofStyle ?? 'none'
+  if (!['none', 'flat', 'gable'].includes(requested)) {
+    return { ok: false, message: 'Roof style must be none, flat, or gable.' }
+  }
+  const suppliedPitch = body.roofPitchDegrees
+  if (requested !== 'gable' && suppliedPitch != null && suppliedPitch !== '') {
+    return { ok: false, message: 'A roof pitch is only valid for a gable roof.' }
+  }
+  if (requested === 'gable') {
+    const pitch = Number(suppliedPitch)
+    if (!Number.isFinite(pitch) || pitch < 5 || pitch > 60) {
+      return {
+        ok: false,
+        message: 'A gable roof needs an explicit pitch between 5 and 60 degrees.',
+      }
+    }
+    return {
+      ok: true,
+      withRoof: true,
+      roofStyle: 'gable',
+      roofPitchDegrees: pitch,
+    }
+  }
+  return {
+    ok: true,
+    withRoof: requested === 'flat',
+    roofStyle: 'flat',
+    roofPitchDegrees: null,
+  }
+}
+
 async function resolveInput(key, reply) {
   if (typeof key !== 'string' || !key.length) {
     reply.status(400).send({ message: 'A stored file key is required.' })
@@ -198,6 +236,8 @@ export async function registerCadRoutes(app) {
     }
     const index = Number.isInteger(Number(request.body?.index)) ? Number(request.body.index) : 0
     const scale = Number(request.body?.scale) > 0 ? Number(request.body.scale) : null
+    const roof = cadRoofOptions(request.body)
+    if (!roof.ok) return reply.status(400).send({ message: roof.message })
 
     // The scale is in the fingerprint on purpose: rebuilding the same sheet at
     // a corrected scale is a genuinely different reconstruction, and merging
@@ -205,6 +245,9 @@ export async function registerCadRoutes(app) {
     const { existing, fields: idempotency } = await checkSubmission(request, [
       'deck', request.body?.key ?? null, page, index, scale,
       request.body?.height ?? null,
+      roof.roofStyle,
+      roof.roofPitchDegrees,
+      roof.withRoof,
     ])
     if (existing) {
       return reply.status(200).send({
@@ -251,6 +294,9 @@ export async function registerCadRoutes(app) {
         index,
         scale,
         height: request.body?.height ?? null,
+        withRoof: roof.withRoof,
+        roofStyle: roof.roofStyle,
+        roofPitchDegrees: roof.roofPitchDegrees,
       },
       outputUrl: null,
       error: null,
@@ -290,6 +336,8 @@ export async function registerCadRoutes(app) {
         message: `This engine reads DWG and DXF. Got ${file.contentType}.`,
       })
     }
+    const roof = cadRoofOptions(request.body)
+    if (!roof.ok) return reply.status(400).send({ message: roof.message })
 
     const out = resolve(WORK_ROOT, request.auth.userId, 'build')
     await mkdir(out, { recursive: true })
@@ -323,6 +371,9 @@ export async function registerCadRoutes(app) {
       // against the first and the reviewer would be handed the wrong villa
       // with a cheerful "not charged again".
       request.body?.building ?? null,
+      roof.roofStyle,
+      roof.roofPitchDegrees,
+      roof.withRoof,
     ])
 
     if (existing) {
@@ -373,6 +424,9 @@ export async function registerCadRoutes(app) {
         // as a site. Absent on every ordinary job, and the engine then builds
         // the whole scope exactly as before.
         building: request.body?.building ?? null,
+        withRoof: roof.withRoof,
+        roofStyle: roof.roofStyle,
+        roofPitchDegrees: roof.roofPitchDegrees,
       },
       outputUrl: null,
       error: null,

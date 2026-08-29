@@ -74,6 +74,7 @@ const ORDER = [
   'bake.mjs',
   'access-code.mjs',
   'cad.mjs',
+  'cad-roof-options.mjs',
   'cad-patches.mjs',
   'cad-cancel.mjs',
   'camera-orientation.mjs',

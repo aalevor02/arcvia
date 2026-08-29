@@ -568,6 +568,14 @@ export interface CadSummary {
   /** Presentation-deck scale evidence, when this was a PDF plan. */
   scale?: number
   scaleConfirmed?: boolean
+  /** Roof geometry requested explicitly by the reviewer; null when omitted. */
+  roof?: {
+    roof: number
+    style?: 'flat' | 'gable'
+    pitchDegrees?: number
+    formSource?: 'explicit-review'
+    reason?: string
+  } | null
 }
 
 export interface CadJob {
@@ -600,7 +608,15 @@ export async function cadModel(url: string): Promise<import('../plan/cadFurnish'
   }
 }
 
-export const submitCadJob = (key: string) =>
+export type CadRoofStyle = 'none' | 'flat' | 'gable'
+
+export interface CadBuildOptions {
+  key: string
+  roofStyle?: CadRoofStyle
+  roofPitchDegrees?: number | null
+}
+
+export const submitCadJob = (input: CadBuildOptions) =>
   request<{
     jobId: string
     status: string
@@ -608,7 +624,7 @@ export const submitCadJob = (key: string) =>
     creditsRemaining?: number
     deduplicated?: boolean
     message?: string
-  }>('/cad/jobs', { method: 'POST', body: { key } })
+  }>('/cad/jobs', { method: 'POST', body: input })
 
 export const cadJob = (jobId: string) => request<CadJob>(`/cad/jobs/${jobId}`)
 
@@ -675,6 +691,8 @@ export const submitDeckBuild = (input: {
   page: number
   index: number
   scale: number | null
+  roofStyle?: CadRoofStyle
+  roofPitchDegrees?: number | null
 }) =>
   request<{
     jobId: string

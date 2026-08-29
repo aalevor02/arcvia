@@ -769,7 +769,9 @@ def reconstruct(
     # Nested rather than top-level on purpose: it closes over the reading, the
     # document, the block placements and the scale, all of which are per-SHEET.
     # Only the walls, the bbox and the base are per-storey.
-    def _solve_frame(frame_walls, bbox, base_z: float = 0.0) -> dict:
+    def _solve_frame(
+        frame_walls, bbox, base_z: float = 0.0, include_roof: bool = False,
+    ) -> dict:
         frame_bbox = bbox
         x0, y0, x1, y1 = bbox
         walls = frame_walls
@@ -1101,7 +1103,7 @@ def reconstruct(
         # Inferred, never drawn, and off unless asked for — a roof lids
         # the cutaway isometric. See build/solidify.build_roof.
         roof_build = {"roof": 0, "reason": "not requested"}
-        if with_roof:
+        if include_roof:
             if roof_style == "gable":
                 roof_meshes, roof_build = build_gable_roof(
                     rooms,
@@ -1200,10 +1202,17 @@ def reconstruct(
 
     if stack:
         datum = frames[min(stack, key=lambda s: abs(s.level)).frame_index].bbox
+        roof_level = max(stack, key=lambda item: item.base_z)
         for level in stack:
             frame = frames[level.frame_index]
             frame_walls = [all_walls[i] for i in frame.wall_indices]
-            result = _solve_frame(frame_walls, frame.bbox, base_z=level.base_z)
+            result = _solve_frame(
+                frame_walls,
+                frame.bbox,
+                base_z=level.base_z,
+                # A roof belongs above the building, never between storeys.
+                include_roof=with_roof and level is roof_level,
+            )
             shift = (datum[0] - frame.bbox[0], datum[1] - frame.bbox[1])
             for mesh in result["meshes"].values():
                 mesh.translate_plan(*shift)
@@ -1270,7 +1279,9 @@ def reconstruct(
         # is measured from.
         storey = min(solved, key=lambda item: abs(item[0].level))[1]
     else:
-        storey = _solve_frame(walls, (x0, y0, x1, y1))
+        storey = _solve_frame(
+            walls, (x0, y0, x1, y1), include_roof=with_roof,
+        )
 
     walls = storey["walls"]
     rooms = storey["rooms"]
@@ -1372,6 +1383,7 @@ def reconstruct(
                 "walls": result["wallStats"]["total"],
                 "rooms": result["roomStats"]["count"],
                 "area": result["roomStats"]["totalArea"],
+                "roof": result["roofBuild"],
             })
 
     if not solved:
@@ -2680,6 +2692,9 @@ def main() -> int:
     R.add_argument("--scale", type=float, default=None,
                    help="Metres across the image, if the drawing prints none.")
     R.add_argument("--no-perimeter", action="store_true")
+    R.add_argument("--with-roof", action="store_true")
+    R.add_argument("--roof-style", choices=("flat", "gable"), default="flat")
+    R.add_argument("--roof-pitch-degrees", type=float, default=None)
 
     # A client's presentation PDF, not a single plan image. Two phases so the
     # scale the user confirms is not billed twice — survey reads, build models.
@@ -2708,6 +2723,9 @@ def main() -> int:
     dkb.add_argument("--detector", default=None)
     dkb.add_argument("--no-perimeter", action="store_true")
     dkb.add_argument("--long-edge", type=int, default=2400)
+    dkb.add_argument("--with-roof", action="store_true")
+    dkb.add_argument("--roof-style", choices=("flat", "gable"), default="flat")
+    dkb.add_argument("--roof-pitch-degrees", type=float, default=None)
 
     L = sub.add_parser("layers", help="Which layers hold walls, with evidence.")
     L.add_argument("--input", required=True)
@@ -2780,6 +2798,9 @@ def main() -> int:
             detector_url=ns.detector,
             unit_scale=ns.scale,
             with_perimeter=not ns.no_perimeter,
+            with_roof=ns.with_roof,
+            roof_style=ns.roof_style,
+            roof_pitch_degrees=ns.roof_pitch_degrees,
         )
         stem = Path(ns.input).stem
         (Path(ns.out) / f"{stem}.building.json").write_text(
@@ -2854,6 +2875,9 @@ def main() -> int:
             unit_scale=ns.scale,
             with_perimeter=not ns.no_perimeter,
             long_edge=ns.long_edge,
+            with_roof=ns.with_roof,
+            roof_style=ns.roof_style,
+            roof_pitch_degrees=ns.roof_pitch_degrees,
         )
         stem = model["sheet"]["stem"]
         (Path(ns.out) / f"{stem}.building.json").write_text(

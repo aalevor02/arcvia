@@ -14,6 +14,7 @@ import {
   uploadScene,
   type CadSummary,
   type CadModelPatch,
+  type CadRoofStyle,
   type DeckSurvey,
 } from '../lib/api'
 
@@ -80,6 +81,8 @@ type Phase =
  */
 export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
   const [phase, setPhase] = useState<Phase>({ at: 'pick' })
+  const [roofStyle, setRoofStyle] = useState<CadRoofStyle>('none')
+  const [roofPitch, setRoofPitch] = useState('30')
   const fileRef = useRef<HTMLInputElement>(null)
   // The poll survives re-renders and must not survive unmount.
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -189,7 +192,11 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         return
       }
 
-      const submitted = await submitCadJob(stored.key)
+      const submitted = await submitCadJob({
+        key: stored.key,
+        roofStyle,
+        roofPitchDegrees: roofStyle === 'gable' ? Number(roofPitch) : null,
+      })
       watch(submitted.jobId, submitted.creditsCharged)
     } catch (error) {
       setPhase({
@@ -219,6 +226,8 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         page: sheet.page,
         index: sheet.index,
         scale: chosenScale(p),
+        roofStyle,
+        roofPitchDegrees: roofStyle === 'gable' ? Number(roofPitch) : null,
       })
       watch(submitted.jobId, submitted.creditsCharged, p.sourceUrl)
     } catch (error) {
@@ -283,6 +292,40 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
               ? 'Pick a GLB and it becomes this project’s 3D scene.'
               : 'Pick a DWG or DXF for an exact reconstruction, or a presentation PDF — the engine finds the plan pages and builds a massing model from your plan. 3 credits per build.'}
           </span>
+          {kind === 'cad' && (
+            <div style={{ display: 'grid', gap: 5, maxWidth: 440 }}>
+              <label style={{ display: 'grid', gap: 3, fontSize: 12 }}>
+                Roof geometry
+                <select
+                  value={roofStyle}
+                  onChange={(event) => setRoofStyle(event.target.value as CadRoofStyle)}
+                  style={{ fontSize: 12 }}
+                >
+                  <option value="none">No roof (plan does not prove one)</option>
+                  <option value="flat">Flat RCC roof</option>
+                  <option value="gable">Gable roof with reviewed pitch</option>
+                </select>
+              </label>
+              {roofStyle === 'gable' && (
+                <label style={{ display: 'grid', gap: 3, fontSize: 12 }}>
+                  Gable pitch (5-60 degrees)
+                  <input
+                    type="number"
+                    min={5}
+                    max={60}
+                    step={0.5}
+                    value={roofPitch}
+                    onChange={(event) => setRoofPitch(event.target.value)}
+                    style={{ fontSize: 12 }}
+                  />
+                </label>
+              )}
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                Roof form is an explicit review choice. Arcvia measures the footprint,
+                but never invents a pitch from a floor plan.
+              </span>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               ref={fileRef}
@@ -463,6 +506,13 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
             : null,
           phase.summary.openings != null ? `${phase.summary.openings} openings` : null,
           phase.summary.unit ? `unit: ${phase.summary.unit}` : null,
+          phase.summary.roof
+            ? phase.summary.roof.roof
+              ? phase.summary.roof.style === 'gable'
+                ? `gable roof: ${phase.summary.roof.pitchDegrees} degrees`
+                : 'flat roof'
+              : `roof refused: ${phase.summary.roof.reason ?? 'footprint is unsupported'}`
+            : null,
         ].filter((fact): fact is string => Boolean(fact))
 
         return (

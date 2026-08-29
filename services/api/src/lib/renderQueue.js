@@ -474,6 +474,9 @@ async function runJob(job) {
               index: job.spec.index,
               scale: job.spec.scale,
               height: job.spec.height,
+              withRoof: job.spec.withRoof === true,
+              roofStyle: job.spec.roofStyle ?? 'flat',
+              roofPitchDegrees: job.spec.roofPitchDegrees ?? null,
               signal: controller.signal,
               onProgress,
             })
@@ -488,6 +491,9 @@ async function runJob(job) {
               building: job.spec.building,
               storeys: job.spec.storeys !== false,
               patches: job.spec.patches ?? [],
+              withRoof: job.spec.withRoof === true,
+              roofStyle: job.spec.roofStyle ?? 'flat',
+              roofPitchDegrees: job.spec.roofPitchDegrees ?? null,
               signal: controller.signal,
               onProgress,
             })
@@ -497,6 +503,19 @@ async function runJob(job) {
       // renders beautifully, and nobody downstream can tell.
       const verify = model.verify ?? { ok: true, checks: [] }
       const reviewChecks = choicesForCadChecks(model, verify.checks ?? [])
+      const roof = model.build?.roof
+        ?? model.storeys?.built?.find(
+          (storey) => storey.roof && storey.roof.reason !== 'not requested',
+        )?.roof
+        ?? null
+      if (roof && !roof.roof) {
+        reviewChecks.push({
+          name: 'roof-form',
+          level: 'warning',
+          message: `The reviewed roof was not built: ${roof.reason ?? 'the footprint is unsupported'}.`,
+          value: roof,
+        })
+      }
       if (!verify.ok) {
         const blocking = reviewChecks.filter((check) => check.level === 'blocking')
         const actionable = blocking.filter((check) => (check.choices?.length ?? 0) > 0)
@@ -579,6 +598,7 @@ async function runJob(job) {
           verifyWarnings: reviewChecks.filter((check) => check.level !== 'info').length,
           verifyChecks: reviewChecks,
           patches: job.spec.patches ?? [],
+          roof,
           // Deck sheets carry scale evidence instead of a drawing unit; the
           // reviewer's question there is "was the scale confirmed or guessed".
           ...(model.scale

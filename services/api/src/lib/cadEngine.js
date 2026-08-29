@@ -132,12 +132,20 @@ export function runEngine(command, args, { onProgress, signal } = {}) {
  */
 export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers = true,
                                     height, frame, building, storeys = true, patches = [],
+                                    withRoof = false, roofStyle = 'flat',
+                                    roofPitchDegrees = null,
                                     onProgress, signal }) {
   const args = ['--input', inputPath, '--out', outDir]
   if (unit) args.push('--unit', unit)
   if (layers?.length) args.push('--layers', layers.join(','))
   else if (autoLayers) args.push('--auto-layers')
   if (height) args.push('--height', String(height))
+  if (withRoof) {
+    args.push('--with-roof', '--roof-style', roofStyle)
+    if (roofStyle === 'gable') {
+      args.push('--roof-pitch-degrees', String(roofPitchDegrees))
+    }
+  }
   if (frame !== undefined && frame !== null) args.push('--frame', String(frame))
   // Which BUILDING within the frame, for a site plan whose villas share no
   // wall. The engine reports its buildings on every build in `model.site`, so
@@ -239,6 +247,7 @@ export async function deckSurvey({ inputPath, outDir, detector, signal }) {
  */
 export async function deckBuild({
   inputPath, outDir, page, index = 0, scale, height, detector, onProgress, signal,
+  withRoof = false, roofStyle = 'flat', roofPitchDegrees = null,
 }) {
   const args = [
     'build', '--input', inputPath, '--out', outDir,
@@ -246,6 +255,12 @@ export async function deckBuild({
   ]
   if (scale) args.push('--scale', String(scale))
   if (height) args.push('--height', String(height))
+  if (withRoof) {
+    args.push('--with-roof', '--roof-style', roofStyle)
+    if (roofStyle === 'gable') {
+      args.push('--roof-pitch-degrees', String(roofPitchDegrees))
+    }
+  }
   if (detector) args.push('--detector', detector)
 
   await runEngine('deck', args, { onProgress, signal })

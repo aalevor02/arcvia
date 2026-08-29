@@ -229,6 +229,9 @@ def build_sheet(
     unit_scale: float | None = None,
     with_perimeter: bool = True,
     long_edge: int = 2400,
+    with_roof: bool = False,
+    roof_style: str = "flat",
+    roof_pitch_degrees: float | None = None,
 ) -> dict:
     """Phase 2: reconstruct one chosen plan sheet, at the settled scale."""
     source = Path(pdf_path)
@@ -253,6 +256,9 @@ def build_sheet(
         detector_url=detector_url,
         unit_scale=unit_scale,
         with_perimeter=with_perimeter,
+        with_roof=with_roof,
+        roof_style=roof_style,
+        roof_pitch_degrees=roof_pitch_degrees,
     )
 
     # A supplied scale IS the confirmation the warning asks for. reconstruct_raster

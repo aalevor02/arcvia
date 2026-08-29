@@ -49,10 +49,19 @@ def reconstruct_raster(
     detector_url: str | None = None,
     unit_scale: float | None = None,
     with_perimeter: bool = True,
+    with_roof: bool = False,
+    roof_style: str = "flat",
+    roof_pitch_degrees: float | None = None,
 ) -> dict:
     """A photograph or scan of a floor plan -> walls, rooms, GLB."""
     from build.glb import MeshBuilder, write_glb
-    from build.solidify import build_room_finishes, build_room_slabs, build_walls
+    from build.solidify import (
+        build_gable_roof,
+        build_roof,
+        build_room_finishes,
+        build_room_slabs,
+        build_walls,
+    )
     from hypothesise import openings as op
     from solve import spaces as sp
     from solve import verify as vf
@@ -169,6 +178,15 @@ def reconstruct_raster(
     wall_build = build_walls(wall_mesh, walls, holes, height)
     room_meshes, slab_build = build_room_slabs(rooms)
     finish_meshes, finish_build = build_room_finishes(rooms, walls, holes, height)
+    roof_meshes = {}
+    roof_build = {"roof": 0, "reason": "not requested"}
+    if with_roof:
+        if roof_style == "gable":
+            roof_meshes, roof_build = build_gable_roof(
+                rooms, height, pitch_degrees=roof_pitch_degrees,
+            )
+        else:
+            roof_meshes, roof_build = build_roof(rooms, height)
 
     # Verified against the *graph* rooms deliberately. The gate exists to catch a
     # wall network that contradicts its own input, and handing it rooms that did
@@ -216,6 +234,7 @@ def reconstruct_raster(
         "storey0_walls": wall_mesh,
         **{f"storey0_{name}": mesh for name, mesh in room_meshes.items()},
         **{f"storey0_{name}": mesh for name, mesh in finish_meshes.items()},
+        **{f"storey0_{name}": mesh for name, mesh in roof_meshes.items()},
     }, out / f"{source.stem}.glb")
 
     return {
@@ -226,7 +245,12 @@ def reconstruct_raster(
         "rooms": room_stats,
         "openings": opening_stats,
         "detectorRooms": reading.rooms,
-        "build": {**wall_build, **slab_build, **finish_build},
+        "build": {
+            **wall_build,
+            **slab_build,
+            **finish_build,
+            "roof": roof_build,
+        },
         "verify": verdict.as_dict() if hasattr(verdict, "as_dict") else verdict,
         "glb": manifest,
         # Surfaced because everything measured downstream inherits it, and a
