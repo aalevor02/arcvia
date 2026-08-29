@@ -109,14 +109,38 @@ ok("a section mark is noise", L.classify("SECTION A-A") in ("noise", "room"))
 
 
 
-# ---- the text pass failing must not lose the whole read ---------------------
-# Measured live: one request in four returned HTTP 500 with ONNXRuntimeError
-# "bad allocation" out of rapidocr, on a box at 96% memory commit. read_labels
-# runs BEFORE any geometry, so an out-of-memory in the OCR discarded a
-# wall-and-room read that had not been attempted yet.
-import io as _io
+# ---- an OCR failure must NOT be swallowed, and this is why -------------------
+# Attempted on 2026-08-29 and REVERTED the same hour, recorded so it is not
+# attempted again.
+#
+# The provocation was real: on a box at 96% memory commit, one request in four
+# returned HTTP 500 with ONNXRuntimeError "bad allocation" out of rapidocr, and
+# because read_labels runs BEFORE any geometry that discarded a wall-and-room
+# read which had not been attempted yet. Degrading to "no labels" looked like an
+# obvious improvement -- an unnamed plan beats no plan.
+#
+# It is not an improvement, because the labels are not decoration. main.py picks
+# between its two binarisations on `sum(1 for room in reading.rooms if
+# room.kind == "room" and room.name)` -- the count of rooms the ARCHITECT named
+# -- with enclosed area only as the tie-break. Strip the labels and that primary
+# key is 0 for both readings, the tie-break decides, and a DIFFERENT
+# binarisation can win.
+#
+# Measured: with the swallow in place, three consecutive reads of the same file
+# gave 55, 55 and 47 walls, and test_segment's determinism case went from PASS
+# to "47 segments differed". So the swallow traded a loud failure for a
+# SILENTLY DIFFERENT BUILDING, in a product whose headline property is that the
+# same drawing imports the same way every time.
+#
+# It also destroyed a signal that already existed: test_segment carries an
+# out_of_memory() guard that skips honestly when the machine is short. Swallowing
+# the exception stopped that guard ever seeing it, so an environmental problem
+# started presenting as a determinism regression.
+#
+# The right fix for the 500 is memory, or a notes channel at the layer where
+# read_labels is called so the caller can refuse a degraded read on purpose.
+# Not a silent fallback here.
 import numpy as np
-from contextlib import redirect_stdout
 
 _saved_engine = L._engine
 try:
@@ -124,20 +148,22 @@ try:
         raise RuntimeError("[ONNXRuntimeError] : 1 : FAIL : bad allocation")
 
     L._engine = _boom
-    _blank = np.full((320, 320, 3), 255, np.uint8)
+    _raised = False
+    try:
+        L.read_labels(np.full((320, 320, 3), 255, np.uint8))
+    except Exception:
+        _raised = True
+    ok("an OCR failure PROPAGATES rather than degrading to no labels", _raised)
+finally:
+    L._engine = _saved_engine
 
-    _buf = _io.StringIO()
-    with redirect_stdout(_buf):
-        _out = L.read_labels(_blank)
-    _said = _buf.getvalue()
-
-    ok("an OCR failure degrades to no labels instead of raising", _out == [])
-    # And not quietly. A caught-and-skipped failure that says nothing is the
-    # defect this codebase keeps writing down, so the cause is named.
-    ok("and it names the cause rather than failing silently",
-       "[labels]" in _said and "bad allocation" in _said)
-    ok("and says what the user loses by it",
-       "unnamed" in _said and "scale" in _said)
+# The one fallback that IS safe: no engine installed at all is a deployment
+# fact, not a mid-read failure, and it is the same for every read.
+_saved_engine = L._engine
+try:
+    L._engine = None
+    ok("but an absent engine still returns no labels, deterministically",
+       L.read_labels(np.full((64, 64, 3), 255, np.uint8)) == [])
 finally:
     L._engine = _saved_engine
 
