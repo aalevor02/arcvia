@@ -1698,3 +1698,111 @@ def build_roof(spaces, height: float, base_z: float = 0.0,
         "height": round(top, 3),
         "assumed": "flat RCC roof with a parapet; the plan does not draw one",
     }
+
+
+def build_gable_roof(
+    spaces,
+    height: float,
+    base_z: float = 0.0,
+    pitch_degrees: float | None = None,
+) -> tuple[dict, dict]:
+    """
+    Build a reviewer-specified gable roof over a measured rectangular footprint.
+
+    A floor plan cannot prove roof form or pitch. This function therefore has
+    no default pitch and never auto-selects itself. It accepts explicit review
+    input, measures only the indoor footprint, and refuses footprints for which
+    a single ridge would manufacture large areas outside the drawing.
+    """
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    if pitch_degrees is None:
+        return {}, {
+            "roof": 0,
+            "reason": "gable roof requires an explicit pitch in degrees",
+        }
+    pitch = float(pitch_degrees)
+    if not 5.0 <= pitch <= 60.0:
+        return {}, {
+            "roof": 0,
+            "reason": "gable roof pitch must be between 5 and 60 degrees",
+        }
+
+    indoor = []
+    for space in spaces or ():
+        if _space_is_outdoor(space):
+            continue
+        loop = getattr(space, "loop", None) or []
+        if len(loop) < 3:
+            continue
+        polygon = Polygon([(float(point[0]), float(point[1])) for point in loop])
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if not polygon.is_empty:
+            indoor.append(polygon)
+
+    if not indoor:
+        return {}, {"roof": 0, "reason": "no indoor rooms to cover"}
+
+    footprint = unary_union(indoor).buffer(
+        0.15 + ROOF_OVERHANG,
+        join_style=2,
+    ).buffer(0)
+    if footprint.geom_type != "Polygon" or footprint.interiors:
+        return {}, {
+            "roof": 0,
+            "reason": "a single gable requires one footprint without courtyards",
+        }
+
+    rectangle = footprint.minimum_rotated_rectangle
+    coverage = footprint.area / rectangle.area if rectangle.area else 0.0
+    if coverage < 0.96:
+        return {}, {
+            "roof": 0,
+            "reason": (
+                "footprint is not rectangular enough for one evidence-safe "
+                f"gable ({coverage:.1%} coverage)"
+            ),
+        }
+
+    corners = list(rectangle.exterior.coords)[:-1]
+    if len(corners) != 4:
+        return {}, {"roof": 0, "reason": "roof rectangle did not resolve"}
+
+    edge0 = math.dist(corners[0], corners[1])
+    edge1 = math.dist(corners[1], corners[2])
+    if edge1 > edge0:
+        corners = corners[1:] + corners[:1]
+    p0, p1, p2, p3 = corners
+    ridge0 = ((p0[0] + p3[0]) / 2, (p0[1] + p3[1]) / 2)
+    ridge1 = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+    span = math.dist(p0, p3)
+    run = span / 2
+    rise = math.tan(math.radians(pitch)) * run
+    eave_z = base_z + height
+    ridge_z = eave_z + rise
+
+    def vertex(point, z):
+        return (point[0], z, -point[1])
+
+    mesh = MeshBuilder()
+    mesh.add_tri_facing(vertex(p0, eave_z), vertex(p1, eave_z), vertex(ridge1, ridge_z))
+    mesh.add_tri_facing(vertex(p0, eave_z), vertex(ridge1, ridge_z), vertex(ridge0, ridge_z))
+    mesh.add_tri_facing(vertex(p3, eave_z), vertex(ridge0, ridge_z), vertex(ridge1, ridge_z))
+    mesh.add_tri_facing(vertex(p3, eave_z), vertex(ridge1, ridge_z), vertex(p2, eave_z))
+    mesh.add_tri(vertex(p3, eave_z), vertex(p0, eave_z), vertex(ridge0, ridge_z))
+    mesh.add_tri(vertex(p1, eave_z), vertex(p2, eave_z), vertex(ridge1, ridge_z))
+
+    return {"roof_gable": mesh}, {
+        "roof": 1,
+        "style": "gable",
+        "parapet": 0,
+        "area": round(footprint.area, 2),
+        "eaveHeight": round(eave_z, 3),
+        "ridgeHeight": round(ridge_z, 3),
+        "ridgeLength": round(math.dist(ridge0, ridge1), 3),
+        "pitchDegrees": round(pitch, 3),
+        "footprintSource": "measured-indoor-rooms",
+        "formSource": "explicit-review",
+    }

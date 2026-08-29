@@ -22,6 +22,7 @@ from build.glb import MeshBuilder, write_glb  # noqa: E402
 from ingest import blocks as ingest_blocks  # noqa: E402
 from ingest.blocks import AGAINST_WALL_M, RoomLabel, wall_gap  # noqa: E402
 from build.solidify import (  # noqa: E402
+    build_gable_roof,
     PARAPET_HEIGHT, RAILING_HEIGHT, build_room_finishes, build_room_slabs,
     build_slabs, build_walls,
 )
@@ -590,6 +591,49 @@ garden_finish, garden_finish_stats = build_room_finishes(
 )
 ok("an outdoor region does not grow an indoor ceiling or painted wall skin",
    garden_finish == {} and garden_finish_stats["ceilingMeshes"] == 0)
+
+print("\n-- explicit gable roofs --")
+gable_meshes, gable_report = build_gable_roof(
+    spaces, height=2.7, base_z=3.0, pitch_degrees=30,
+)
+ok("an explicit gable choice builds one addressable roof mesh",
+   set(gable_meshes) == {"roof_gable"}, str(sorted(gable_meshes)))
+ok("the gable report preserves explicit form provenance",
+   gable_report["style"] == "gable"
+   and gable_report["formSource"] == "explicit-review"
+   and gable_report["pitchDegrees"] == 30.0)
+gable = gable_meshes["roof_gable"]
+ok("two slopes plus two gable ends produce six triangles",
+   gable.triangles == 6, str(gable.triangles))
+ok("the ridge rises above the measured wall head",
+   close(max(point[1] for point in gable.positions),
+         gable_report["ridgeHeight"], 0.002)
+   and gable_report["ridgeHeight"] > gable_report["eaveHeight"])
+no_pitch_meshes, no_pitch_report = build_gable_roof(spaces, height=2.7)
+ok("a gable is refused rather than assigned a guessed pitch",
+   no_pitch_meshes == {}
+   and "explicit pitch" in no_pitch_report["reason"])
+steep_meshes, steep_report = build_gable_roof(
+    spaces, height=2.7, pitch_degrees=75,
+)
+ok("unsafe pitch values are refused",
+   steep_meshes == {} and "between 5 and 60" in steep_report["reason"])
+irregular = sp.Space(
+    index=99,
+    loop=[(0, 0), (4, 0), (4, 2), (2, 2), (2, 4), (0, 4)],
+    area=12.0,
+    gross_area=12.0,
+    perimeter=16.0,
+    name="Living",
+    kind="room",
+    bounded_by=[],
+)
+irregular_meshes, irregular_report = build_gable_roof(
+    [irregular], height=2.7, pitch_degrees=30,
+)
+ok("one gable refuses an irregular footprint instead of filling its notch",
+   irregular_meshes == {}
+   and "not rectangular enough" in irregular_report["reason"])
 
 # ── A storey has to be able to sit somewhere other than zero ────────────────
 # `storey0` is hardcoded through the engine and a house has floors. This is the

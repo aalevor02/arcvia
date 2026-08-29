@@ -202,6 +202,8 @@ def reconstruct(
     with_perimeter: bool = True,
     with_storeys: bool = False,
     with_roof: bool = False,
+    roof_style: str = "flat",
+    roof_pitch_degrees: float | None = None,
     building_index: int | None = None,
 ) -> dict:
     """
@@ -214,6 +216,7 @@ def reconstruct(
     from build.glb import MeshBuilder, write_glb
     from build.solidify import (
         build_fixtures, build_room_finishes, build_room_slabs, build_roof,
+        build_gable_roof,
         build_marked_stairs, build_stairs, build_walls, open_stair_cores,
     )
     from classify.catalogue_dims import CATALOGUE_DIMS
@@ -1097,8 +1100,17 @@ def reconstruct(
             meshes["wallface_plinth"] = wall_plinth_mesh
         # Inferred, never drawn, and off unless asked for — a roof lids
         # the cutaway isometric. See build/solidify.build_roof.
+        roof_build = {"roof": 0, "reason": "not requested"}
         if with_roof:
-            roof_meshes, roof_build = build_roof(rooms, height, base_z=base_z)
+            if roof_style == "gable":
+                roof_meshes, roof_build = build_gable_roof(
+                    rooms,
+                    height,
+                    base_z=base_z,
+                    pitch_degrees=roof_pitch_degrees,
+                )
+            else:
+                roof_meshes, roof_build = build_roof(rooms, height, base_z=base_z)
             meshes.update(roof_meshes)
         if fixture_build["fixtures"]:
             meshes["fixtures"] = fixture_mesh
@@ -1139,6 +1151,7 @@ def reconstruct(
             "openingStats": opening_stats,
             "meshes": meshes,
             "stairFaces": stair_faces,
+            "roofBuild": roof_build,
             "builds": (wall_build, slab_build, finish_build, fixture_build),
         }
 
@@ -2631,8 +2644,14 @@ def main() -> int:
     b.add_argument("--work", default="A:/tmp/reconstruct")
     b.add_argument("--out", required=True)
     b.add_argument("--with-roof", action="store_true",
-                   help="Infer a flat roof and parapet. OFF by default: "
-                        "the isometric view is a CUTAWAY and a roof lids it.")
+                   help="Build opt-in roof geometry. OFF by default because "
+                        "the isometric view is a cutaway.")
+    b.add_argument("--roof-style", choices=("flat", "gable"), default="flat",
+                   help="Flat is the assumed RCC fallback. Gable is used only "
+                        "with an explicit --roof-pitch-degrees review choice.")
+    b.add_argument("--roof-pitch-degrees", type=float, default=None,
+                   help="Explicit gable pitch, 5..60 degrees; never inferred "
+                        "from an ordinary floor plan.")
     b.add_argument("--unit", default=None, help="Force a unit (mm|cm|m|in|ft).")
     b.add_argument("--layers", default=None,
                    help="Comma-separated wall layers. Defaults to the name heuristic.")
@@ -2937,6 +2956,12 @@ def main() -> int:
         return 0
 
     if ns.command == "reconstruct":
+        if ns.roof_style == "gable" and ns.roof_pitch_degrees is None:
+            parser.error("--roof-style gable requires --roof-pitch-degrees")
+        if ns.roof_pitch_degrees is not None and (
+            not ns.with_roof or ns.roof_style != "gable"
+        ):
+            parser.error("--roof-pitch-degrees requires --with-roof --roof-style gable")
         def _build(chosen_layers, out_dir=None):
             return reconstruct(
                 ns.input, ns.work, out_dir or ns.out, unit=ns.unit,
@@ -2944,6 +2969,8 @@ def main() -> int:
                 height=ns.height, frame_index=ns.frame,
                 with_fixtures=not ns.no_fixtures, auto_layers=ns.auto_layers,
                 with_perimeter=not ns.no_perimeter,
+                roof_style=ns.roof_style,
+                roof_pitch_degrees=ns.roof_pitch_degrees,
                 with_storeys=ns.storeys, with_roof=ns.with_roof,
                 building_index=ns.building,
             )
