@@ -136,7 +136,29 @@ def read_labels(image: np.ndarray, long_edge: int = 3000) -> list[Label]:
         image = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
         height, width = image.shape[:2]
 
-    result, _ = _engine(image)  # type: ignore[misc]
+    try:
+        result, _ = _engine(image)  # type: ignore[misc]
+    except Exception as error:  # noqa: BLE001 - see the module note below
+        # Degrade to "no labels" rather than losing the whole read.
+        #
+        # Measured: an out-of-memory inside the OCR session surfaces as
+        # ONNXRuntimeError "bad allocation" and, unguarded, returned HTTP 500
+        # for the entire request -- discarding walls and rooms that had not
+        # been computed yet because the text pass runs first. This function
+        # already returns [] when the engine is absent; a failing engine is the
+        # same outcome for a different reason.
+        #
+        # Printed by name, never swallowed: a caught-and-skipped failure that
+        # says nothing is the defect this codebase keeps writing down. The
+        # visible consequence for the caller is unnamed rooms and no printed
+        # scale, which is a degraded read rather than no read.
+        print(
+            f"[labels] the text pass failed and was skipped: "
+            f"{type(error).__name__}: {error}. Rooms will be unnamed, furniture "
+            f"will not be proposed, and the printed scale was not read.",
+            flush=True,
+        )
+        return []
 
     # A faint scan or a screenshot with a grey wash reads poorly at native
     # contrast; a second pass on a contrast-stretched greyscale copy catches

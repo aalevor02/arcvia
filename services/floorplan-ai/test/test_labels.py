@@ -108,5 +108,39 @@ ok("a fitting word wins a compound label", L.classify("BEDROOM WARDROBE") == "fi
 ok("a section mark is noise", L.classify("SECTION A-A") in ("noise", "room"))
 
 
+
+# ---- the text pass failing must not lose the whole read ---------------------
+# Measured live: one request in four returned HTTP 500 with ONNXRuntimeError
+# "bad allocation" out of rapidocr, on a box at 96% memory commit. read_labels
+# runs BEFORE any geometry, so an out-of-memory in the OCR discarded a
+# wall-and-room read that had not been attempted yet.
+import io as _io
+import numpy as np
+from contextlib import redirect_stdout
+
+_saved_engine = L._engine
+try:
+    def _boom(_image):
+        raise RuntimeError("[ONNXRuntimeError] : 1 : FAIL : bad allocation")
+
+    L._engine = _boom
+    _blank = np.full((320, 320, 3), 255, np.uint8)
+
+    _buf = _io.StringIO()
+    with redirect_stdout(_buf):
+        _out = L.read_labels(_blank)
+    _said = _buf.getvalue()
+
+    ok("an OCR failure degrades to no labels instead of raising", _out == [])
+    # And not quietly. A caught-and-skipped failure that says nothing is the
+    # defect this codebase keeps writing down, so the cause is named.
+    ok("and it names the cause rather than failing silently",
+       "[labels]" in _said and "bad allocation" in _said)
+    ok("and says what the user loses by it",
+       "unnamed" in _said and "scale" in _said)
+finally:
+    L._engine = _saved_engine
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
