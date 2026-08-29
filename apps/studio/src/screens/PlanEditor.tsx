@@ -73,6 +73,11 @@ import {
   type DetectedScale,
   type ProposedWall,
 } from '../plan/detections'
+import {
+  placeRasterOpenings,
+  proposeRasterOpenings,
+  type ProposedOpening,
+} from '../plan/rasterOpenings'
 import SceneView from './SceneView'
 import { UnderlayPanel } from '../components/UnderlayPanel'
 import { CalibrateDialog } from '../components/CalibrateDialog'
@@ -145,6 +150,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const [calibration, setCalibration] = useState<{ from: Vec2; to: Vec2 } | null>(null)
   /** Detector output awaiting acceptance. Never written into the plan directly. */
   const [proposal, setProposal] = useState<ProposedWall[] | null>(null)
+  const [openingProposal, setOpeningProposal] = useState<ProposedOpening[]>([])
   // What the reader made of the drawing beyond its walls: the rooms it closed,
   // their names, and the scale it read off the printed dimensions. Kept beside
   // the proposal because it is reviewed with it and discarded with it.
@@ -518,7 +524,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     writeUnitPreference(units)
   }, [units])
   useEffect(() => viewerRef.current?.setSelection(selection), [selection])
-  useEffect(() => viewerRef.current?.setProposal(proposal ?? []), [proposal])
+  useEffect(
+    () => viewerRef.current?.setProposal(proposal ?? [], openingProposal),
+    [proposal, openingProposal],
+  )
   useEffect(() => {
     viewerRef.current?.setPlacing(placing)
     // Arming an item switches to the place tool; disarming returns to Select so
@@ -736,7 +745,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // Shown either way. A poor detection is still a starting point somebody
       // may want to correct by hand, and throwing it away would make that
       // impossible — but it is no longer offered silently as if it worked.
-      if (walls.length > 0) setProposal(walls)
+      const openings = proposeRasterOpenings(result, traced, walls)
+      setOpeningProposal(openings)
+      setProposal(walls.length > 0 ? walls : null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The floor-plan reader failed.')
     } finally {
@@ -748,8 +759,8 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     if (!proposal) return
     // One history entry for the whole import, so a single undo reverses it —
     // rather than forty, which would be unusable.
-    apply((current) =>
-      proposal.reduce((next, wall) => {
+    apply((current) => {
+      const withWalls = proposal.reduce((next, wall) => {
         // A balcony parapet and an interior partition are the same two lines on
         // the drawing, and this is where they used to become the same wall:
         // every proposal took interior height regardless. The reader's verdict
@@ -763,9 +774,11 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           type: build?.id,
           snapRadius: 0.15,
         })
-      }, current),
-    )
+      }, current)
+      return placeRasterOpenings(withWalls, openingProposal)
+    })
     setProposal(null)
+    setOpeningProposal([])
   }
 
   /** Place the furniture the drawing showed, as one undoable step. */
@@ -1214,9 +1227,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 
           {proposal && (
             <section>
-              <span className="eyebrow">Proposed walls</span>
+              <span className="eyebrow">Proposed geometry</span>
               <ProposalReview
                 proposal={proposal}
+                openings={openingProposal}
                 units={units}
                 onAccept={acceptProposal}
                 rooms={reading?.rooms ?? []}
@@ -1225,6 +1239,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
                 notes={reading?.notes ?? []}
                 onDiscard={() => {
                   setProposal(null)
+                  setOpeningProposal([])
                   setReading(null)
                 }}
               />

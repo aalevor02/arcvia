@@ -4,6 +4,7 @@ import { detectRooms, displayName } from './rooms'
 import { add, distance, normalise, perpendicular, scale, snapToAxis, snapToGrid, sub } from './geometry'
 import { DEFAULT_UNITS, formatArea, formatLength, type UnitSystem } from '../lib/format'
 import type { ProposedWall } from './detections'
+import type { ProposedOpening } from './rasterOpenings'
 import type { CatalogueItem, PlacedObject } from '../catalogue/types'
 import { itemById } from '../catalogue/items'
 import { footprint, objectsNear, resolvePlacement, sizeOf } from '../catalogue/placement'
@@ -94,6 +95,7 @@ export class PlanCanvas {
    * before anyone has agreed to any of it.
    */
   private proposal: ProposedWall[] = []
+  private openingProposal: ProposedOpening[] = []
 
   /** Catalogue item currently being placed, following the pointer. */
   private placing: CatalogueItem | null = null
@@ -201,8 +203,12 @@ export class PlanCanvas {
     this.invalidate()
   }
 
-  setProposal(walls: ProposedWall[]): void {
+  setProposal(
+    walls: ProposedWall[],
+    openings: ProposedOpening[] = [],
+  ): void {
     this.proposal = walls
+    this.openingProposal = openings
     this.invalidate()
   }
 
@@ -1077,7 +1083,7 @@ export class PlanCanvas {
    * legible as geometry while never being mistaken for geometry that exists.
    */
   private drawProposal(): void {
-    if (this.proposal.length === 0) return
+    if (this.proposal.length === 0 && this.openingProposal.length === 0) return
     const ctx = this.ctx
 
     ctx.save()
@@ -1095,6 +1101,27 @@ export class PlanCanvas {
       // them differently is the cheapest way to say which is which.
       ctx.strokeStyle = wall.paired ? COLOURS.proposal : COLOURS.proposalWeak
       ctx.stroke()
+    }
+    ctx.setLineDash([])
+    ctx.lineWidth = 4
+    ctx.font = 'bold 10px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    for (const opening of this.openingProposal) {
+      const centre = this.toScreen(opening.position)
+      const half = opening.width * this.view.zoom / 2
+      const dx = Math.cos(opening.rotation) * half
+      const dy = -Math.sin(opening.rotation) * half
+      ctx.strokeStyle =
+        opening.kind === 'window'
+          ? COLOURS.proposalOpening
+          : COLOURS.proposalDoor
+      ctx.fillStyle = ctx.strokeStyle
+      ctx.beginPath()
+      ctx.moveTo(centre.x - dx, centre.y - dy)
+      ctx.lineTo(centre.x + dx, centre.y + dy)
+      ctx.stroke()
+      ctx.fillText(opening.kind === 'window' ? 'W' : 'D', centre.x, centre.y - 5)
     }
     ctx.restore()
   }
@@ -1170,6 +1197,8 @@ const COLOURS = {
   warn: '#f5a524',
   proposal: 'rgba(0, 194, 168, 0.85)',
   proposalWeak: 'rgba(245, 165, 36, 0.7)',
+  proposalOpening: 'rgba(56, 189, 248, 0.95)',
+  proposalDoor: 'rgba(167, 139, 250, 0.95)',
   objectFill: 'rgba(200, 210, 224, 0.16)',
   objectSelected: 'rgba(47, 109, 246, 0.32)',
   objectLine: 'rgba(200, 210, 224, 0.55)',

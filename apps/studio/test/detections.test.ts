@@ -8,6 +8,10 @@ import {
 import { distance } from '../src/plan/geometry'
 import { addWall, activeFloor, emptyPlan } from '../src/plan/planStore'
 import { detectRooms } from '../src/plan/rooms'
+import {
+  placeRasterOpenings,
+  proposeRasterOpenings,
+} from '../src/plan/rasterOpenings'
 import type { Underlay } from '../src/plan/types'
 
 let passed = 0
@@ -429,6 +433,75 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
   }
   check('a 0.1 m edge in an outline is kept, because a loop needs all of them',
     detectRooms(activeFloor(ticked)).length === 1)
+}
+
+// ---- Classified raster openings reach editable wall geometry ----------------
+{
+  const detected = result([])
+  detected.objects = [
+    {
+      label: 'window',
+      bbox: [0.4, 0.18, 0.2, 0.04],
+      confidence: 0.88,
+      attaches_to: 'wall',
+    },
+    // A nested lower-confidence box around the same symbol is one opening.
+    {
+      label: 'window',
+      bbox: [0.405, 0.185, 0.19, 0.03],
+      confidence: 0.61,
+      attaches_to: 'wall',
+    },
+    // There is evidence of a gap but no evidence of its type. Never guess.
+    {
+      label: 'opening',
+      bbox: [0.2, 0.18, 0.1, 0.04],
+      confidence: 0.6,
+      attaches_to: 'wall',
+    },
+    // A classified symbol away from every wall cannot safely make a hole.
+    {
+      label: 'door',
+      bbox: [0.4, 0.76, 0.1, 0.08],
+      confidence: 0.9,
+      attaches_to: 'wall',
+    },
+  ]
+  const proposedWalls = [{
+    a: { x: 1, y: -1 },
+    b: { x: 9, y: -1 },
+    thickness: 0.2,
+    paired: true,
+    confidence: 0.9,
+  }]
+  const openings = proposeRasterOpenings(detected, UNDERLAY, proposedWalls)
+  check('only the classified wall-attached raster opening is proposed',
+    openings.length === 1 && openings[0].kind === 'window',
+    JSON.stringify(openings))
+  check('the detected box supplies its measured two-metre span',
+    near(openings[0]?.width ?? 0, 2))
+  check('the opening is projected onto the proposed wall centreline',
+    near(openings[0]?.position.x ?? 0, 5) &&
+      near(openings[0]?.position.y ?? 0, -1))
+
+  let plan = addWall(emptyPlan(), { x: 1, y: -1 }, { x: 9, y: -1 }, {
+    thickness: 0.2,
+    snapRadius: 0.15,
+  })
+  plan = placeRasterOpenings(plan, openings)
+  const placed = Object.values(activeFloor(plan).objects)
+  check('acceptance creates one editable catalogue window attached to the wall',
+    placed.length === 1 &&
+      placed[0].item === 'window' &&
+      Boolean(placed[0].wallId))
+  check('the accepted window keeps detected width, wall depth, and standard sill',
+    near(placed[0]?.size?.width ?? 0, 2) &&
+      near(placed[0]?.size?.depth ?? 0, 0.2) &&
+      near(placed[0]?.elevation ?? 0, 0.9))
+
+  const twice = placeRasterOpenings(plan, openings)
+  check('accepting the same detection again does not duplicate the opening',
+    Object.keys(activeFloor(twice).objects).length === 1)
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

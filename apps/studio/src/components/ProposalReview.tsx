@@ -4,10 +4,12 @@ import {
   type DetectedScale,
   type ProposedWall,
 } from '../plan/detections'
+import type { ProposedOpening } from '../plan/rasterOpenings'
 import { formatLength, formatThickness, type UnitSystem } from '../lib/format'
 
 interface Props {
   proposal: ProposedWall[]
+  openings: ProposedOpening[]
   units: UnitSystem
   /** The spaces the walls closed, named from the drawing where it says so. */
   rooms: DetectedRoom[]
@@ -36,6 +38,7 @@ interface Props {
  */
 export function ProposalReview({
   proposal,
+  openings,
   units,
   rooms,
   scale,
@@ -48,6 +51,8 @@ export function ProposalReview({
   const unpaired = summary.total - summary.paired
   const named = rooms.filter((room) => room.name)
   const merged = rooms.filter((room) => room.also.length > 0)
+  const doors = openings.filter((opening) => opening.kind === 'door').length
+  const windows = openings.filter((opening) => opening.kind === 'window').length
 
   return (
     <>
@@ -63,6 +68,17 @@ export function ProposalReview({
         <span className="muted">Rooms closed</span>
         <span className="mono">{rooms.length}</span>
       </div>
+      <div className="stat">
+        <span className="muted">Openings classified</span>
+        <span className="mono">{doors} doors / {windows} windows</span>
+      </div>
+      {openings.length > 0 && (
+        <p className="muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+          Coloured D/W marks are vision-classified openings snapped to the
+          proposed walls. Check them against the drawing; unclassified gaps were
+          not guessed.
+        </p>
+      )}
       {/* The adjudicator's own account of what it changed — "dropped 4
           proposed walls — bed (95%)". A proposal that quietly shrank between
           reads would look like flakiness; the same proposal with its reasons
