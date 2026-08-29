@@ -269,7 +269,9 @@ export function wallsFromRooms(
   const kept: ProposedWall[] = []
 
   for (const room of rooms) {
-    const polygon = (room.polygon ?? []).map((point) => toWorld(point, underlay))
+    const polygon = withoutNeedles(
+      (room.polygon ?? []).map((point) => toWorld(point, underlay)),
+    )
     if (polygon.length < 3) continue
 
     // EVERY edge, including short ones. A polygon is only useful while it is
@@ -624,3 +626,49 @@ export function namesFromDrawing(
   return out
 }
 
+/**
+ * Drop needle tips from a traced contour.
+ *
+ * The reader's outlines are traced contours, not drafted polygons, and one can
+ * run out to a point and come straight back along the same line. The damage is
+ * NOT local to the region that carries the needle.
+ *
+ * Measured on the owner's Avarana Basement: an unnamed region reaches
+ * y 0.8932 -> 0.678 -> 0.8932, a 2.69 m spike lying at x 0.345 -- 6 cm from the
+ * TOILET's right wall at x 0.3412. `addWall` snaps within 0.15 m, so the spike
+ * lands on top of that wall and consumes it, the two rooms collapse into one
+ * face, and the word TOILET printed on the drawing has no room left to name.
+ * The Toilet's OWN two needles are harmless; removing only those changes
+ * nothing. That is why this runs over every outline rather than the one that
+ * looks damaged -- a needle is a hazard to its neighbours, not to itself.
+ *
+ * The test is the TURN, not the length. At a needle tip the edge arriving and
+ * the edge leaving point in nearly opposite directions, which is a property of
+ * the artefact. A length threshold would have to guess how thin a real room may
+ * be, and would have missed this one anyway: the spike is 2.69 m long.
+ *
+ * This does not weaken the rule that every edge of an outline is kept. A tip is
+ * not an edge of the enclosed shape; removing it leaves the loop closed and
+ * shorter, where dropping a real edge would open it.
+ */
+function withoutNeedles(polygon: Vec2[]): Vec2[] {
+  if (polygon.length < 4) return polygon
+
+  const kept: Vec2[] = []
+  for (let i = 0; i < polygon.length; i += 1) {
+    const previous = kept.length ? kept[kept.length - 1] : polygon[(i - 1 + polygon.length) % polygon.length]
+    const current = polygon[i]
+    const next = polygon[(i + 1) % polygon.length]
+
+    const incoming = sub(current, previous)
+    const outgoing = sub(next, current)
+    const lengths = Math.hypot(incoming.x, incoming.y) * Math.hypot(outgoing.x, outgoing.y)
+    if (lengths > 0) {
+      const turn = (incoming.x * outgoing.x + incoming.y * outgoing.y) / lengths
+      // -1 is a complete reversal. -0.98 is about 11 degrees off one.
+      if (turn < -0.98) continue
+    }
+    kept.push(current)
+  }
+  return kept.length >= 3 ? kept : polygon
+}
