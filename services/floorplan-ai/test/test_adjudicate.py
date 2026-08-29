@@ -218,3 +218,70 @@ assert "carpet is continuous soft pile" in prompt
 assert "wood requires visible plank seams or grain" in prompt
 
 print("vision provider contract: PASS")
+
+# ---- reasoning_effort is not universal, and a wrong value is a hard 400 ------
+# Found live by codex-01a047: gpt-4.1-mini answers HTTP 400 "Unrecognized
+# request argument: reasoning_effort" because this seam sent the field for
+# every OpenAI model. The values differ between reasoning models too -- legacy
+# gpt-5-mini takes minimal/low/medium/high but NOT none -- so the previous
+# constant "none" was wrong for that model as well, and this was never only a
+# 4.1 problem.
+
+assert adjudicate.reasoning_effort_for("gpt-5.5") == "none"
+assert adjudicate.reasoning_effort_for("gpt-5.5-2026-01-31") == "none", (
+    "a dated snapshot is still gpt-5.5")
+assert adjudicate.reasoning_effort_for("openai/gpt-5.5") == "none", (
+    "a provider-qualified name is still the same model")
+
+assert adjudicate.reasoning_effort_for("gpt-5-mini") == "minimal", (
+    "gpt-5-mini rejects 'none', so it must not inherit the gpt-5.5 value")
+
+assert adjudicate.reasoning_effort_for("gpt-4.1-mini") is None, (
+    "a non-reasoning model must have the field OMITTED, not set")
+assert adjudicate.reasoning_effort_for("gpt-4o") is None
+assert adjudicate.reasoning_effort_for("nvidia/nemotron-nano-12b-v2-vl") is None
+assert adjudicate.reasoning_effort_for("") is None, (
+    "an unset model must degrade to omission rather than guess")
+
+# THE ASSERTION THAT WOULD HAVE CAUGHT IT. The table above is a unit test of a
+# lookup; this checks the field actually leaves the process, because the bug
+# was in the request builder and not in any table.
+_sent = {}
+
+
+class _Reply(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, *a):
+        return json.dumps(
+            {"choices": [{"message": {"content": "{}"}}]}).encode()
+
+
+def _capture(request, timeout=None):
+    _sent["body"] = json.loads(request.data.decode("utf-8"))
+    return _Reply()
+
+
+_blank = np.full((64, 64, 3), 255, np.uint8)
+
+for model, expected in (("gpt-4.1-mini", None), ("gpt-5.5", "none"), ("gpt-5-mini", "minimal")):
+    _sent.clear()
+    with patch.object(adjudicate, "MODEL", model), \
+            patch.object(adjudicate.urllib.request, "urlopen", _capture):
+        adjudicate._ask(_blank, "hello", max_tokens=25)
+    body = _sent.get("body")
+    assert body is not None, f"{model}: no request was sent"
+    assert body["model"] == model
+    if expected is None:
+        assert "reasoning_effort" not in body, (
+            f"{model} is non-reasoning: the field must be ABSENT, got "
+            f"{body.get('reasoning_effort')!r} -- this is the live HTTP 400")
+    else:
+        assert body["reasoning_effort"] == expected, (
+            f"{model}: expected {expected!r}, sent {body.get('reasoning_effort')!r}")
+
+print("reasoning-effort model policy: PASS")
