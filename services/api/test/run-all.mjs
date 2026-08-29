@@ -59,6 +59,7 @@ const ORDER = [
   'store-durability.mjs',
   'delivery.mjs',
   'origins-production.mjs',
+  'production-config.mjs',
   'static-urls.mjs',
   'publications.mjs',
   'sqlite-store.mjs',

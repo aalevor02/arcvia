@@ -27,6 +27,8 @@
     "compare:trees": "node tools/compare-trees.mjs A:\\Web\\Arcvia C:\\Users\\aalev\\Arcvia",
     "build": "npm run build --workspaces --if-present",
     "build:production": "node tools/validate.mjs build",
+    "preflight:production": "node --env-file-if-exists=.env tools/production-preflight.mjs",
+    "start:production": "npm run preflight:production && node --env-file-if-exists=.env services/api/src/server.js",
     "validate": "node tools/validate.mjs all"
   },
   "engines": {

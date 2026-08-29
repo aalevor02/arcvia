@@ -74,6 +74,17 @@ npm run build            # nothing to compile; this validates the workspaces
 NODE_ENV=production node services/api/src/server.js
 ```
 
+Run the consolidated gate before starting the API. It reports every missing
+provider, origin, persistence, storage, AI, and render-capacity input together
+without printing secret values:
+
+```bash
+npm run preflight:production
+npm run start:production
+```
+
+`start:production` will not serve traffic until the preflight passes.
+
 ### Required in production
 
 ```bash
