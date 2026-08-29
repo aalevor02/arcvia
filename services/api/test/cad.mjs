@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises'
  * because a missing Python environment is a setup fact rather than a failure.
  */
 
-const BASE = 'http://localhost:8787'
+const BASE = process.env.API_BASE ?? 'http://localhost:8787'
 const DRAWING = 'A:/Projects/CasaAltinho/_work/cad/dxf/DOWN VILLA -WD 22-1-24.dxf'
 const stamp = Date.now()
 

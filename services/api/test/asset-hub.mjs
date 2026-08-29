@@ -16,6 +16,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { SCALE_VERSION } from '../../../tools/asset-ingest/scale.mjs'
+
 import {
   NotConditionable,
   conditionedAssetModel,
@@ -41,7 +43,7 @@ const ok = (label, condition, extra = '') => {
 }
 
 ok('only current, verified scale reports are reusable',
-  reusableConditioning({ scale: { ok: true, version: 1 } }))
+  reusableConditioning({ scale: { ok: true, version: SCALE_VERSION, factor: 1 } }))
 ok('legacy scale sidecars are regenerated',
   !reusableConditioning({ scale: { ok: true } }) && !reusableConditioning({}))
 {
