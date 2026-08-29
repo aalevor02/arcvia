@@ -16,6 +16,7 @@ const valid = {
   NODE_ENV: 'production',
   JWT_SECRET: 'j'.repeat(48),
   WORKER_SECRET: 'w'.repeat(48),
+  PUBLIC_ASSET_SECRET: 'p'.repeat(48),
   PUBLIC_SITE_URL: 'https://arcvia.example',
   ALLOWED_ORIGINS: 'https://arcvia.example,https://studio.arcvia.example',
   DB_PROVIDER: 'sqlite',

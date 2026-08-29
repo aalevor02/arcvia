@@ -1,6 +1,12 @@
 import { db, nanoid } from '../store.js'
 import { requireAuth, hashPassword, verifyPassword } from '../lib/auth.js'
 import { spend } from '../lib/credits.js'
+import { isEnvAsset, keyOfOwnUpload, open } from '../lib/storage.js'
+import {
+  PUBLIC_ASSET_FIELDS,
+  protectedAssetUrl,
+  verifyProtectedAsset,
+} from '../lib/publicAssetAccess.js'
 
 /**
  * Scenes — the projects a user builds in the studio.
@@ -429,7 +435,36 @@ export async function registerSceneRoutes(app) {
     }
 
     attempts.delete(slug)
-    return { scene: publicPayload(scene) }
+    return { scene: publicPayload(scene, { protectAssets: true }) }
+  })
+
+  app.get('/public/:slug/assets/:field', async (request, reply) => {
+    const scene = await db.findOne(
+      'scenes',
+      (item) => item.publishedSlug === request.params.slug && item.published,
+    )
+    const field = request.params.field
+    if (
+      !scene
+      || !verifyProtectedAsset(
+        scene,
+        field,
+        request.query?.expires,
+        request.query?.sig,
+      )
+    ) {
+      return reply.status(404).send({ message: 'Protected asset not found.' })
+    }
+    const key = keyOfOwnUpload(scene[field])
+    if (!key) return reply.status(404).send({ message: 'Protected asset not found.' })
+    const object = await open(key)
+    if (!object) return reply.status(404).send({ message: 'Protected asset not found.' })
+
+    reply.header('Content-Type', object.contentType)
+    if (object.size) reply.header('Content-Length', String(object.size))
+    reply.header('Cache-Control', 'private, no-store')
+    reply.header('X-Content-Type-Options', 'nosniff')
+    return reply.send(object.stream)
   })
 
 }
@@ -502,8 +537,8 @@ function recordFailure(slug) {
  * Everything needed to render, and nothing else — no owner, no plan, no
  * internal ids.
  */
-function publicPayload(scene) {
-  return {
+function publicPayload(scene, { protectAssets = false } = {}) {
+  const result = {
     name: scene.name,
     modelUrl: scene.modelUrl,
     lightsUrl: scene.lightsUrl,
@@ -525,6 +560,15 @@ function publicPayload(scene) {
     // Null rather than absent, matching hdriUrl: the page checks one field.
     options: scene.options ?? null,
   }
+  if (!protectAssets) return result
+
+  for (const field of PUBLIC_ASSET_FIELDS) {
+    const source = result[field]
+    if (!source) continue
+    if (keyOfOwnUpload(source)) result[field] = protectedAssetUrl(scene, field)
+    else if (!isEnvAsset(source)) result[field] = null
+  }
+  return result
 }
 
 async function owned(request, reply) {

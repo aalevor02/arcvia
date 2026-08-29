@@ -441,9 +441,14 @@ export function resolveUrl(url) {
  * the prefix (the scheme is in front of it), which is the point: an absolute
  * URL is never one of our keys.
  */
+export function keyOfOwnUpload(url) {
+  if (typeof url !== 'string' || !url.startsWith(`${PUBLIC_PREFIX}/`)) return null
+  const key = url.slice(PUBLIC_PREFIX.length + 1)
+  return isSafeObjectKey(key) && pathFor(key) !== null ? key : null
+}
+
 export function isOwnUpload(url) {
-  if (typeof url !== 'string' || !url.startsWith(`${PUBLIC_PREFIX}/`)) return false
-  return pathFor(url.slice(PUBLIC_PREFIX.length + 1)) !== null
+  return keyOfOwnUpload(url) !== null
 }
 
 /**

@@ -74,6 +74,7 @@ const ORDER = [
   'detect-storage-key.mjs',
   'bake.mjs',
   'access-code.mjs',
+  'protected-assets.mjs',
   'cad.mjs',
   'cad-roof-options.mjs',
   'cad-patches.mjs',

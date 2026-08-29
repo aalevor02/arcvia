@@ -137,10 +137,16 @@ const publicUrl = `${BASE}/scenes/public/${slug}`
   ok('the right code is accepted', right.status === 200, String(right.status))
 
   const body = await right.json()
-  ok('unlocking returns the model', body.scene?.modelUrl === '/uploads/scenes/x/model.glb')
-  ok('unlocking returns the bake', body.scene?.bakedUrl === '/uploads/renders/x/atlas.png')
-  ok('unlocking returns the panorama',
-    body.scene?.panoramaUrl === '/uploads/renders/x/panorama.png')
+  ok('unlocking returns a signed model proxy',
+    /^\/scenes\/public\/[^/]+\/assets\/modelUrl\?/.test(body.scene?.modelUrl ?? ''))
+  ok('unlocking returns a signed bake proxy',
+    /^\/scenes\/public\/[^/]+\/assets\/bakedUrl\?/.test(body.scene?.bakedUrl ?? ''))
+  ok('unlocking returns a signed panorama proxy',
+    /^\/scenes\/public\/[^/]+\/assets\/panoramaUrl\?/.test(
+      body.scene?.panoramaUrl ?? '',
+    ))
+  ok('unlocking exposes no raw storage URL',
+    !JSON.stringify(body.scene).includes('/uploads/'))
   ok('unlocking returns the views', body.scene?.views?.length === 1)
 }
 

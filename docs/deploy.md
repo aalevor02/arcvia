@@ -90,6 +90,7 @@ npm run start:production
 ```bash
 JWT_SECRET=<32+ random bytes>    # the server refuses to start without it
 WORKER_SECRET=<random>           # shared with the render worker
+PUBLIC_ASSET_SECRET=<random>     # signs protected walkthrough asset URLs
 DB_PROVIDER=sqlite
 DB_PATH=/var/lib/arcvia/arcvia.sqlite
 STORAGE_PROVIDER=s3
@@ -231,6 +232,8 @@ mid-flight.
 - **SQLite is a single-API-instance production store.** WAL and immediate
   transactions make one always-on API process durable. Before horizontally
   scaling the API, migrate this collection-shaped adapter to PostgreSQL.
-- **Access codes gate the manifest, not the files.** The model and atlas stay
-  content-addressed and unauthenticated. It stops a forwarded link being
-  opened; it is not encryption.
+- **Protected walkthrough assets are proxied.** A correct access code returns
+  15-minute HMAC-signed API URLs, never raw bucket/CDN URLs. They are private,
+  no-store streams and are revoked by unpublishing or changing the code. This
+  is access control, not at-rest encryption; an already loaded browser still
+  has the bytes it downloaded.

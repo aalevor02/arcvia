@@ -54,6 +54,7 @@ export function productionConfiguration(env = process.env) {
   }
   secret(env, 'JWT_SECRET', errors)
   secret(env, 'WORKER_SECRET', errors)
+  secret(env, 'PUBLIC_ASSET_SECRET', errors)
 
   const site = secureUrl(value(env, 'PUBLIC_SITE_URL'), 'PUBLIC_SITE_URL', errors)
   const origins = value(env, 'ALLOWED_ORIGINS')
