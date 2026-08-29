@@ -2484,3 +2484,42 @@ that lost 14,272 bytes of finished research from `A:\Research\BIM` on 26 August
 when a session died between "the evidence is complete" and the Edit that would
 have written it down. Now versioned (`bb4bfb1`), code and docs and the
 acceptance test only, weights and datasets deliberately excluded.
+
+---
+
+## 2026-08-29 - scale/fit and guarded CAD re-solve are complete
+
+Two repo-side backlog slices are now implemented and validated on the local
+continuation branch:
+
+- `b454123` refuses unsafe band-edge scale guesses, exports one shared fit
+  policy, and prevents Studio replacement options from offering or applying an
+  asset that cannot fit its measured placement envelope. The 1,500-directory
+  evaluation resolved 96 scored cases at 87/96 correct (90.6%); the deliberate
+  coverage loss is the price of refusing guesses at the safety-band edge.
+- `edf074d` turns solver-provided CAD review choices into owner-only, zero-cost
+  revision jobs with persistent, user-attributed patches. Only an exact patch
+  offered by the completed source job is accepted; arbitrary free re-runs and
+  unsupported geometry edits are refused. Blocking models remain failed and
+  unpublished.
+
+Focused validation is green: scale 36/36, fit 25/25, Studio replacement options
+20/20, CAD patch contract 18/18, Studio CAD review 10/10, strict Studio
+TypeScript, backend syntax checks, and the memory-bounded Studio production
+build. The two commits have not been pushed: the earlier authorization covered
+the prior 22 commits, not these later commits.
+
+### What still cannot honestly be marked solved
+
+1. The authenticated panorama flow, post-edit live render comparison, and stair
+   visual approval require the owner to sign in and inspect the output.
+2. Pitched-roof form and additional stair forms require source marks that prove
+   the geometry. The engine keeps refusing unsupported inference; it must not
+   manufacture winders, spirals, L/three-flight stairs, or roof pitch from an
+   ordinary floor plan.
+3. Production email/SMS, secrets, origins, object storage, URL rewrites,
+   clean-device CORS, persistent database replacement, and CPU/GPU capacity are
+   deployment decisions requiring the target providers and credentials.
+4. The bounded live OpenAI comparison requires a deliberately supplied
+   server-side key and spending approval.
+5. The two new commits require explicit push authorization.

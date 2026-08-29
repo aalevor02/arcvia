@@ -276,3 +276,22 @@ coordinates, walls, and final geometry remain deterministic CAD responsibilities
 Do not expose API keys in frontend code, commits, screenshots, logs, or this
 file. Do not claim live AI verification until a real key is configured and a
 real deck has been processed.
+
+## 2026-08-29 continuation delta
+
+Local branch `codex/finish-arcvia-20260828` is clean and contains two validated
+commits after the last pushed tip `9cb7afa`:
+
+- `b454123 Refuse unsafe scale guesses and enforce asset fit`
+- `edf074d Add guarded CAD re-solve with persistent choices`
+
+Do not reimplement these slices. Scale, fit, CAD-patch, Studio review,
+TypeScript, backend syntax, and the memory-bounded Studio production build are
+green; exact counts are recorded in `docs/PENDING-ARCVIA.md`.
+
+The remaining work is not an unbounded invitation to guess geometry or invent
+production configuration. Owner authentication/visual approval, drawings that
+prove pitched roofs or additional stair forms, deployment provider choices and
+credentials, and a deliberately supplied server-side OpenAI key are required.
+The two local commits also need a new explicit push authorization because they
+postdate the already completed 22-commit push.
