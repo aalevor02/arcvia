@@ -13,6 +13,7 @@ import {
 import { resolveUrl, isOwnUpload, isEnvAsset } from '../lib/storage.js'
 import { checkSubmission } from '../lib/idempotency.js'
 import { AI_STYLES, isStyle } from '../lib/aiRender.js'
+import { renderAssetsForScene } from '../lib/renderAssets.js'
 
 /**
  * Render jobs.
@@ -402,6 +403,7 @@ export async function registerRenderRoutes(app) {
       // wrong produces a render that is silently rotated 90 degrees.
       spec: {
         inputUrl,
+        ...renderAssetsForScene(scene, resolveUrl),
         lightsUrl: resolveUrl(scene.lightsUrl),
         hdriUrl: resolveUrl(hdriUrl ?? scene.hdriUrl),
         camera: {

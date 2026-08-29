@@ -29,6 +29,19 @@ from pathlib import Path
 import bpy  # type: ignore  # provided by the Blender runtime
 import mathutils  # type: ignore
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import arcvia_style as style
+from render_views import place_fixtures
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MATERIAL_ARTIFACTS = {
+    "render-materials-v1": REPO_ROOT / "data" / "materials" / "render-materials.json",
+}
+CATALOGUE_ARTIFACTS = {
+    "catalogue-models-v1": REPO_ROOT / "data" / "catalogue-models.json",
+}
+
 
 # --------------------------------------------------------------------------
 # Arguments
@@ -79,6 +92,31 @@ def import_model(path: str) -> None:
         bpy.ops.wm.obj_import(filepath=path)
     else:
         raise ValueError(f"unsupported model format: {suffix}")
+
+
+def apply_render_assets(spec: dict) -> None:
+    """Dress semantic surfaces and replace boxes using trusted artifacts."""
+    material_id = spec.get("materialArtifact")
+    if spec.get("materialProfile") and material_id:
+        bridge_path = MATERIAL_ARTIFACTS.get(material_id)
+        if bridge_path is None:
+            raise ValueError(f"unknown material artifact: {material_id}")
+        bridge = style.load_material_bridge(
+            bridge_path, tier=str(spec.get("materialProfile") or "standard")
+        )
+        report = style.apply_surface_materials(bpy, bridge)
+        print(f"ARCVIA_MATERIALS:{json.dumps(report, sort_keys=True)}", flush=True)
+
+    fixtures_url = spec.get("fixturesUrl")
+    if not fixtures_url:
+        return
+    catalogue_id = spec.get("catalogueArtifact")
+    catalogue_path = CATALOGUE_ARTIFACTS.get(catalogue_id)
+    if catalogue_path is None:
+        raise ValueError(f"unknown catalogue artifact: {catalogue_id}")
+    fixture_path = fetch(fixtures_url, ".building.json")
+    report = place_fixtures(fixture_path, str(catalogue_path))
+    print(f"ARCVIA_FIXTURES:{json.dumps(report, sort_keys=True)}", flush=True)
 
 
 def apply_environment(hdri_path: str | None, strength: float = 1.0) -> None:
@@ -861,6 +899,7 @@ def main() -> int:
 
     model_path = fetch(spec["inputUrl"], ".glb")
     import_model(model_path)
+    apply_render_assets(spec)
 
     hdri_path = fetch(spec["hdriUrl"], ".hdr") if spec.get("hdriUrl") else None
     apply_environment(hdri_path, float(spec.get("environmentStrength", 1.0)))

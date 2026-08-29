@@ -329,7 +329,8 @@ def load_material_bridge(path, tier: str = "standard"):
     import json
     from pathlib import Path
 
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    bridge_path = Path(path).resolve()
+    doc = json.loads(bridge_path.read_text(encoding="utf-8"))
     materials = doc.get("materials", {})
     library = doc.get("asset_library") or {}
     order = [tier, "standard", "economy", "premium"]
@@ -338,7 +339,9 @@ def load_material_bridge(path, tier: str = "standard"):
         if not isinstance(spec, dict):
             entry = materials.get(spec)
             if entry:
-                out[klass] = {"name": spec, **entry}
+                out[klass] = _material_entry(
+                    spec, entry, library, bridge_path.parent
+                )
             continue
         name = spec.get("default")
         if name is None:
@@ -352,9 +355,30 @@ def load_material_bridge(path, tier: str = "standard"):
             continue
         entry = materials.get(name)
         if entry:
-            out[klass] = {"name": name, "texture": _resolve_maps(entry, library),
-                          **entry}
+            out[klass] = _material_entry(
+                name, entry, library, bridge_path.parent
+            )
     return out
+
+
+def _material_entry(name: str, entry: dict, library: dict,
+                    bridge_dir) -> dict:
+    """Copy one material and resolve direct maps relative to its bridge."""
+    from pathlib import Path
+
+    direct = entry.get("texture") or {}
+    if direct:
+        maps = {}
+        for role, value in direct.items():
+            if not value:
+                continue
+            candidate = Path(str(value)).expanduser()
+            if not candidate.is_absolute():
+                candidate = Path(bridge_dir) / candidate
+            maps[role] = str(candidate.resolve())
+    else:
+        maps = _resolve_maps(entry, library)
+    return {"name": name, **entry, "texture": maps}
 
 
 def _resolve_maps(entry: dict, library: dict) -> dict:
@@ -489,7 +513,8 @@ def _build_material(bpy, klass: str, entry: dict):
 
     # Glass and water are transmissive; a solid pane reads as a grey slab.
     if "Transmission Weight" in bsdf.inputs and (
-        "glass" in klass or "glaz" in klass or entry.get("name", "").startswith("glass")
+        "glass" in klass or "glaz" in klass or "water" in klass
+        or entry.get("name", "").lower().startswith("glass")
     ):
         bsdf.inputs["Transmission Weight"].default_value = 1.0
 
@@ -528,6 +553,14 @@ def _build_material(bpy, klass: str, entry: dict):
             rough.image["arcvia_role"] = "roughness"
             links.new(mapping.outputs["Vector"], rough.inputs["Vector"])
             links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+        if maps.get("normal_gl"):
+            normal_image = nodes.new("ShaderNodeTexImage")
+            normal_image.image = _load_texture(bpy, maps["normal_gl"], "normal_gl")
+            normal_image.image.colorspace_settings.name = "Non-Color"
+            normal_map = nodes.new("ShaderNodeNormalMap")
+            links.new(mapping.outputs["Vector"], normal_image.inputs["Vector"])
+            links.new(normal_image.outputs["Color"], normal_map.inputs["Color"])
+            links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
         mat["arcvia_textured"] = True
 
     if tile:

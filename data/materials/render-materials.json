@@ -1,0 +1,251 @@
+{
+  "_generated": "node tools/cad-engine/gen-render-materials.mjs",
+  "_source": "apps/studio/src/catalogue/surfaces.ts",
+  "_version": 1,
+  "_note": "Texture paths are relative to this production Blender bridge.",
+  "materials": {
+    "floor-wood": {
+      "name": "Oak boards",
+      "base_color_srgb": "#9A7652",
+      "roughness": 0.55,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/floor-wood-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/floor-wood-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/floor-wood-normal.jpg"
+      },
+      "provenance": {
+        "note": "Warm mid-oak, running bond.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=WoodFloor007"
+      }
+    },
+    "floor-tile": {
+      "name": "Grey floor tile",
+      "base_color_srgb": "#B5B7B5",
+      "roughness": 0.45,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/floor-tile-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/floor-tile-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/floor-tile-normal.jpg"
+      },
+      "provenance": {
+        "note": "Large-format grey porcelain, running bond.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Tiles010"
+      }
+    },
+    "wall": {
+      "name": "Plaster",
+      "base_color_srgb": "#E6E0D5",
+      "roughness": 0.82,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/wall-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/wall-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/wall-normal.jpg"
+      },
+      "provenance": {
+        "note": "Clean off-white plaster.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Plaster001"
+      }
+    },
+    "ceiling": {
+      "name": "Plaster ceiling",
+      "base_color_srgb": "#F2F0EA",
+      "roughness": 0.88,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/ceiling-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/ceiling-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/ceiling-normal.jpg"
+      },
+      "provenance": {
+        "note": "The same plaster, tinted lighter.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Plaster001"
+      }
+    },
+    "fabric": {
+      "name": "Woven upholstery",
+      "base_color_srgb": "#777A7D",
+      "roughness": 0.9,
+      "tile_metres": 0.5,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/fabric-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/fabric-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/fabric-normal.jpg"
+      },
+      "provenance": {
+        "note": "Grey woven upholstery.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Fabric030"
+      }
+    },
+    "wood": {
+      "name": "Oak",
+      "base_color_srgb": "#966E48",
+      "roughness": 0.55,
+      "tile_metres": 1,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/wood-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/wood-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/wood-normal.jpg"
+      },
+      "provenance": {
+        "note": "Warm timber for furniture bodies.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Wood005"
+      }
+    },
+    "stone": {
+      "name": "Marble",
+      "base_color_srgb": "#57545A",
+      "roughness": 0.28,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/stone-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/stone-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/stone-normal.jpg"
+      },
+      "provenance": {
+        "note": "Dark marble with white veining, for counters and sills.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Marble016"
+      }
+    },
+    "paving": {
+      "name": "Paving",
+      "base_color_srgb": "#878A86",
+      "roughness": 0.72,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/paving-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/paving-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/paving-normal.jpg"
+      },
+      "provenance": {
+        "note": "Grey linear pavers for a terrace or a pool surround.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=PavingStones126A"
+      }
+    },
+    "brick": {
+      "name": "Brickwork",
+      "base_color_srgb": "#985A45",
+      "roughness": 0.8,
+      "tile_metres": 0.9,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/brick-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/brick-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/brick-normal.jpg"
+      },
+      "provenance": {
+        "note": "Clean red brick in running bond, for exposed work.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Bricks005"
+      }
+    },
+    "concrete": {
+      "name": "Fair-faced concrete",
+      "base_color_srgb": "#858784",
+      "roughness": 0.8,
+      "tile_metres": 2,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/concrete-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/concrete-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/concrete-normal.jpg"
+      },
+      "provenance": {
+        "note": "Smooth mid-grey concrete.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Concrete002"
+      }
+    },
+    "metal": {
+      "name": "Brushed steel",
+      "base_color_srgb": "#73777C",
+      "roughness": 0.32,
+      "metallic": 0.8,
+      "tile_metres": 0.5,
+      "texture": {
+        "base_color": "../../apps/studio/public/surfaces/metal-color.jpg",
+        "roughness": "../../apps/studio/public/surfaces/metal-roughness.jpg",
+        "normal_gl": "../../apps/studio/public/surfaces/metal-normal.jpg"
+      },
+      "provenance": {
+        "note": "Brushed steel for appliances and fixtures.",
+        "licence": "CC0 1.0 Public Domain",
+        "author": "ambientCG",
+        "source": "https://ambientcg.com/view?id=Metal010"
+      }
+    },
+    "glass": {
+      "name": "Clear architectural glass",
+      "base_color_srgb": "#D7EDF0",
+      "roughness": 0.08
+    },
+    "water": {
+      "name": "Pool water",
+      "base_color_srgb": "#3A94A8",
+      "roughness": 0.12
+    },
+    "grass": {
+      "name": "Procedural turf",
+      "base_color_srgb": "#557B42",
+      "roughness": 0.9
+    },
+    "planting": {
+      "name": "Procedural planting",
+      "base_color_srgb": "#416633",
+      "roughness": 0.9
+    }
+  },
+  "surface_classes": {
+    "internal_wall": "wall",
+    "external_wall": "wall",
+    "wallface_reveal": "wall",
+    "ceiling": "ceiling",
+    "roof": "concrete",
+    "plinth": "stone",
+    "parapet_coping": "stone",
+    "floor_bath": "floor-tile",
+    "floor_bedroom": "floor-wood",
+    "floor_corridor": "floor-tile",
+    "floor_dining": "floor-tile",
+    "floor_kitchen": "floor-tile",
+    "floor_living": "floor-tile",
+    "floor_lobby": "floor-tile",
+    "floor_parking": "paving",
+    "floor_pooja": "stone",
+    "floor_store": "floor-tile",
+    "floor_toilet": "floor-tile",
+    "floor_utility": "floor-tile",
+    "floor_stair": "stone",
+    "floor_balcony": "paving",
+    "floor_verandah": "paving",
+    "floor_courtyard": "paving",
+    "driveway": "paving",
+    "water_body": "water",
+    "lawn": "grass",
+    "planting_bed": "planting",
+    "glazing": "glass",
+    "window_frame": "metal",
+    "railing": "metal",
+    "grill": "metal",
+    "gate": "metal",
+    "counter": "stone"
+  }
+}

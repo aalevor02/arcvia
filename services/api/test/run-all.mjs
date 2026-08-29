@@ -83,6 +83,7 @@ const ORDER = [
   'render-capture-ssrf.mjs',
   'rate-limit.mjs',
   'render-script-path.mjs',
+  'render-assets.mjs',
   'render-concurrency.mjs',
   'queue-persistence.mjs',
   'queue-lanes.mjs',
