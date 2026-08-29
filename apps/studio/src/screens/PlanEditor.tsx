@@ -717,8 +717,40 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // the walls already enclose something would seal circulation that is
       // visibly open. Gated on zero, it cannot: markup 2's walls close the lift
       // shaft, so this never executes there.
+      //
+      // ⚠ KNOWN LIMIT, measured 2026-08-29 and NOT solved. On a sheet holding
+      // several drawings this rescue will close outlines taken from an
+      // elevation or a section as though they were rooms. On a real four-panel
+      // CIVILMIX sheet it produced 14 rooms and 109.7 m2 spanning two storeys,
+      // an elevation and a section. The guard for that is gated on rooms === 0,
+      // so it is consulted BELOW before the rescue rather than after — but on
+      // that sheet it does not fire either: the reader found 26 walls in total
+      // and `PLAN_MIN_WALLS` needs three clusters of six, so under-detection
+      // defeats the detector of under-detection.
+      //
+      // REFUTED alternative, so nobody spends the afternoon on it again:
+      // clustering the ROOM POLYGONS instead of the walls does not separate
+      // them. Measured over three drawings — the acceptance deck (one plan)
+      // gives 2 X-groups and 2 Y-groups, `4.png` (one plan) gives 2 and 1, and
+      // the four-panel sheet gives 1 and 3. A single plan shows the same
+      // signature as four, and the multi-panel sheet does not even separate on
+      // the axis its panels are arranged along. There is no threshold there.
+      //
+      // So the user is told instead. That is worse than detecting it and better
+      // than implying it cannot happen.
+      // ASSESS BEFORE RESCUING. The several-plans-on-one-sheet guard is gated
+      // on `rooms === 0`, so manufacturing rooms below would make its condition
+      // permanently false and silence it on exactly the sheets it exists for.
+      // Measured on a real four-panel sheet: the rescue produced 14 rooms and
+      // 109.7 m2 spanning two storeys, an elevation and a section, and the
+      // verdict came back "ok". Zero rooms is unusable and obvious; fourteen
+      // confident rooms built partly out of a section drawing is wrong and
+      // invisible, which is the worse failure.
+      const beforeRescue = assessDetection(walls, rooms)
+      const severalPlans = !beforeRescue.ok && (beforeRescue.clusters ?? 0) >= 3
+
       let closedFromOutlines = false
-      if (rooms === 0 && (result.rooms?.length ?? 0) > 0) {
+      if (!severalPlans && rooms === 0 && (result.rooms?.length ?? 0) > 0) {
         const fromOutlines = convertDetections(result, traced, { useRoomPolygons: true })
         const enclosed = encloses(fromOutlines)
         if (enclosed > 0) {
@@ -728,7 +760,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         }
       }
 
-      const verdict = assessDetection(walls, rooms)
+      // `beforeRescue` when the rescue was declined, so the reason the user is
+      // given is the multi-plan one and not a downstream symptom of it.
+      const verdict = severalPlans ? beforeRescue : assessDetection(walls, rooms)
       if (closedFromOutlines) {
         // Said plainly, because it changes what the user is accepting. These
         // walls trace the reader's room outlines rather than lines measured on
@@ -737,7 +771,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           `No walls in this drawing enclosed a room, so the plan was closed ` +
           `using the ${rooms} room outline${rooms === 1 ? '' : 's'} the reader ` +
           `found instead. Those are traced from shaded areas rather than ` +
-          `measured from lines — check the walls before you build on them.`,
+          `measured from lines — check the walls before you build on them. ` +
+          `If this sheet holds more than one drawing, crop it to a single ` +
+          `floor plan and read it again: outlines from an elevation or a ` +
+          `section will have been closed as if they were rooms.`,
         )
       } else if (!verdict.ok) {
         setError(`${verdict.reason} ${verdict.detail}`)
