@@ -1,6 +1,7 @@
 import {
   automaticScalePerPixel,
   convertDetections,
+  namesFromDrawing,
   summarise,
   toWorld,
   type DetectionResult,
@@ -502,6 +503,62 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
   const twice = placeRasterOpenings(plan, openings)
   check('accepting the same detection again does not duplicate the opening',
     Object.keys(activeFloor(twice).objects).length === 1)
+}
+
+// ---- The drawing already says what its rooms are called ---------------------
+// The CAD path names its rooms and the IFC path names its spaces. The raster
+// path did not, so a plan that plainly reads SHOWER / TOILET / PATIO arrived as
+// Room 1, Room 2, Room 3 — after the reader had OCRed those very labels and
+// used them to choose which binarisation to trust.
+{
+  const square = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
+  ]
+  const region = (
+    name: string | null,
+    kind: 'room' | 'fitting',
+    area: number,
+    poly: Array<{ x: number; y: number }>,
+  ) => ({ polygon: poly, area, name, kind, size: null, also: [] })
+
+  // World metres for UNDERLAY: 1000x500 at 0.01 => 10 m x 5 m, y negative down.
+  const rooms = [
+    { id: 'big', polygon: [{ x: 1, y: -1 }, { x: 5, y: -1 }, { x: 5, y: -4 }, { x: 1, y: -4 }] },
+    { id: 'small', polygon: [{ x: 6, y: -1 }, { x: 8, y: -1 }, { x: 8, y: -2 }, { x: 6, y: -2 }] },
+  ]
+
+  const names = namesFromDrawing(rooms, [
+    region('Bedroom', 'room', 0.4, square(0.15, 0.25, 0.45, 0.7)),
+    region('Shower', 'room', 0.1, square(0.62, 0.25, 0.78, 0.35)),
+  ], UNDERLAY)
+
+  check('a named region names the room it sits in', names.big === 'Bedroom', JSON.stringify(names))
+  check('and a second region names the second room', names.small === 'Shower', JSON.stringify(names))
+
+  // A fitting is joinery, not a space. Measured on the owner's own plan: the
+  // Wardrobe outline claimed a 13 m2 room — the bedroom the wardrobe stands in.
+  const withFitting = namesFromDrawing(rooms, [
+    region('Wardrobe', 'fitting', 0.4, square(0.15, 0.25, 0.45, 0.7)),
+  ], UNDERLAY)
+  check('a FITTING never names a room, however well it fits',
+    withFitting.big === undefined, JSON.stringify(withFitting))
+
+  // Two regions inside one derived room: the dominant space wins, not whatever
+  // happened to be first in the list.
+  const contested = namesFromDrawing([rooms[0]], [
+    region('Cupboard', 'room', 0.02, square(0.2, 0.3, 0.24, 0.36)),
+    region('Living', 'room', 0.5, square(0.15, 0.25, 0.45, 0.7)),
+  ], UNDERLAY)
+  check('when two regions fall in one room the larger one names it',
+    contested.big === 'Living', JSON.stringify(contested))
+
+  // An unnamed region must not blank out a room that another region could name.
+  const unnamed = namesFromDrawing([rooms[0]], [
+    region(null, 'room', 0.6, square(0.15, 0.25, 0.45, 0.7)),
+    region('Bedroom', 'room', 0.4, square(0.16, 0.26, 0.44, 0.69)),
+  ], UNDERLAY)
+  check('an unnamed region does not block a named one',
+    unnamed.big === 'Bedroom', JSON.stringify(unnamed))
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
