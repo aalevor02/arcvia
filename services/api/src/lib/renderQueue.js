@@ -5,6 +5,7 @@ import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { db } from '../store.js'
 import { renderWithAi } from './aiRender.js'
+import { choicesForCadChecks, frameChoiceCheck } from './cadPatches.js'
 import { settleRefund } from './refunds.js'
 import { put } from './storage.js'
 
@@ -486,6 +487,7 @@ async function runJob(job) {
               frame: job.spec.frame,
               building: job.spec.building,
               storeys: job.spec.storeys !== false,
+              patches: job.spec.patches ?? [],
               signal: controller.signal,
               onProgress,
             })
@@ -494,12 +496,23 @@ async function runJob(job) {
       // believe. Publishing that is worse than failing: a villa 4 cm across
       // renders beautifully, and nobody downstream can tell.
       const verify = model.verify ?? { ok: true, checks: [] }
+      const reviewChecks = choicesForCadChecks(model, verify.checks ?? [])
       if (!verify.ok) {
-        const why = (verify.checks ?? [])
-          .filter((c) => c.level === 'blocking')
-          .map((c) => c.message)
-          .join(' ')
-        await finish('failed', { error: `The drawing did not reconstruct. ${why}` })
+        const blocking = reviewChecks.filter((check) => check.level === 'blocking')
+        const actionable = blocking.filter((check) => (check.choices?.length ?? 0) > 0)
+        const why = blocking.map((check) => check.message).join(' ')
+        await finish('failed', {
+          error: actionable.length
+            ? 'The drawing needs a decision before it can reconstruct.'
+            : `The drawing did not reconstruct. ${why}`,
+          markers: {
+            unit: model.unit,
+            layers: model.layersUsed,
+            verifyWarnings: reviewChecks.filter((check) => check.level !== 'info').length,
+            verifyChecks: reviewChecks,
+            patches: job.spec.patches ?? [],
+          },
+        })
         return
       }
 
@@ -510,11 +523,16 @@ async function runJob(job) {
       // where the user has answered that choice.
       const storeyRefusals = model.storeys?.refusals ?? []
       if (storeyRefusals.length > 0 && job.spec.frame == null) {
-        const why = storeyRefusals.map((item) => item.reason).join(' ')
+        const check = frameChoiceCheck(model, storeyRefusals)
         await finish('failed', {
-          error:
-            'The drawing contains several matching plans but their floor order ' +
-            `could not be confirmed. ${why}`,
+          error: 'Choose which drawing to reconstruct before this model can be used.',
+          markers: {
+            unit: model.unit,
+            layers: model.layersUsed,
+            verifyWarnings: 1,
+            verifyChecks: [...reviewChecks, check],
+            patches: job.spec.patches ?? [],
+          },
         })
         return
       }
@@ -558,8 +576,9 @@ async function runJob(job) {
           unit: model.unit,
           layers: model.layersUsed,
           wallLayers: model.walls?.layers ?? [],
-          verifyWarnings: verify.warnings ?? 0,
-          verifyChecks: verify.checks ?? [],
+          verifyWarnings: reviewChecks.filter((check) => check.level !== 'info').length,
+          verifyChecks: reviewChecks,
+          patches: job.spec.patches ?? [],
           // Deck sheets carry scale evidence instead of a drawing unit; the
           // reviewer's question there is "was the scale confirmed or guessed".
           ...(model.scale

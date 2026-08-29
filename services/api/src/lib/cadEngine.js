@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 /**
@@ -131,7 +131,7 @@ export function runEngine(command, args, { onProgress, signal } = {}) {
  * not believe, and shipping that to a viewer is worse than failing.
  */
 export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers = true,
-                                    height, frame, building, storeys = true,
+                                    height, frame, building, storeys = true, patches = [],
                                     onProgress, signal }) {
   const args = ['--input', inputPath, '--out', outDir]
   if (unit) args.push('--unit', unit)
@@ -182,6 +182,12 @@ export async function reconstruct({ inputPath, outDir, unit, layers, autoLayers 
   } catch {
     throw new EngineError('The engine reported success but wrote no model.')
   }
+
+  // Decisions live in the model as well as the queue spec. The spec is what
+  // replays them; the building JSON is what lets an export or later import
+  // explain why this solve differs from the source drawing.
+  model.patches = Array.isArray(patches) ? patches : []
+  await writeFile(modelPath, JSON.stringify(model, null, 2) + '\n', 'utf8')
 
   // The plan drawing and the solved cameras cost seconds and need no renderer,
   // so there is no reason to make them a second job. A reviewer wants the plan

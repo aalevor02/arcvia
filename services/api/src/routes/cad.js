@@ -7,6 +7,7 @@ import { checkSubmission } from '../lib/idempotency.js'
 import { settleRefund, declineRefund } from '../lib/refunds.js'
 import { enqueue, cancelJob } from '../lib/renderQueue.js'
 import * as engine from '../lib/cadEngine.js'
+import { applyCadPatch, cadPatchWasOffered, CadPatchError } from '../lib/cadPatches.js'
 import { pathOf } from '../lib/storage.js'
 
 /**
@@ -397,6 +398,92 @@ export async function registerCadRoutes(app) {
       status: 'queued',
       creditsCharged: charge.charged,
       creditsRemaining: charge.remaining,
+    })
+  })
+
+  /**
+   * Replay one solver-offered decision.
+   *
+   * Blocking models remain unpublished. This endpoint only accepts a patch
+   * carried by that job's own review payload, so it cannot be used as a free
+   * arbitrary reconstruction surface. Corrective re-solves add no charge and
+   * are capped; every accepted decision remains in spec.
+   */
+  app.post('/jobs/:id/resolve', { preHandler: requireAuth }, async (request, reply) => {
+    const source = await db.findOne('renderJobs', (job) => job.id === request.params.id)
+    if (!source) return reply.status(404).send({ message: 'Job not found.' })
+    if (source.ownerId !== request.auth.userId) {
+      return reply.status(403).send({ message: 'That job is not yours.' })
+    }
+    if (source.action !== 'cadReconstruct' || !['done', 'failed'].includes(source.status)) {
+      return reply.status(409).send({ message: 'Only a finished CAD job can be re-solved.' })
+    }
+
+    const requested = request.body?.patch
+    const wasOffered = cadPatchWasOffered(source.markers, requested)
+    if (!wasOffered) {
+      return reply.status(409).send({
+        message: 'That correction was not offered by this reconstruction.',
+      })
+    }
+
+    const previous = Array.isArray(source.spec?.patches) ? source.spec.patches : []
+    if (previous.length >= 12) {
+      return reply.status(409).send({
+        message: 'This reconstruction has reached its 12-decision review limit.',
+      })
+    }
+
+    let spec
+    try {
+      spec = applyCadPatch({
+        ...source.spec,
+        layers: source.spec?.layers ?? source.markers?.layers ?? null,
+      }, requested)
+    } catch (error) {
+      if (error instanceof CadPatchError) {
+        return reply.status(422).send({ message: error.message })
+      }
+      throw error
+    }
+
+    const duplicate = await db.findOne('renderJobs', (job) =>
+      job.revisionOf === (source.revisionOf ?? source.id) &&
+      JSON.stringify(job.spec?.patches) === JSON.stringify(spec.patches))
+    if (duplicate) {
+      return reply.status(200).send({
+        jobId: duplicate.id,
+        status: duplicate.status,
+        creditsCharged: 0,
+        deduplicated: true,
+      })
+    }
+
+    const { nanoid } = await import('../store.js')
+    const outDir = resolve(WORK_ROOT, request.auth.userId, 'resolve', nanoid(8))
+    await mkdir(outDir, { recursive: true })
+    spec.outDir = outDir
+
+    const revision = await db.insert('renderJobs', {
+      sceneId: source.sceneId ?? null,
+      ownerId: source.ownerId,
+      preset: 'cad',
+      action: 'cadReconstruct',
+      status: 'queued',
+      progress: 0,
+      creditsCharged: 0,
+      revisionOf: source.revisionOf ?? source.id,
+      spec,
+      outputUrl: null,
+      error: null,
+    })
+    await enqueue(revision)
+
+    return reply.status(201).send({
+      jobId: revision.id,
+      status: 'queued',
+      creditsCharged: 0,
+      includedResolve: true,
     })
   })
 

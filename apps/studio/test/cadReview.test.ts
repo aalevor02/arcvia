@@ -47,6 +47,19 @@ check('blocking findings sort ahead of warnings',
 check('sorting does not mutate the API payload',
   source[0] === warning && source[1] === info && source[2] === blocking)
 
+const withChoice: CadVerifyCheck = {
+  ...warning,
+  choices: [{
+    label: 'Read as centimetres',
+    patch: {
+      op: 'setUnit', target: 'unit', value: 'cm', by: 'solver',
+      at: '2026-08-29T02:00:00.000Z',
+    },
+  }],
+}
+const choiceReview = cadReviewChecks({ verifyChecks: [withChoice] })
+check('review sorting preserves solver-provided patch choices',
+  choiceReview[0]?.choices?.[0]?.patch.value === 'cm')
 const all = cadReviewChecks(summary, true)
 check('the reviewer can inspect all measurements on demand',
   all.length === 3 && all[2]?.level === 'info', all.map((finding) => finding.level).join(','))

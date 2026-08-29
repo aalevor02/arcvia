@@ -6,12 +6,14 @@ import {
   cadJob,
   cancelCadJob,
   deckSurvey,
+  resolveCadJob,
   storedUrl,
   submitCadJob,
   submitDeckBuild,
   uploadFloorplan,
   uploadScene,
   type CadSummary,
+  type CadModelPatch,
   type DeckSurvey,
 } from '../lib/api'
 
@@ -48,7 +50,8 @@ type Phase =
   | { at: 'working'; jobId: string; progress: number; charged: number }
   | {
       at: 'review'
-      modelUrl: string
+      jobId: string
+      modelUrl: string | null
       summary: CadSummary
       modelJsonUrl: string | null
       sourceDocumentUrl?: string
@@ -100,6 +103,7 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
           if (job.summary && cadReviewRequired(job.summary)) {
             setPhase({
               at: 'review',
+              jobId,
               modelUrl: job.outputUrl,
               summary: job.summary,
               modelJsonUrl: job.modelJsonUrl,
@@ -112,11 +116,27 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         }
         if (job.status === 'failed' || job.status === 'cancelled') {
           if (pollRef.current) clearInterval(pollRef.current)
-          setPhase({
-            at: 'failed',
-            message: job.error ?? 'The reconstruction did not finish.',
-            refunded: job.refunded > 0,
-          })
+          jobRef.current = null
+          const actionable =
+            job.status === 'failed' &&
+            job.summary &&
+            cadReviewChecks(job.summary).some((finding) => (finding.choices?.length ?? 0) > 0)
+          if (actionable && job.summary) {
+            setPhase({
+              at: 'review',
+              jobId,
+              modelUrl: null,
+              summary: job.summary,
+              modelJsonUrl: null,
+              sourceDocumentUrl,
+            })
+          } else {
+            setPhase({
+              at: 'failed',
+              message: job.error ?? 'The reconstruction did not finish.',
+              refunded: job.refunded > 0,
+            })
+          }
           return
         }
         setPhase((prev) =>
@@ -211,7 +231,24 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
   }
 
   async function acceptReview(p: Extract<Phase, { at: 'review' }>) {
+    if (!p.modelUrl) return
     await onLanded(p.modelUrl, p.summary, p.modelJsonUrl, p.sourceDocumentUrl)
+  }
+
+  async function applyChoice(
+    p: Extract<Phase, { at: 'review' }>,
+    patch: CadModelPatch,
+  ) {
+    try {
+      const submitted = await resolveCadJob(p.jobId, patch)
+      watch(submitted.jobId, 0, p.sourceDocumentUrl)
+    } catch (error) {
+      setPhase({
+        at: 'failed',
+        message: error instanceof Error ? error.message : 'The correction could not start.',
+        refunded: false,
+      })
+    }
   }
 
   async function cancel() {
@@ -402,7 +439,9 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
         <>
           <span style={{ fontSize: 12.5 }}>
             Reconstructing — {phase.progress > 0 ? `${phase.progress}%` : 'reading the drawing'}.
-            Charged {phase.charged} credit{phase.charged === 1 ? '' : 's'}.
+            {phase.charged > 0
+              ? `Charged ${phase.charged} credit${phase.charged === 1 ? '' : 's'}.`
+              : 'This corrective re-solve has no additional charge.'}
           </span>
           <div>
             <button className="icon-btn" onClick={() => void cancel()}>
@@ -430,8 +469,11 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
           <>
             <strong style={{ fontSize: 13 }}>Review the reconstruction before using it</strong>
             <span style={{ fontSize: 12.5 }}>
-              The model was built, but the verification gate found {required.length}{' '}
-              item{required.length === 1 ? '' : 's'} that need a human glance.
+              {phase.modelUrl
+                ? `The model was built, but the verification gate found ${required.length} ` +
+                  `item${required.length === 1 ? '' : 's'} that need a human glance.`
+                : `The verification gate stopped this model before publishing it. Choose one ` +
+                  `of the measured corrections below to re-solve the same source.`}
             </span>
             {facts.length > 0 && (
               <span className="muted" style={{ fontSize: 11.5 }}>
@@ -455,6 +497,19 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
                     {finding.name.replaceAll('-', ' ')}
                   </strong>
                   <span style={{ fontSize: 12 }}>{finding.message}</span>
+                  {(finding.choices?.length ?? 0) > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                      {finding.choices?.map((choice) => (
+                        <button
+                          key={`${choice.patch.op}:${choice.patch.target}:${JSON.stringify(choice.patch.value)}`}
+                          className="choice"
+                          onClick={() => void applyChoice(phase, choice.patch)}
+                        >
+                          {choice.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -502,9 +557,11 @@ export default function ImportPanel({ kind, onLanded, onDismiss }: Props) {
               </details>
             )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" onClick={() => void acceptReview(phase)}>
-                Use reconstruction
-              </button>
+              {phase.modelUrl && (
+                <button className="btn btn-primary" onClick={() => void acceptReview(phase)}>
+                  Use reconstruction
+                </button>
+              )}
               <button className="icon-btn" onClick={() => setPhase({ at: 'pick' })}>
                 Try another file
               </button>

@@ -492,11 +492,25 @@ export const detectFloorplan = (url: string) =>
 
 export type CadVerifyLevel = 'blocking' | 'warning' | 'info'
 
+export interface CadModelPatch {
+  op: string
+  target: string
+  value: unknown
+  by: 'user' | 'solver'
+  at: string
+}
+
+export interface CadVerifyChoice {
+  label: string
+  patch: CadModelPatch
+}
+
 export interface CadVerifyCheck {
   name: string
   level: CadVerifyLevel
   message: string
   value: unknown
+  choices?: CadVerifyChoice[]
 }
 
 export interface CadOpeningIssue {
@@ -548,6 +562,7 @@ export interface CadSummary {
   /** Warning count and complete gate evidence emitted by reconstruction. */
   verifyWarnings?: number
   verifyChecks?: CadVerifyCheck[]
+  patches?: CadModelPatch[]
   openingsUnassigned?: number
   openingIssues?: CadOpeningIssue[]
   /** Presentation-deck scale evidence, when this was a PDF plan. */
@@ -601,6 +616,15 @@ export const cancelCadJob = (jobId: string) =>
   request<{ jobId: string; status: string; refunded: number }>(`/cad/jobs/${jobId}`, {
     method: 'DELETE',
   })
+
+export const resolveCadJob = (jobId: string, patch: CadModelPatch) =>
+  request<{
+    jobId: string
+    status: string
+    creditsCharged: 0
+    includedResolve?: boolean
+    deduplicated?: boolean
+  }>(`/cad/jobs/${jobId}/resolve`, { method: 'POST', body: { patch } })
 
 // ---- Presentation decks -----------------------------------------------------
 // Two-phase: a cheap survey finds the plan sheets and the printed dimensions,
