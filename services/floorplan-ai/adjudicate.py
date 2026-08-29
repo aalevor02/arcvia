@@ -342,6 +342,53 @@ def _encode(image: np.ndarray) -> str | None:
     return None
 
 
+#: Which models accept `reasoning_effort`, and what to send them.
+#:
+#: The field is NOT universal and a wrong value is a hard HTTP 400 rather than a
+#: degraded answer, so it cannot be a constant. Three behaviours seen:
+#:
+#:   gpt-4.1-mini  non-reasoning. Sending the field at all is refused with
+#:                 "Unrecognized request argument: reasoning_effort".
+#:   gpt-5-mini    legacy reasoning. Accepts minimal/low/medium/high but NOT
+#:                 "none" -- so the previous constant was wrong for it too, and
+#:                 this was never only a 4.1 problem.
+#:   gpt-5.5       current default. Accepts "none".
+#:
+#: Absence is therefore the default and a model has to EARN the field by being
+#: known to accept it. An optional field left out cannot fail the request; a
+#: field sent with a value the model rejects fails all of them. That asymmetry
+#: is the whole design: an unknown model degrades to a slightly slower call
+#: rather than to no adjudicator at all.
+_REASONING_EFFORT: dict[str, str] = {
+    "gpt-5.5": "none",
+    "gpt-5-mini": "minimal",
+}
+
+#: Escape hatch for an operator whose model is newer than this table. Set to
+#: "omit" to force the field off; any other value is sent verbatim.
+_REASONING_EFFORT_OVERRIDE = os.environ.get("FLOORPLAN_REASONING_EFFORT", "").strip()
+
+
+def reasoning_effort_for(model: str) -> str | None:
+    """The value to send for `model`, or None to omit the field entirely."""
+    if _REASONING_EFFORT_OVERRIDE:
+        return None if _REASONING_EFFORT_OVERRIDE.lower() == "omit" else _REASONING_EFFORT_OVERRIDE
+
+    name = (model or "").strip().lower()
+    if "/" in name:                      # "openai/gpt-5.5" and friends
+        name = name.rsplit("/", 1)[1]
+
+    # Longest match wins, so a "gpt-5" entry could never capture "gpt-5-mini"
+    # and hand it a value that model rejects. Dated suffixes are matched too:
+    # gpt-5.5-2026-01-31 is still gpt-5.5.
+    best: tuple[str, str] | None = None
+    for known, effort in _REASONING_EFFORT.items():
+        if name == known or name.startswith(known + "-") or name.startswith(known + "."):
+            if best is None or len(known) > len(best[0]):
+                best = (known, effort)
+    return best[1] if best else None
+
+
 def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
     """One image, one question, the raw text answer â€” or None on any failure."""
     encoded = _encode(image)
@@ -368,7 +415,9 @@ def _ask(image: np.ndarray, prompt: str, max_tokens: int = 300) -> str | None:
     # endpoint still expects the older key, so choose it at the provider seam.
     if PROVIDER == "openai":
         request_body["max_completion_tokens"] = max_tokens
-        request_body["reasoning_effort"] = "none"
+        effort = reasoning_effort_for(MODEL)
+        if effort is not None:
+            request_body["reasoning_effort"] = effort
     else:
         request_body["max_tokens"] = max_tokens
         request_body["temperature"] = 0.0
