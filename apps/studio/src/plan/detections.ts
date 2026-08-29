@@ -1,6 +1,6 @@
 import type { Underlay, Vec2 } from './types'
 import { WALL_DEFAULTS } from './types'
-import { add, distance, dot, normalise, scale, sub } from './geometry'
+import { add, distance, dot, labelPoint, normalise, pointInPolygon, scale, sub } from './geometry'
 
 /**
  * Turn detector output into walls.
@@ -605,13 +605,18 @@ export function namesFromDrawing(
   for (const region of named) {
     const points = (region.polygon ?? []).map((point) => toWorld(point, underlay))
     if (points.length < 3) continue
-    const centre = {
-      x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
-      y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
-    }
+    // `labelPoint`, not a centroid. Measured on the owner's Avarana Basement:
+    // the reader named Patio, Shower and Toilet and only two arrived, because
+    // Toilet is a twelve-point outline and the centroid of a concave polygon
+    // can lie outside it -- its anchor fell inside zero of the eight derived
+    // rooms. labelPoint returns the centroid when it is inside and otherwise
+    // sweeps for the widest interior span, so it is inside by construction.
+    // Room.label is built the same way; this was the one place that re-derived
+    // a naive centre.
+    const centre = labelPoint(points)
     for (const room of rooms) {
       if (out[room.id]) continue
-      if (!contains(room.polygon, centre)) continue
+      if (!pointInPolygon(centre, room.polygon)) continue
       out[room.id] = (region.name ?? '').trim()
       break
     }
@@ -619,16 +624,3 @@ export function namesFromDrawing(
   return out
 }
 
-/** Ray casting. A point on the boundary may fall either way and that is fine. */
-function contains(polygon: Vec2[], point: Vec2): boolean {
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const a = polygon[i]
-    const b = polygon[j]
-    const straddles = a.y > point.y !== b.y > point.y
-    if (!straddles) continue
-    const x = ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
-    if (point.x < x) inside = !inside
-  }
-  return inside
-}

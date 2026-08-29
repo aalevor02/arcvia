@@ -561,5 +561,48 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
     unnamed.big === 'Bedroom', JSON.stringify(unnamed))
 }
 
+// ---- a concave region's centroid is not inside it ---------------------------
+// Found on the owner's Avarana Basement: the reader named Patio, Shower and
+// Toilet and only two arrived. Toilet is a twelve-point outline, and the
+// centroid of a concave polygon can lie outside the polygon.
+//
+// That fixture does not settle it -- Toilet's outline never closed into a room
+// at all, so nothing could have named it -- which is exactly why this case is
+// constructed. Here the naive centroid does not merely MISS, it lands in the
+// NEIGHBOURING room, so the old code would confidently name the wrong space.
+{
+  // An L in world metres: the top bar runs x 1..5 at y -1..-2, the left leg
+  // runs x 1..2 down to y -4. Its vertex centroid is (2.67, -2.33), which sits
+  // in the notch the L wraps around, not in the L.
+  const ell = [
+    { x: 1, y: -1 }, { x: 5, y: -1 }, { x: 5, y: -2 },
+    { x: 2, y: -2 }, { x: 2, y: -4 }, { x: 1, y: -4 },
+  ]
+  const notch = [
+    { x: 2, y: -2 }, { x: 5, y: -2 }, { x: 5, y: -4 }, { x: 2, y: -4 },
+  ]
+  const rooms = [
+    { id: 'ell', polygon: ell },
+    { id: 'notch', polygon: notch },
+  ]
+
+  // The same L in normalised image coordinates for UNDERLAY (1000x500 at 0.01,
+  // so world x = nx*10 and world y = -ny*5).
+  const region = {
+    polygon: [
+      { x: 0.1, y: 0.2 }, { x: 0.5, y: 0.2 }, { x: 0.5, y: 0.4 },
+      { x: 0.2, y: 0.4 }, { x: 0.2, y: 0.8 }, { x: 0.1, y: 0.8 },
+    ],
+    area: 0.3, name: 'Kitchen', kind: 'room' as const, size: null, also: [],
+  }
+
+  const names = namesFromDrawing(rooms, [region], UNDERLAY)
+
+  check('a concave region names the room it is actually in',
+    names.ell === 'Kitchen', JSON.stringify(names))
+  check('and NOT the neighbour its centroid happens to fall in',
+    names.notch === undefined, JSON.stringify(names))
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
