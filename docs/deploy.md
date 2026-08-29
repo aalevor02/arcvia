@@ -224,10 +224,10 @@ mid-flight.
 
 ## Known limits worth knowing before you sell against them
 
-- **Atlas resolution is fixed at 2048.** A scene is packed into a
-  ceil(sqrt(n)) grid, so 158 meshes get about 157 px each. Fine for soft
-  lighting, thin for a large scene — the resolution should scale with mesh
-  count and currently does not.
+- **One atlas currently supports at most 256 meshes.** Adaptive sizing uses
+  1024 for up to 16 meshes, 2048 through 64, and 4096 through 256, based on
+  the worker's actual imported scene. Larger scenes refuse rather than return
+  a silently blurry bake; segmented multi-atlas output is the next scale step.
 - **SQLite is a single-API-instance production store.** WAL and immediate
   transactions make one always-on API process durable. Before horizontally
   scaling the API, migrate this collection-shaped adapter to PostgreSQL.

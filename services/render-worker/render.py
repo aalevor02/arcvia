@@ -649,10 +649,24 @@ def bake_lightmap(out_path: str, spec: dict) -> None:
     scene.render.bake.use_pass_color = False
     scene.render.bake.margin = int(spec.get("bakeMargin", 8))
 
-    size = int(spec.get("width", 2048))
     meshes = [o for o in scene.objects if o.type == "MESH"]
     if not meshes:
         raise RuntimeError("scene contains no mesh objects to bake")
+    if spec.get("atlasPolicy") == "adaptive-v1":
+        from atlas_policy import atlas_resolution
+
+        maximum = int(os.environ.get("ARCVIA_MAX_ATLAS_SIZE", "4096"))
+        try:
+            size = atlas_resolution(len(meshes), maximum=maximum)
+        except ValueError as exc:
+            raise RuntimeError(f"lightmap atlas refused: {exc}") from exc
+        print(
+            f"ARCVIA_ATLAS:{size}:{len(meshes)}:adaptive-v1",
+            flush=True,
+        )
+    else:
+        # Compatibility for queued jobs created before adaptive-v1 existed.
+        size = int(spec.get("width", 2048))
 
     image = bpy.data.images.new(
         "ArcviaLightmap", width=size, height=size, float_buffer=True

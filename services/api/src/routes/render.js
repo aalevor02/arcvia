@@ -428,6 +428,9 @@ export async function registerRenderRoutes(app) {
         // Only claimed when the caller says so: a model uploaded from outside
         // the studio has no such channel and does need unwrapping.
         prebakedUv: preset === 'bake' && Boolean(request.body?.prebakedUv),
+        // The worker sizes from the meshes it actually imported. A client hint
+        // can be stale or dishonest; the imported scene is the evidence.
+        atlasPolicy: preset === 'bake' ? 'adaptive-v1' : undefined,
         // Only meaningful for the AI preset, and harmless elsewhere.
         style: request.body?.style ?? 'daylight',
         note: typeof request.body?.note === 'string' ? request.body.note : undefined,

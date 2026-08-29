@@ -42,6 +42,7 @@ const valid = {
   RENDER_DAILY_CAP: '500',
   RENDER_TIMEOUT_MS: '600000',
   BAKE_TIMEOUT_MS: '2700000',
+  ARCVIA_MAX_ATLAS_SIZE: '4096',
   FLOORPLAN_URL: 'http://floorplan.internal:8090',
   FLOORPLAN_AI_PROVIDER: 'openai',
   FLOORPLAN_MODEL: '/models/floorplan.onnx',
@@ -89,6 +90,8 @@ ok('remote rendering requires an HTTPS worker',
   !productionConfiguration({ ...valid, RENDER_WORKER_URL: 'http://render.local' }).ok)
 ok('render concurrency is bounded',
   !productionConfiguration({ ...valid, RENDER_CONCURRENCY: '20' }).ok)
+ok('the atlas memory ceiling must be a power of two',
+  !productionConfiguration({ ...valid, ARCVIA_MAX_ATLAS_SIZE: '3000' }).ok)
 ok('OpenAI adjudication requires its server-side key',
   !productionConfiguration({ ...valid, OPENAI_API_KEY: '' }).ok)
 ok('local rendering requires an absolute Blender path',

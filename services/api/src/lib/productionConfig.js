@@ -135,6 +135,12 @@ export function productionConfiguration(env = process.env) {
   boundedInteger(env, 'RENDER_DAILY_CAP', 500, 1, 10000, errors)
   boundedInteger(env, 'RENDER_TIMEOUT_MS', 600000, 60000, 3600000, errors)
   boundedInteger(env, 'BAKE_TIMEOUT_MS', 2700000, 300000, 7200000, errors)
+  const maxAtlas = boundedInteger(
+    env, 'ARCVIA_MAX_ATLAS_SIZE', 4096, 1024, 8192, errors,
+  )
+  if (Number.isInteger(maxAtlas) && maxAtlas & (maxAtlas - 1)) {
+    errors.push('ARCVIA_MAX_ATLAS_SIZE must be a power of two')
+  }
 
   secureUrl(value(env, 'FLOORPLAN_URL'), 'FLOORPLAN_URL', errors, { allowHttp: true })
   const aiProvider = value(env, 'FLOORPLAN_AI_PROVIDER').toLowerCase()

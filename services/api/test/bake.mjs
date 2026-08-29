@@ -179,6 +179,8 @@ const db = JSON.parse(await readFile(DB_PATH, 'utf8'))
 const stored = db.renderJobs.find((j) => j.id === jobBody.jobId)
 ok('the job persisted', Boolean(stored))
 ok('prebakedUv reached the spec', stored?.spec?.prebakedUv === true)
+ok('the worker receives the bounded adaptive atlas policy',
+  stored?.spec?.atlasPolicy === 'adaptive-v1')
 ok(
   'inputUrl was resolved to a local path',
   typeof stored?.spec?.inputUrl === 'string' && !stored.spec.inputUrl.startsWith('/uploads/'),
