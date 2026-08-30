@@ -329,8 +329,7 @@ def load_material_bridge(path, tier: str = "standard"):
     import json
     from pathlib import Path
 
-    bridge_path = Path(path).resolve()
-    doc = json.loads(bridge_path.read_text(encoding="utf-8"))
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
     materials = doc.get("materials", {})
     library = doc.get("asset_library") or {}
     order = [tier, "standard", "economy", "premium"]
@@ -339,9 +338,7 @@ def load_material_bridge(path, tier: str = "standard"):
         if not isinstance(spec, dict):
             entry = materials.get(spec)
             if entry:
-                out[klass] = _material_entry(
-                    spec, entry, library, bridge_path.parent
-                )
+                out[klass] = {"name": spec, **entry}
             continue
         name = spec.get("default")
         if name is None:
@@ -355,30 +352,9 @@ def load_material_bridge(path, tier: str = "standard"):
             continue
         entry = materials.get(name)
         if entry:
-            out[klass] = _material_entry(
-                name, entry, library, bridge_path.parent
-            )
+            out[klass] = {"name": name, "texture": _resolve_maps(entry, library),
+                          **entry}
     return out
-
-
-def _material_entry(name: str, entry: dict, library: dict,
-                    bridge_dir) -> dict:
-    """Copy one material and resolve direct maps relative to its bridge."""
-    from pathlib import Path
-
-    direct = entry.get("texture") or {}
-    if direct:
-        maps = {}
-        for role, value in direct.items():
-            if not value:
-                continue
-            candidate = Path(str(value)).expanduser()
-            if not candidate.is_absolute():
-                candidate = Path(bridge_dir) / candidate
-            maps[role] = str(candidate.resolve())
-    else:
-        maps = _resolve_maps(entry, library)
-    return {"name": name, **entry, "texture": maps}
 
 
 def _resolve_maps(entry: dict, library: dict) -> dict:
@@ -456,41 +432,64 @@ def apply_surface_materials(bpy, bridge: dict, aliases: dict | None = None) -> d
             "classes": sorted(applied)}
 
 
-# Surface maps are tiled across large architectural areas. Keeping every 2K
-# source decoded can consume more than a gigabyte before Cycles starts. A 1024
-# longest-edge budget preserved valid dressed frames in the measured villa run.
+#: Longest edge, in pixels, that a surface texture is loaded at.
+#:
+#: ── Why there is a budget at all ───────────────────────────────────────────
+#: Measured 2026-08-29, and it is not a tuning preference — it is the
+#: difference between a dressed render and no render. A bridge resolving 13
+#: surface classes over 74 meshes loads roughly two maps per class at the
+#: 2K the hub stores. Blender holds a decoded 2048x2048 map at 16 MB as
+#: bytes and 64 MB as float, so 26 maps is 0.4-1.6 GB of texture alone —
+#: against 0.9 GB available on this machine. The first dressed render of
+#: the villa died in three seconds with "Error: Out of memory" AFTER
+#: reporting every class resolved correctly, which is the worst possible
+#: place to fail: the material work all succeeded and the picture never
+#: arrived.
+#:
+#: 1024 rather than 512, unlike `condition_asset.py`'s prop budget. A prop
+#: is seen once across a room; an architectural surface TILES — the bridge
+#: repeats a plaster sheet every 2 m of wall — so the same pixels are
+#: stretched across every wall in shot and grain that survives at 512 on a
+#: chair reads as mush on twenty square metres of plaster. Quartering the
+#: area is enough: 26 maps come down to roughly 100-400 MB.
+#:
+#: Override with ARCVIA_MAX_TEXTURE when a hero still justifies the memory.
 MAX_TEXTURE = int(os.environ.get("ARCVIA_MAX_TEXTURE", "1024"))
 
 
 def _load_texture(bpy, path: str, role: str):
-    """Load, role-stamp, and memory-bound one shared surface texture."""
+    """
+    Load one surface map, stamped with its role and capped to `MAX_TEXTURE`.
+
+    The role is stamped HERE rather than at the call site so that every image
+    entering the scene carries one; `audit_materials` reads the role and never
+    the filename, because `white_rough_plaster_diff_2K.jpg` is a diffuse map
+    containing the word "rough".
+
+    Downscaling is in-place and one-way, so the guard matters: `load` is called
+    with `check_existing=True` and returns the SAME datablock for a map two
+    materials share. Without the stamp a shared map would be halved once per
+    material that uses it, and a texture quietly at 256 looks like a bad asset
+    rather than like this function.
+    """
     image = bpy.data.images.load(path, check_existing=True)
     image["arcvia_role"] = role
 
-    # check_existing=True returns the same Blender datablock to every material.
-    # Scale it once; otherwise a shared map is repeatedly halved.
     if not image.get("arcvia_scaled") and MAX_TEXTURE > 0:
         width, height = image.size
         longest = max(width, height)
         if longest > MAX_TEXTURE:
             factor = MAX_TEXTURE / longest
-            image.scale(
-                max(1, int(width * factor)),
-                max(1, int(height * factor)),
-            )
+            image.scale(max(1, int(width * factor)), max(1, int(height * factor)))
             image["arcvia_scaled"] = True
-            print(
-                f"ARCVIA_TEXTURE_SCALED:{role} {width}x{height} -> "
-                f"{image.size[0]}x{image.size[1]}",
-                flush=True,
-            )
+            print(f"ARCVIA_TEXTURE_SCALED:{role} {width}x{height} -> "
+                  f"{image.size[0]}x{image.size[1]}", flush=True)
 
     return image
 
 
-    """One Principled BSDF from a bridge entry, tiled at its real size."""
 def _build_material(bpy, klass: str, entry: dict):
-
+    """One Principled BSDF from a bridge entry, tiled at its real size."""
     mat = bpy.data.materials.new(f"arcvia_{klass}")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
@@ -513,8 +512,7 @@ def _build_material(bpy, klass: str, entry: dict):
 
     # Glass and water are transmissive; a solid pane reads as a grey slab.
     if "Transmission Weight" in bsdf.inputs and (
-        "glass" in klass or "glaz" in klass or "water" in klass
-        or entry.get("name", "").lower().startswith("glass")
+        "glass" in klass or "glaz" in klass or entry.get("name", "").startswith("glass")
     ):
         bsdf.inputs["Transmission Weight"].default_value = 1.0
 
@@ -533,13 +531,12 @@ def _build_material(bpy, klass: str, entry: dict):
         links.new(coord.outputs["UV"], mapping.inputs["Vector"])
 
         image = nodes.new("ShaderNodeTexImage")
-        image.image = _load_texture(bpy, maps["base_color"], "base_color")
         # The role is recorded ON the image, because the FILENAME cannot
         # carry it: `white_rough_plaster_diff_2K.jpg` is a diffuse map
         # whose name contains "rough". Auditing on the name flagged it as
         # a mis-loaded data map — the substring-matcher trap, inside the
         # very check written to catch traps.
-        image.image["arcvia_role"] = "base_color"
+        image.image = _load_texture(bpy, maps["base_color"], "base_color")
         links.new(mapping.outputs["Vector"], image.inputs["Vector"])
         links.new(image.outputs["Color"], bsdf.inputs["Base Color"])
 
@@ -550,17 +547,8 @@ def _build_material(bpy, klass: str, entry: dict):
             # sRGB transform lightens it and every surface comes out glossier
             # than the material says.
             rough.image.colorspace_settings.name = "Non-Color"
-            rough.image["arcvia_role"] = "roughness"
             links.new(mapping.outputs["Vector"], rough.inputs["Vector"])
             links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
-        if maps.get("normal_gl"):
-            normal_image = nodes.new("ShaderNodeTexImage")
-            normal_image.image = _load_texture(bpy, maps["normal_gl"], "normal_gl")
-            normal_image.image.colorspace_settings.name = "Non-Color"
-            normal_map = nodes.new("ShaderNodeNormalMap")
-            links.new(mapping.outputs["Vector"], normal_image.inputs["Vector"])
-            links.new(normal_image.outputs["Color"], normal_map.inputs["Color"])
-            links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
         mat["arcvia_textured"] = True
 
     if tile:

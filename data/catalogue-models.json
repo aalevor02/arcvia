@@ -1,7 +1,7 @@
 {
   "_generated": "node tools/cad-engine/gen-catalogue-models.mjs",
   "_source": "apps/studio/src/catalogue/items.ts",
-  "_note": "Fixture meshes for the offline renderer. `file` is null for a real catalogue item that has no GLB ? keep the dimensioned box for those.",
+  "_note": "Fixture meshes for the offline renderer. `file` is null for a real catalogue item that has no GLB — keep the dimensioned box for those.",
   "items": {
     "sofa-3": {
       "file": "/models/sofa-3.glb",

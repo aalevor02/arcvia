@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url'
 /**
  * Generate the fixture MODEL table the offline renderer places furniture from.
  *
- * ?? The gap this closes ?????????????????????????????????????????????????????
- * `build/solidify.py:build_fixtures` says it plainly: "Boxes, not models ? a
+ * ── The gap this closes ─────────────────────────────────────────────────────
+ * `build/solidify.py:build_fixtures` says it plainly: "Boxes, not models — a
  * correctly *dimensioned* stand-in is what makes clearances checkable, which is
  * the job at this stage. `Definition.meshUrl` is the seam where a real GLB
  * replaces one without anything else changing." The seam was designed and never
@@ -16,15 +16,15 @@ import { pathToFileURL } from 'node:url'
  * GLB.
  *
  * So the reconstruction identifies a block as `bed-queen` at 0.74 confidence,
- * places it, rotates it ? and the render draws a ten-triangle box. Measured on
+ * places it, rotates it — and the render draws a ten-triangle box. Measured on
  * the villa: 21 fixtures resolved to real catalogue ids (bed-king x5,
  * bed-queen x2, wc, hob, sink-unit, plant x2) and `storey0_fixtures` is 120
  * triangles for the lot. Every one of those ids already has a conditioned GLB
  * sitting in `apps/studio/public/models/`.
  *
- * ?? Why a generated JSON and not a direct read of items.ts ??????????????????
+ * ── Why a generated JSON and not a direct read of items.ts ──────────────────
  * The renderer is Python inside Blender and cannot import TypeScript, and
- * `classify/catalogue_dims.py` ? the existing generated table ? deliberately
+ * `classify/catalogue_dims.py` — the existing generated table — deliberately
  * carries only geometry, because the classifier matches on SIZE and has no use
  * for a mesh. Widening it would push render concerns into the classifier's
  * table.
@@ -34,10 +34,10 @@ import { pathToFileURL } from 'node:url'
  * `items.ts` that never reaches the renderer puts every bed in the building a
  * quarter turn out with nothing failing.
  *
- * ?? What travels, and why each field has to ?????????????????????????????????
+ * ── What travels, and why each field has to ─────────────────────────────────
  *   file      the conditioned GLB, relative to apps/studio/public
  *   yaw       degrees to turn the model so its front faces the stand-in's
- *             front. NOT derivable ? `items.ts` documents that one armchair is
+ *             front. NOT derivable — `items.ts` documents that one armchair is
  *             modelled facing -Z and the next facing +X, and nothing in a GLB
  *             distinguishes the front of a chair from its back.
  *   upAxis    'z' for models whose proportions only match the catalogue when Z
@@ -101,7 +101,7 @@ for (const item of CATALOGUE) {
     // "This item's three dimensions all carry information", so each informed
     // axis meets its own target instead of sharing one uniform ratio. Set on
     // beds because a king already at the catalogue's 0.6 m height cannot grow
-    // into a 1.83 m width under a uniform scale ? it drew as a single.
+    // into a 1.83 m width under a uniform scale — it drew as a single.
     fitFootprint: item.model?.fitFootprint ?? false,
     placement: item.placement,
     mountHeight: item.mountHeight ?? null,
@@ -118,7 +118,7 @@ await writeFile(
       _source: 'apps/studio/src/catalogue/items.ts',
       _note:
         'Fixture meshes for the offline renderer. `file` is null for a real ' +
-        'catalogue item that has no GLB ? keep the dimensioned box for those.',
+        'catalogue item that has no GLB — keep the dimensioned box for those.',
       items,
     },
     null,
