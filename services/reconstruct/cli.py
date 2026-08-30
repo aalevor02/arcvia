@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -1035,6 +1036,50 @@ def reconstruct(
             # Solved walls are centrelines, so the faces are half a thickness
             # out on each side; `wall_gap` takes the inset for that reason.
             wall_faces = [(w.ax, w.ay, w.bx, w.by, w.thickness / 2.0) for w in walls]
+
+            # ---- The same object inserted twice is one object ----------------
+            #
+            # Measured on DOWN VILLA: two `bed-king` fixtures from block
+            # `VZXVZXV` 0.008 m apart — eight MILLIMETRES — with identical
+            # footprints and identical confidences. That is one bed drawn
+            # twice, not two beds, and it produced FIVE bed-kings in a villa
+            # with two bedrooms: four in one BED ROOM and two in the FOYER.
+            #
+            # The engine already noticed and said so. The clearance pass
+            # reports "bed-king and bed-king overlap by 3.70 m2 — 99% of the
+            # smaller one", and the model shipped both anyway. This is the
+            # same shape as every other finding this week: the signal existed
+            # and nothing consumed it.
+            #
+            # Keyed on the BLOCK NAME as well as position, deliberately. Two
+            # different blocks at the same point are a genuine stack — a lamp
+            # on a table — and collapsing those would delete real furniture.
+            # Only the SAME block at the SAME spot is a duplicate insert.
+            #
+            # 0.05 m, because two identical chairs 5 cm apart is not a room
+            # anyone drew, while two identical chairs 1 m apart is a dining
+            # set. The gap between a duplicate and a pair is orders of
+            # magnitude here, not a threshold to tune: the duplicates measure
+            # 0.008 m and the real neighbours 1.08 m.
+            DUPLICATE_M = 0.05
+            deduped, dropped = [], 0
+            for placement in in_frame:
+                px, py = placement["position"]["x"], placement["position"]["y"]
+                block = placement["block"]
+                if any(
+                    kept["block"] == block
+                    and math.hypot(px - kept["position"]["x"],
+                                   py - kept["position"]["y"]) <= DUPLICATE_M
+                    for kept in deduped
+                ):
+                    dropped += 1
+                    continue
+                deduped.append(placement)
+            if dropped:
+                print(f"ARCVIA_FIXTURE_DUPLICATES:{dropped} placement(s) collapsed "
+                      f"(same block within {DUPLICATE_M} m)")
+            in_frame = deduped
+
             for placement in in_frame:
                 w, d = footprints.get(placement["block"], (0.0, 0.0))
                 px, py = placement["position"]["x"], placement["position"]["y"]
