@@ -67,6 +67,7 @@ import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection, shouldTryOutlines } from '../plan/detectionQuality'
 import { proposeFurnitureForImport, type Proposal } from '../plan/furnish'
+import { ViewerBoundary } from '../components/ViewerBoundary'
 import {
   automaticScalePerPixel,
   convertDetections,
@@ -1193,12 +1194,19 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       )}
 
       {mode === '3d' ? (
-        <SceneView
-          plan={plan}
-          sceneId={sceneId}
-          sceneName={scene?.name}
-          onDesignsChanged={(designs) => void offerDesignFurniture(designs)}
-        />
+        // Scoped to the viewer, not the app. Without a boundary a throw here --
+        // a refused WebGL context on a machine short of video memory, which the
+        // owner hit on their own box -- unmounted the whole tree and left a
+        // blank page: no plan, no rooms, no tools, no message, everything still
+        // saved and nothing saying so.
+        <ViewerBoundary onLeave={() => setMode('2d')}>
+          <SceneView
+            plan={plan}
+            sceneId={sceneId}
+            sceneName={scene?.name}
+            onDesignsChanged={(designs) => void offerDesignFurniture(designs)}
+          />
+        </ViewerBoundary>
       ) : (
       <div className="editor-body">
         {/* ---- Tools ---------------------------------------------------- */}
