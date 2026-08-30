@@ -292,12 +292,24 @@ class Verdict:
     #: most reliable signals in the file are pointing different ways.
     contested: bool = False
 
+    #: The footprint outvoted the architect's own block label — the drawing
+    #: said one thing and the measurement chose another.
+    #:
+    #: Distinct from `contested`, which is the label disagreeing with the ROOM,
+    #: and much narrower than `needs_review`, which a thin margin alone can
+    #: trip. A consumer that must not place a wrong object — the mesh builder —
+    #: wants exactly this one: it is the difference between "we are unsure
+    #: which of two beds this is" and "the drawing says plant and we built a
+    #: bed".
+    name_overridden: bool = False
+
     @property
     def needs_review(self) -> bool:
         return (
             self.label == "unknown"
             or self.margin < REVIEW_MARGIN
             or self.contested
+            or self.name_overridden
         )
 
     def as_dict(self) -> dict:
@@ -313,6 +325,7 @@ class Verdict:
             },
             "signals": self.signals,
             "needsReview": self.needs_review,
+            "nameOverridden": self.name_overridden,
         }
 
 
@@ -481,6 +494,22 @@ def classify_footprint(
             alternatives=normalised[:4], signals=signals, contested=contested,
         )
 
+    # ── The measurement disagreed with the architect ──────────────────────────
+    # Recorded as its own fact, not left for a consumer to reconstruct from
+    # `signals.block.item`. Boosting rather than short-circuiting is the right
+    # design and stays — a wildly wrong dimension SHOULD be able to outvote a
+    # carelessly reused block name — but the two cases are not the same thing
+    # and downstream had no way to tell them apart.
+    #
+    # Measured on DOWN VILLA, and this is why it matters: three placements of a
+    # block literally named "plant 1". Two resolve to `plant` and one to
+    # `bed-queen`, so a two-metre bed was built in the middle of the plan. All
+    # three carry margins in the same band — 0.03 and 0.06 — so `needsReview`
+    # cannot separate them: filtering on it drops the phantom bed AND both
+    # correct plants. What separates them is exactly this flag. The two right
+    # answers AGREE with the label; the wrong one contradicts it.
+    name_overridden = bool(named) and top_id != named
+
     return Verdict(
         label="fixture",
         item=top_id,
@@ -489,4 +518,5 @@ def classify_footprint(
         alternatives=normalised[:4],
         signals=signals,
         contested=contested,
+        name_overridden=name_overridden,
     )
