@@ -862,6 +862,32 @@ def build_fixtures(mesh: MeshBuilder, placements, dims: dict,
         if placement.get("label") != "fixture" or not item:
             skipped += 1
             continue
+
+        # ---- The drawing said one thing and the measurement built another ---
+        #
+        # No geometry when the footprint outvoted the architect's own block
+        # label. The placement STAYS in `elements.fixtures` with its verdict,
+        # alternatives and signals — that is what a reviewer needs to correct
+        # it, and deleting it would be the silent drop this codebase keeps
+        # getting bitten by. It simply does not become an object.
+        #
+        # Measured on DOWN VILLA: three placements of a block named "plant 1".
+        # Two resolve to `plant`; one resolves to `bed-queen`, and a two-metre
+        # bed was built in the middle of the plan.
+        #
+        # `needsReview` was tried here first and REVERTED, because it is the
+        # wrong gate: all three carry margins in one band (0.03 and 0.06), so
+        # filtering on it removed the phantom bed AND both correct plants — one
+        # wrong object avoided at the cost of two right ones. `nameOverridden`
+        # separates them exactly: the two right answers agree with the label,
+        # the wrong one contradicts it.
+        #
+        # This is the module docstring's own rule, applied one stage later:
+        # "An absent sofa is a gap someone notices; a wrong sofa is a gap
+        # nobody does."
+        if placement.get("nameOverridden"):
+            skipped += 1
+            continue
         spec = dims.get(item)
         if not spec or spec["placement"] not in ("floor", "wall"):
             skipped += 1

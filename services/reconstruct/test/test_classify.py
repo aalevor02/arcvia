@@ -242,7 +242,29 @@ sofa = classify(width=2.1, depth=0.9, block="3 ST SOFA", layer="FURNITURE",
 ok("a verdict carries its runners-up", len(sofa.alternatives) >= 2,
    str([a for a, _ in sofa.alternatives[:3]]))
 ok("the verdict serialises", set(sofa.as_dict()) == {
-    "label", "item", "confidence", "signals", "needsReview"})
+    "label", "item", "confidence", "signals", "needsReview", "nameOverridden"})
+
+# `nameOverridden` is the narrow signal the mesh builder gates on, so it has to
+# mean exactly one thing: the footprint outvoted the architect's block label.
+# It must NOT fire when the label and the winner agree, or the builder starts
+# dropping correctly identified furniture — which is what happened when that
+# gate was `needsReview` and a thin margin was enough to trip it.
+ok("a verdict that agrees with its block label is not overridden",
+   sofa.item is None or not sofa.as_dict()["nameOverridden"],
+   f"{sofa.item} from '3 ST SOFA'")
+
+# A block named for one thing whose footprint measures another. The classifier
+# is still entitled to prefer the measurement — boosting, not short-circuiting,
+# is deliberate — but it has to SAY that it did.
+mismatch = classify(width=1.64, depth=1.62, block="plant 1", layer="FURNITURE")
+ok("a footprint that outvotes the block label says so",
+   mismatch.label != "fixture"
+   or mismatch.item == mismatch.signals.get("block", {}).get("item")
+   or mismatch.name_overridden,
+   f"item={mismatch.item} named={mismatch.signals.get('block', {}).get('item')} "
+   f"overridden={mismatch.name_overridden}")
+ok("and an overridden name always needs review",
+   not mismatch.name_overridden or mismatch.needs_review)
 ok(f"REVIEW_MARGIN is a real threshold ({REVIEW_MARGIN})", 0 < REVIEW_MARGIN < 1)
 
 
