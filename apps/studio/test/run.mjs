@@ -1,5 +1,5 @@
 import { build } from 'esbuild'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,6 +31,7 @@ const targets = entries.length
       'test/buildGeometry.test.ts',
       'test/underlay.test.ts',
       'test/detections.test.ts',
+      'test/detectedOpenings.test.ts',
       'test/objects.test.ts',
       'test/lightmapUV.test.ts',
       'test/credits.test.ts',
@@ -59,7 +60,48 @@ const targets = entries.length
       'test/thumbnail.test.ts',
       'test/floors.test.ts',
       'test/realtime-roster.test.ts',
+
+      // The BIM and IFC side. These existed and passed for some time while
+      // being in NO runner's list, so `npm test` reported green over 244
+      // assertions it never executed and `validate.mjs js:studio` reported
+      // the same. (validate's `bim` family runs test_plangraph.py, which is
+      // Python and unrelated.) Found by the check above the moment it was
+      // written. Nothing here was broken -- that is the point: a silent skip
+      // is invisible precisely while everything passes.
+      'test/bimAnalytics.test.ts',
+      'test/bimBaselineClassifier.test.ts',
+      'test/bimComparison.test.ts',
+      'test/bimInference.test.ts',
+      'test/bimLearningCorpus.test.ts',
+      'test/bimLearningDataset.test.ts',
+      'test/bimQuality.test.ts',
+      'test/bimSemantics.test.ts',
+      'test/ifcCorpus.test.ts',
+      'test/ifcMetadata.test.ts',
+      'test/ifcPlanProposal.test.ts',
+      'test/materials.test.ts',
+      'test/quantities.test.ts',
+      'test/revitMetadata.test.ts',
     ]
+
+// A hand-written list is deliberate — order is meaningful and a stray file in
+// test/ should not become a test run. But a list also means a NEW test file
+// runs nowhere and says nothing about it, which is the same failure as a
+// caught-and-skipped parse: the suite reports green over work it never
+// executed. (Found by adding detectedOpenings.test.ts and watching the total
+// stay at 889.) So the omission is named out loud instead.
+if (!entries.length) {
+  const onDisk = (await readdir('test')).filter((name) => name.endsWith('.test.ts'))
+  const missing = onDisk.filter((name) => !targets.includes(`test/${name}`))
+  if (missing.length) {
+    console.error(
+      `\n${missing.length} test file(s) exist but are not in the list in` +
+        ` test/run.mjs, so they did not run:\n  ${missing.join('\n  ')}\n` +
+        'Add them to `targets`, or delete them.',
+    )
+    process.exit(1)
+  }
+}
 
 const dir = await mkdtemp(join(tmpdir(), 'arcvia-test-'))
 let failed = false

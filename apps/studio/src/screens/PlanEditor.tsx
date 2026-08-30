@@ -70,7 +70,10 @@ import { proposeFurniture, type Proposal } from '../plan/furnish'
 import {
   automaticScalePerPixel,
   convertDetections,
-  namesFromDrawing,  type DetectedRoom,
+  namesFromDrawing,  type DetectedObject,  type DetectedRoom,
+} from '../plan/detections'
+import { openingsFromDetection } from '../plan/detectedOpenings'
+import {
   type DetectedScale,
   type ProposedWall,
 } from '../plan/detections'
@@ -176,6 +179,8 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 
   const [reading, setReading] = useState<{
     rooms: DetectedRoom[]
+    /** The reader's door gaps, kept so `acceptProposal` can cut them. */
+    objects: DetectedObject[]
     scale: DetectedScale | null
     scaleApplied: boolean
     /** What the vision adjudicator did — "dropped 4 walls — bed (95%)". */
@@ -655,6 +660,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       let walls = convertDetections(result, traced)
       setReading({
         rooms: result.rooms ?? [],
+        objects: result.objects ?? [],
         scale: detectedScale ?? null,
         scaleApplied,
         notes: result.notes ?? [],
@@ -812,14 +818,43 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
     // binarisation to trust.
     const outlines = reading?.rooms ?? []
     const traced = activeFloor(plan).underlay
-    if (outlines.length > 0 && traced) {
+    if (traced && (outlines.length > 0 || reading)) {
+      // Names and doorways in ONE step, because both read the floor the walls
+      // above just produced and neither is worth its own undo.
       apply((current) => {
         const floor = activeFloor(current)
-        const names = namesFromDrawing(detectRooms(floor), outlines, traced)
-        return Object.entries(names).reduce<typeof current>(
-          (next, [roomId, name]) => nameRoom(next, roomId, String(name)),
-          current,
-        )
+        let next = current
+
+        if (outlines.length > 0) {
+          const names = namesFromDrawing(detectRooms(floor), outlines, traced)
+          next = Object.entries(names).reduce<typeof current>(
+            (plan, [roomId, name]) => nameRoom(plan, roomId, String(name)),
+            next,
+          )
+        }
+
+        // Cut the doorways the reader measured. Until this ran, every gap it
+        // found was dropped between the reader and the model: an uploaded
+        // drawing built a solid box with no way from one room to the next.
+        // Only gaps with a wall actually standing in them are cut -- a gap
+        // between two walls that stop either side of it is already a hole, and
+        // cutting there would put a second doorway beside the real one. The
+        // measurement that settles it is in detectedOpenings.ts.
+        if (reading) {
+          next = openingsFromDetection(reading.objects, traced, floor).reduce<typeof current>(
+            (plan, opening) =>
+              addObject(plan, {
+                item: opening.item,
+                position: opening.position,
+                rotation: opening.rotation,
+                wallId: opening.wallId,
+                size: opening.size,
+              }),
+            next,
+          )
+        }
+
+        return next
       })
     }
 
