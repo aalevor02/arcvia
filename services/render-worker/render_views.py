@@ -35,6 +35,7 @@ someone added, not a missing one.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -77,6 +78,17 @@ def parse():
                    help="Material bridge JSON: dress meshes by their "
                         "extras.surfaceClass. Only meaningful with a style "
                         "that keeps materials.")
+    p.add_argument("--fixtures", default=None,
+                   help="building.json: replace the dimensioned fixture boxes "
+                        "with the catalogue's own models.")
+    p.add_argument("--catalogue", default=None,
+                   help="data/catalogue-models.json. Defaults beside the repo "
+                        "when --fixtures is given.")
+    p.add_argument("--practicals", action="store_true",
+                   help="A warm ceiling light in each enclosed room. The "
+                        "two-sun rig assumes a roofless cutaway; models now "
+                        "carry ceilings, so interiors get no light at all. "
+                        "Needs --fixtures for the room outlines.")
     p.add_argument("--skip-tight", action="store_true", default=True)
     return p.parse_args(argv())
 
@@ -91,6 +103,428 @@ def import_glb(path: str) -> int:
     if not meshes:
         raise SystemExit("ARCVIA_ERROR: the GLB imported no meshes.")
     return len(meshes)
+
+
+#: The mesh carrying the dimensioned stand-in boxes, from
+#: `build/solidify.py:build_fixtures`. Named rather than detected, because
+#: guessing which mesh is furniture from its geometry is exactly the kind of
+#: inference that goes wrong quietly.
+FIXTURE_MESH = "storey0_fixtures"
+
+
+#: An axis whose extent is this small a fraction of the model's largest carries
+#: no information about scale. Same value and same reasoning as the studio
+#: loader and `condition_asset.py`: flat is a PROPORTION, not a measurement —
+#: 12 mm is flat on a rug and is the whole object on a sheet of paper.
+FLAT = 0.02
+
+
+def _fit_to_catalogue(obj, entry: dict) -> None:
+    """
+    Scale one imported model to the catalogue's dimensions.
+
+    ── Why the renderer has to do this at all ────────────────────────────────
+    Measured, and it is the whole reason the first version of this drew an
+    eight-metre sink. The shipped catalogue GLBs are NOT at catalogue size:
+    `sink-unit.glb` is 7.06 x 8.49 x 5.43 against a catalogue 1.2 x 0.6 x 0.9,
+    `plant.glb` is 0.01 across against 0.55, `bed-king.glb` is 0.91 against
+    1.83. That is not a defect — `catalogue/types.ts` states the contract, that
+    a model "is an upgrade layered on top, never a replacement for the
+    dimensions" — so every consumer fits the mesh to the entry, and the studio
+    loader (`catalogue/models.ts`) has done exactly this all along. This
+    function is that same fit, in Blender's Z-up rather than three.js's Y-up.
+
+    Deliberately mirrors the studio rather than inventing a second rule: two
+    fits that disagree would put a bed in the plan at one size and the same bed
+    in the render at another, and nothing would report it.
+    """
+    bpy.context.view_layer.update()
+    dims = obj.dimensions
+    extent = (dims.x, dims.y, dims.z)
+    largest = max(extent)
+    if largest <= 0:
+        return
+
+    size = entry["size"]
+    # A quarter turn swaps which catalogue dimension the model's local x will
+    # end up spanning, so the fit has to target the dimensions the model ENDS
+    # UP in. The rotation is still applied afterwards; only the meaning of
+    # "width" changes here.
+    yaw = entry.get("yaw") or 0
+    quarter = abs(round(yaw / 90)) % 2 == 1
+    target = (size["d"], size["w"], size["h"]) if quarter else (size["w"], size["d"], size["h"])
+
+    carries = [e / largest > FLAT for e in extent]
+    if not any(carries):
+        return  # every axis flat: a point, not a model. Leave it alone.
+
+    own = [t / e if e > 0 else 0.0 for t, e in zip(target, extent)]
+    informed = [own[i] for i in range(3) if carries[i]]
+
+    if entry.get("fitFootprint"):
+        # Every informed axis meets its own target; a flat axis has no opinion
+        # and follows the mean of the ones that do.
+        mean = sum(informed) / len(informed)
+        factors = [own[i] if carries[i] else mean for i in range(3)]
+    else:
+        # Uniform, and under-filling rather than distorting. Stretching each
+        # axis to hit the box exactly guarantees the footprint and deforms the
+        # object, and a sofa squashed along its length is more obviously wrong
+        # than one leaving a few centimetres spare.
+        factors = [min(informed)] * 3
+
+    obj.scale = (obj.scale.x * factors[0],
+                 obj.scale.y * factors[1],
+                 obj.scale.z * factors[2])
+    bpy.context.view_layer.update()
+
+
+def place_fixtures(model_path: str, catalogue_path: str) -> dict:
+    """
+    Swap the fixture boxes for the catalogue's own models.
+
+    ── Why this belongs here and not in the reconstruction ────────────────────
+    `build/solidify.py:build_fixtures` draws a BOX per identified fixture and
+    says why: "a correctly *dimensioned* stand-in is what makes clearances
+    checkable, which is the job at this stage", with `Definition.meshUrl` named
+    as "the seam where a real GLB replaces one without anything else changing".
+    That is right — a clearance check wants a footprint, not a mesh, and the
+    reconstruction GLB should stay small and semantic.
+
+    The renderer is the consumer that wants the mesh. It already has everything
+    needed: the reconstruction resolved each block to a CATALOGUE ID with a
+    confidence (measured on the villa: 21 fixtures, `bed-king` x5, `bed-queen`
+    x2, `wc`, `hob`, `sink-unit`, `plant` x2), and every one of those ids has a
+    conditioned GLB shipped in `apps/studio/public/models`. Until now the render
+    drew the boxes: 120 triangles for the lot.
+
+    ── Coordinates ───────────────────────────────────────────────────────────
+    `build/glb.py` emits `v(x, y, h) -> (x, h, -y)`, and Blender's importer
+    converts Y-up to Z-up, so a plan point (px, py) at height h lands at Blender
+    (px, py, h). Fixture positions are in that same plan space, which is why no
+    conversion appears below — but it is stated because a silent identity
+    transform is indistinguishable from a forgotten one.
+
+    Returns a report rather than printing, so the caller decides what to say.
+    """
+    import math
+
+    with open(model_path, encoding="utf-8") as handle:
+        model = json.load(handle)
+    with open(catalogue_path, encoding="utf-8") as handle:
+        catalogue = json.load(handle)["items"]
+
+    fixtures = (model.get("elements") or {}).get("fixtures") or []
+    report = {"placed": 0, "boxed": 0, "unknown": 0, "items": {}, "missing": {}}
+
+    # The boxes go only if something replaces them. A run that resolves nothing
+    # must leave the scene exactly as it found it rather than deleting the
+    # furniture and rendering an empty house.
+    placeable = [
+        f for f in fixtures
+        if catalogue.get(f.get("item") or "", {}).get("file")
+    ]
+    if not placeable:
+        for f in fixtures:
+            item = f.get("item") or "?"
+            if item in catalogue:
+                report["boxed"] += 1
+                report["missing"][item] = report["missing"].get(item, 0) + 1
+            else:
+                report["unknown"] += 1
+        return report
+
+    boxes = bpy.data.objects.get(FIXTURE_MESH)
+    if boxes is not None:
+        bpy.data.objects.remove(boxes, do_unlink=True)
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(catalogue_path)))
+    public = os.path.join(root, "apps", "studio", "public")
+
+    for fixture in fixtures:
+        item = fixture.get("item") or ""
+        entry = catalogue.get(item)
+        if entry is None:
+            report["unknown"] += 1
+            continue
+        if not entry.get("file"):
+            # A real catalogue item with no mesh — a door is an opening, not an
+            # object. Counted separately from an id nobody recognises, because
+            # the two want different fixes.
+            report["boxed"] += 1
+            report["missing"][item] = report["missing"].get(item, 0) + 1
+            continue
+
+        path = os.path.join(public, entry["file"].lstrip("/").replace("/", os.sep))
+        if not os.path.exists(path):
+            report["boxed"] += 1
+            report["missing"][item] = report["missing"].get(item, 0) + 1
+            continue
+
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=path)
+        fresh = [o for o in bpy.data.objects if o not in before and o.type == "MESH"]
+        if not fresh:
+            report["boxed"] += 1
+            continue
+
+        px = fixture["position"]["x"]
+        py = fixture["position"]["y"]
+        rot = float(fixture.get("rotation") or 0.0)
+        mount = entry.get("mountHeight") or 0.0
+
+        for obj in fresh:
+            obj.rotation_mode = "XYZ"
+            if entry.get("upAxis") == "z":
+                # Recorded per item in `items.ts` as "its own proportions match
+                # the catalogue only when Z is up". The importer has already
+                # applied a Y-up to Z-up conversion, so such a model arrives a
+                # quarter turn out about X and has to be turned back.
+                obj.rotation_euler[0] += math.radians(-90)
+                bpy.context.view_layer.update()
+
+            _fit_to_catalogue(obj, entry)
+
+            # The catalogue's yaw first, then the plan's rotation. The yaw says
+            # which way the MODEL faces and the rotation says which way the
+            # object should face in the room; composing them in the other order
+            # turns the correction by the placement.
+            obj.rotation_euler[2] += math.radians(entry.get("yaw") or 0) + rot
+            obj.location = (px, py, mount)
+
+        report["placed"] += 1
+        report["items"][item] = report["items"].get(item, 0) + 1
+
+    return report
+
+
+#: Colour temperature of an interior practical, in Kelvin. 3000 K is a warm
+#: domestic LED — what an Indian residential interior is actually lit by, and
+#: what stops a daylight-only render reading blue.
+PRACTICAL_KELVIN = 3000.0
+
+#: Radius of the emitting disc, in metres. Not a point: a point light throws a
+#: hard, obviously-CG shadow off every object, and a 0.35 m disc at ceiling
+#: height is roughly a real fitting and gives the soft edge an interior has.
+PRACTICAL_RADIUS = 0.35
+
+#: Watts per square metre of floor. A domestic room lands near 4 W/m2 of LED,
+#: and scaling by AREA rather than using a fixed wattage is what stops a
+#: 124 m2 foyer and a 2 m2 toilet being lit by the same lamp.
+PRACTICAL_WATTS_PER_M2 = 4.0
+
+
+def _kelvin_to_rgb(kelvin: float) -> tuple:
+    """
+    Approximate blackbody colour, so a practical is warm without a node tree.
+
+    Blender has a Blackbody node, but wiring one per lamp means a node tree per
+    light and a lot of graph for a constant. This is the standard Tanner Helland
+    approximation, which is within a couple of percent over 1000-6600 K — far
+    inside what anybody can see in a render.
+    """
+    temp = max(1000.0, min(6600.0, kelvin)) / 100.0
+    red = 1.0
+    green = min(1.0, max(0.0, (99.4708025861 * math.log(temp) - 161.1195681661) / 255.0))
+    if temp <= 19:
+        blue = 0.0
+    else:
+        blue = min(1.0, max(0.0, (138.5177312231 * math.log(temp - 10) - 305.0447927307) / 255.0))
+    return (red, green, blue)
+
+
+#: Name prefix for the lamps this module owns, so they can be cleared between
+#: views without touching the style rig's suns.
+PRACTICAL_PREFIX = "practical_"
+
+
+def _inside(x: float, y: float, loop) -> bool:
+    """Ray-cast point-in-polygon. Handles concave outlines; a bbox test does not."""
+    hit = False
+    n = len(loop)
+    for i in range(n):
+        ax, ay = float(loop[i][0]), float(loop[i][1])
+        bx, by = float(loop[(i + 1) % n][0]), float(loop[(i + 1) % n][1])
+        if (ay > y) != (by > y):
+            cross = ax + (y - ay) * (bx - ax) / ((by - ay) or 1e-12)
+            if x < cross:
+                hit = not hit
+    return hit
+
+
+def _edge_distance(x: float, y: float, loop) -> float:
+    """Shortest distance from a point to the outline."""
+    best = float("inf")
+    n = len(loop)
+    for i in range(n):
+        ax, ay = float(loop[i][0]), float(loop[i][1])
+        bx, by = float(loop[(i + 1) % n][0]), float(loop[(i + 1) % n][1])
+        dx, dy = bx - ax, by - ay
+        span = dx * dx + dy * dy
+        t = 0.0 if span == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / span))
+        best = min(best, math.hypot(x - (ax + t * dx), y - (ay + t * dy)))
+    return best
+
+
+def room_anchor(loop) -> tuple | None:
+    """
+    A point reliably INSIDE a room outline, for hanging a light from.
+
+    ── Why not the centroid, which is what this used to do ───────────────────
+    Because a concave polygon's centroid is not guaranteed to be inside it, and
+    "L-shaped" is the normal case in a house, not an exotic one. The engine has
+    been bitten by this twice from different directions: `cameras.py`'s
+    `pole_of_inaccessibility` docstring records that "an L-shaped room's
+    centroid frequently falls in the missing corner, which is outside the room —
+    so a camera placed there is inside a wall, and the render is black", and
+    commit 39242a6 records the studio side of the same fault, where "on an
+    L-shaped room wrapped around a neighbour, the vertex centroid lands in the
+    NEIGHBOUR, so the old code confidently named the wrong space".
+
+    A lamp fails the same way and worse than a camera: it does not go black, it
+    lights the room next door while the room being photographed stays dark, and
+    nothing in the output says so.
+
+    ── Why this is not just an import ────────────────────────────────────────
+    `pole_of_inaccessibility` is the right algorithm and it lives in
+    services/reconstruct, which needs shapely. This runs inside Blender's own
+    Python, where shapely is not installed (checked, ModuleNotFoundError). So
+    this is the same IDEA implemented without the dependency — grid, keep the
+    points that are genuinely inside, take the one furthest from any edge — and
+    deliberately coarser, because a lamp needs to be in the room and roughly
+    central, not optimally placed.
+
+    Returns None when no interior point is found at all, so the caller can skip
+    the room rather than hang a light in a wall.
+    """
+    xs = [float(p[0]) for p in loop]
+    ys = [float(p[1]) for p in loop]
+    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+
+    # The centroid first: it is right for the convex majority and costs nothing
+    # to test. What was wrong before was TRUSTING it, not computing it.
+    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+    if _inside(cx, cy, loop):
+        return cx, cy
+
+    steps = 12
+    span_x = (maxx - minx) / steps
+    span_y = (maxy - miny) / steps
+    best, best_clear = None, 0.0
+    for i in range(1, steps):
+        for j in range(1, steps):
+            px, py = minx + i * span_x, miny + j * span_y
+            if not _inside(px, py, loop):
+                continue
+            clear = _edge_distance(px, py, loop)
+            if clear > best_clear:
+                best, best_clear = (px, py), clear
+    return best
+
+
+def clear_practicals() -> int:
+    """Remove the lamps from the previous view. Leaves `add_sun`'s rig alone."""
+    gone = 0
+    for obj in [o for o in bpy.data.objects if o.name.startswith(PRACTICAL_PREFIX)]:
+        bpy.data.objects.remove(obj, do_unlink=True)
+        gone += 1
+    return gone
+
+
+def place_room_lights(model_path: str, height: float | None = None,
+                      only_space: int | None = None) -> dict:
+    """
+    A practical light in each enclosed room.
+
+    ── Why this is needed NOW and was not before ─────────────────────────────
+    `arcvia_style.add_sun` explains its two-sun rig by saying "a reconstructed
+    building is an open-topped cutaway: it has walls and floors and no roof",
+    and that was true when it was written. It is not true any more — the
+    reconstruction now emits per-room ceiling slabs (21 of them on the villa),
+    so those two suns light the roof and nothing under it. Every interior is
+    then lit only by whatever sky reaches it through a doorway.
+
+    Measured on the bedroom before this: blue-minus-red +29.7 and 7.1% of the
+    frame under luminance 60. A warm interior should skew NEGATIVE. That is not
+    a tone-map or exposure problem, it is a room with no light in it — the same
+    diagnosis `add_sun` made about black pockets, one geometry change later.
+
+    ── This is a convention, and saying so is the point ──────────────────────
+    A ceiling light is not in the drawing. `add_sun`'s second sun is not
+    physically motivated either and its docstring says so plainly: "this is a
+    diagram of a building rather than a photograph". The same honesty applies
+    here. A room in a house has a light in it, and rendering one is a closer
+    description of the building than rendering a cave; but nothing measured it,
+    so it is reported in the summary rather than left for someone to discover
+    from a suspiciously warm picture.
+
+    Skips OUTDOOR spaces — a lawn, a pool, a patio have no ceiling to hang
+    anything from, and a lamp floating over a garden at 2.4 m is exactly the
+    artefact that makes a render look automatic.
+    """
+    with open(model_path, encoding="utf-8") as handle:
+        model = json.load(handle)
+
+    spaces = (model.get("elements") or {}).get("spaces") or []
+    ceiling = float(height or model.get("wallHeight") or 2.7)
+    # Just under the slab, so the fitting is in the room rather than inside the
+    # concrete, where it lights nothing.
+    z = max(0.5, ceiling - 0.25)
+
+    colour = _kelvin_to_rgb(PRACTICAL_KELVIN)
+    report = {"lit": 0, "skipped": 0, "watts": 0.0}
+
+    for space in spaces:
+        # One room at a time when the caller names one.
+        #
+        # Lighting the whole building at once was the first version and it is
+        # both wasteful and wrong. Wasteful: 22 area lamps went into every
+        # frame and the render died with "Error: Out of memory" on a box that
+        # had just completed the same frame without them. Wrong: a camera in a
+        # bedroom does not need the far toilet lit, and a room the camera
+        # cannot see contributes nothing but samples.
+        #
+        # The view already carries its `space` index, so the renderer can light
+        # exactly the room it is photographing. Rooms beyond a doorway stay
+        # dark, which is what an unlit adjacent room looks like anyway.
+        if only_space is not None and space.get("index") != only_space:
+            continue
+        if str(space.get("kind") or "").lower() in ("outdoor", "site"):
+            report["skipped"] += 1
+            continue
+        loop = space.get("loop") or []
+        if len(loop) < 3:
+            report["skipped"] += 1
+            continue
+
+        anchor = room_anchor(loop)
+        if anchor is None:
+            # No interior point found. Skip rather than hang a lamp in a wall,
+            # where it lights the neighbour and leaves this room dark.
+            report["skipped"] += 1
+            continue
+        cx, cy = anchor
+
+        area = float(space.get("area") or 0.0)
+        if area <= 0:
+            report["skipped"] += 1
+            continue
+        watts = max(15.0, min(400.0, area * PRACTICAL_WATTS_PER_M2))
+
+        data = bpy.data.lights.new(name=f"practical_{space.get('index')}", type="AREA")
+        data.shape = "DISK"
+        data.size = PRACTICAL_RADIUS * 2
+        data.energy = watts
+        data.color = colour
+        lamp = bpy.data.objects.new(name=f"practical_{space.get('index')}", object_data=data)
+        bpy.context.collection.objects.link(lamp)
+        lamp.location = (cx, cy, z)
+
+        report["lit"] += 1
+        report["watts"] += watts
+
+    report["watts"] = round(report["watts"], 1)
+    return report
 
 
 def place_camera(view: dict):
@@ -358,6 +792,48 @@ def main():
     elif args.materials:
         print(f"ARCVIA_MATERIALS_SKIPPED:style {args.style} overrides materials")
 
+    # After materials, deliberately. A catalogue model arrives with its own
+    # conditioned materials and must NOT be dressed by surface class — the
+    # bridge paints by `extras.surfaceClass`, a bed carries none, and running
+    # this first would hand the dresser a scene full of meshes it would report
+    # as untouched.
+    if args.fixtures:
+        catalogue = args.catalogue or str(
+            Path(__file__).resolve().parents[2] / "data" / "catalogue-models.json"
+        )
+        if not Path(catalogue).exists():
+            print(f"ARCVIA_FIXTURES_SKIPPED:no catalogue at {catalogue}")
+        else:
+            placed = place_fixtures(args.fixtures, catalogue)
+            detail = ", ".join(
+                f"{k}={v}" for k, v in sorted(placed["items"].items())
+            )
+            print(f"ARCVIA_FIXTURES:{placed['placed']} placed"
+                  + (f" ({detail})" if detail else ""))
+            if placed["missing"]:
+                # Named, not counted. "3 fixtures kept their box" cannot be
+                # acted on; "door=4" says which catalogue entry needs a mesh.
+                miss = ", ".join(
+                    f"{k}={v}" for k, v in sorted(placed["missing"].items())
+                )
+                print(f"ARCVIA_FIXTURES_BOXED:{placed['boxed']} kept the "
+                      f"dimensioned box ({miss})")
+            if placed["unknown"]:
+                print(f"ARCVIA_FIXTURES_UNKNOWN:{placed['unknown']} fixture(s) "
+                      "carry an id the catalogue does not have")
+
+    # After the fixtures, so a lamp is never the thing a catalogue model gets
+    # fitted against, and after materials for the same reason those run first.
+    practicals_on = bool(args.practicals)
+    if args.practicals and not args.fixtures:
+        practicals_on = False
+        print("ARCVIA_PRACTICALS_SKIPPED:needs --fixtures for room outlines")
+    elif practicals_on:
+        # Placed per view, in the loop below, so only the room being
+        # photographed is lit. Announced here so the log says it is on even
+        # when the first view is an exterior.
+        print("ARCVIA_PRACTICALS:on, one warm ceiling light per interior view")
+
     stem = Path(args.glb).stem
     print(f"ARCVIA_SCENE:{meshes} meshes, style={args.style}, "
           f"engine={args.engine} ({samples} samples, {width}x{height})")
@@ -366,6 +842,16 @@ def main():
     done = []
     for i, view in enumerate(views):
         print(f"ARCVIA_VIEW:{i + 1}/{len(views)} {view['id']}")
+
+        # Light the room this view is in, and only that one. Cleared first so
+        # lamps never accumulate across a 22-view run — which is how the whole
+        # building ends up lit again by frame two.
+        if practicals_on and view.get("kind") == "interior":
+            clear_practicals()
+            lit = place_room_lights(args.fixtures, only_space=view.get("space"))
+            if lit["lit"]:
+                print(f"ARCVIA_PRACTICAL:{view['id']} {lit['watts']} W")
+
         result = render_one(view, out_dir, stem, args.aov,
                             line_art=bool(applied.get("freestyle")),
                             diagnostic=args.style == "raw")

@@ -20,6 +20,8 @@ left to a preset:
 
 from __future__ import annotations
 
+import os
+
 #: id -> (view transform, world kind, material kind, freestyle, look)
 #:
 #: `raw` is NOT a picture and is not meant to be legible on its own. Flat world
@@ -430,6 +432,62 @@ def apply_surface_materials(bpy, bridge: dict, aliases: dict | None = None) -> d
             "classes": sorted(applied)}
 
 
+#: Longest edge, in pixels, that a surface texture is loaded at.
+#:
+#: ── Why there is a budget at all ───────────────────────────────────────────
+#: Measured 2026-08-29, and it is not a tuning preference — it is the
+#: difference between a dressed render and no render. A bridge resolving 13
+#: surface classes over 74 meshes loads roughly two maps per class at the
+#: 2K the hub stores. Blender holds a decoded 2048x2048 map at 16 MB as
+#: bytes and 64 MB as float, so 26 maps is 0.4-1.6 GB of texture alone —
+#: against 0.9 GB available on this machine. The first dressed render of
+#: the villa died in three seconds with "Error: Out of memory" AFTER
+#: reporting every class resolved correctly, which is the worst possible
+#: place to fail: the material work all succeeded and the picture never
+#: arrived.
+#:
+#: 1024 rather than 512, unlike `condition_asset.py`'s prop budget. A prop
+#: is seen once across a room; an architectural surface TILES — the bridge
+#: repeats a plaster sheet every 2 m of wall — so the same pixels are
+#: stretched across every wall in shot and grain that survives at 512 on a
+#: chair reads as mush on twenty square metres of plaster. Quartering the
+#: area is enough: 26 maps come down to roughly 100-400 MB.
+#:
+#: Override with ARCVIA_MAX_TEXTURE when a hero still justifies the memory.
+MAX_TEXTURE = int(os.environ.get("ARCVIA_MAX_TEXTURE", "1024"))
+
+
+def _load_texture(bpy, path: str, role: str):
+    """
+    Load one surface map, stamped with its role and capped to `MAX_TEXTURE`.
+
+    The role is stamped HERE rather than at the call site so that every image
+    entering the scene carries one; `audit_materials` reads the role and never
+    the filename, because `white_rough_plaster_diff_2K.jpg` is a diffuse map
+    containing the word "rough".
+
+    Downscaling is in-place and one-way, so the guard matters: `load` is called
+    with `check_existing=True` and returns the SAME datablock for a map two
+    materials share. Without the stamp a shared map would be halved once per
+    material that uses it, and a texture quietly at 256 looks like a bad asset
+    rather than like this function.
+    """
+    image = bpy.data.images.load(path, check_existing=True)
+    image["arcvia_role"] = role
+
+    if not image.get("arcvia_scaled") and MAX_TEXTURE > 0:
+        width, height = image.size
+        longest = max(width, height)
+        if longest > MAX_TEXTURE:
+            factor = MAX_TEXTURE / longest
+            image.scale(max(1, int(width * factor)), max(1, int(height * factor)))
+            image["arcvia_scaled"] = True
+            print(f"ARCVIA_TEXTURE_SCALED:{role} {width}x{height} -> "
+                  f"{image.size[0]}x{image.size[1]}", flush=True)
+
+    return image
+
+
 def _build_material(bpy, klass: str, entry: dict):
     """One Principled BSDF from a bridge entry, tiled at its real size."""
     mat = bpy.data.materials.new(f"arcvia_{klass}")
@@ -473,25 +531,22 @@ def _build_material(bpy, klass: str, entry: dict):
         links.new(coord.outputs["UV"], mapping.inputs["Vector"])
 
         image = nodes.new("ShaderNodeTexImage")
-        image.image = bpy.data.images.load(maps["base_color"], check_existing=True)
         # The role is recorded ON the image, because the FILENAME cannot
         # carry it: `white_rough_plaster_diff_2K.jpg` is a diffuse map
         # whose name contains "rough". Auditing on the name flagged it as
         # a mis-loaded data map — the substring-matcher trap, inside the
         # very check written to catch traps.
-        image.image["arcvia_role"] = "base_color"
+        image.image = _load_texture(bpy, maps["base_color"], "base_color")
         links.new(mapping.outputs["Vector"], image.inputs["Vector"])
         links.new(image.outputs["Color"], bsdf.inputs["Base Color"])
 
         if maps.get("roughness"):
             rough = nodes.new("ShaderNodeTexImage")
-            rough.image = bpy.data.images.load(maps["roughness"],
-                                               check_existing=True)
+            rough.image = _load_texture(bpy, maps["roughness"], "roughness")
             # A roughness map is DATA, not a colour: reading it through the
             # sRGB transform lightens it and every surface comes out glossier
             # than the material says.
             rough.image.colorspace_settings.name = "Non-Color"
-            rough.image["arcvia_role"] = "roughness"
             links.new(mapping.outputs["Vector"], rough.inputs["Vector"])
             links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
         mat["arcvia_textured"] = True

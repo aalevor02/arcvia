@@ -1,0 +1,865 @@
+{
+  "_generated": "node tools/cad-engine/gen-catalogue-models.mjs",
+  "_source": "apps/studio/src/catalogue/items.ts",
+  "_note": "Fixture meshes for the offline renderer. `file` is null for a real catalogue item that has no GLB — keep the dimensioned box for those.",
+  "items": {
+    "sofa-3": {
+      "file": "/models/sofa-3.glb",
+      "yaw": 180,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 2.1,
+        "d": 0.9,
+        "h": 0.82
+      }
+    },
+    "sofa-2": {
+      "file": "/models/sofa-2.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.5,
+        "d": 0.9,
+        "h": 0.82
+      }
+    },
+    "armchair": {
+      "file": "/models/armchair.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.85,
+        "d": 0.85,
+        "h": 0.82
+      }
+    },
+    "dining-chair": {
+      "file": "/models/dining-chair.glb",
+      "yaw": 180,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.45,
+        "d": 0.5,
+        "h": 0.9
+      }
+    },
+    "bench": {
+      "file": "/models/bench.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.4,
+        "d": 0.4,
+        "h": 0.45
+      }
+    },
+    "dining-table-6": {
+      "file": "/models/dining-table-6.glb",
+      "yaw": 90,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.9,
+        "h": 0.75
+      }
+    },
+    "dining-table-4": {
+      "file": "/models/dining-table-4.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.2,
+        "d": 0.8,
+        "h": 0.75
+      }
+    },
+    "coffee-table": {
+      "file": "/models/coffee-table.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.1,
+        "d": 0.6,
+        "h": 0.42
+      }
+    },
+    "side-table": {
+      "file": "/models/side-table.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.45,
+        "d": 0.45,
+        "h": 0.55
+      }
+    },
+    "desk": {
+      "file": "/models/desk.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.4,
+        "d": 0.7,
+        "h": 0.75
+      }
+    },
+    "bed-king": {
+      "file": "/models/bed-king.glb",
+      "yaw": 180,
+      "upAxis": null,
+      "fitFootprint": true,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.83,
+        "d": 2.03,
+        "h": 0.6
+      }
+    },
+    "bed-queen": {
+      "file": "/models/bed-queen.glb",
+      "yaw": 270,
+      "upAxis": "z",
+      "fitFootprint": true,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.52,
+        "d": 2.03,
+        "h": 0.6
+      }
+    },
+    "bed-single": {
+      "file": "/models/bed-single.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": true,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.91,
+        "d": 1.9,
+        "h": 0.6
+      }
+    },
+    "bedside": {
+      "file": "/models/bedside.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.45,
+        "d": 0.4,
+        "h": 0.55
+      }
+    },
+    "wardrobe": {
+      "file": "/models/wardrobe.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.6,
+        "h": 2.1
+      }
+    },
+    "wardrobe-small": {
+      "file": "/models/wardrobe-small.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.6,
+        "h": 2.1
+      }
+    },
+    "bookshelf": {
+      "file": "/models/bookshelf.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.32,
+        "h": 1.8
+      }
+    },
+    "tv-unit": {
+      "file": "/models/tv-unit.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.6,
+        "d": 0.4,
+        "h": 0.5
+      }
+    },
+    "chest": {
+      "file": "/models/chest.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.45,
+        "h": 0.85
+      }
+    },
+    "counter": {
+      "file": "/models/counter.glb",
+      "yaw": 270,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 2.4,
+        "d": 0.6,
+        "h": 0.9
+      }
+    },
+    "island": {
+      "file": "/models/island.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.9,
+        "h": 0.9
+      }
+    },
+    "sink-unit": {
+      "file": "/models/sink-unit.glb",
+      "yaw": 180,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.2,
+        "d": 0.6,
+        "h": 0.9
+      }
+    },
+    "fridge": {
+      "file": "/models/fridge.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.7,
+        "d": 0.7,
+        "h": 1.8
+      }
+    },
+    "hob": {
+      "file": "/models/hob.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.6,
+        "d": 0.6,
+        "h": 0.9
+      }
+    },
+    "overhead": {
+      "file": "/models/overhead.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 1.45,
+      "size": {
+        "w": 1.8,
+        "d": 0.35,
+        "h": 0.7
+      }
+    },
+    "ceiling-fan": {
+      "file": "/models/ceiling-fan.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": true,
+      "placement": "ceiling",
+      "mountHeight": 0.3,
+      "size": {
+        "w": 1.2,
+        "d": 1.2,
+        "h": 0.35
+      }
+    },
+    "ac-split": {
+      "file": "/models/ac-split.glb",
+      "yaw": 90,
+      "upAxis": null,
+      "fitFootprint": true,
+      "placement": "wall",
+      "mountHeight": 2.2,
+      "size": {
+        "w": 1,
+        "d": 0.22,
+        "h": 0.3
+      }
+    },
+    "washing-machine": {
+      "file": "/models/washing-machine.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": true,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.6,
+        "d": 0.6,
+        "h": 0.85
+      }
+    },
+    "wc": {
+      "file": "/models/wc.glb",
+      "yaw": 270,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.38,
+        "d": 0.7,
+        "h": 0.78
+      }
+    },
+    "basin": {
+      "file": "/models/basin.glb",
+      "yaw": 90,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 0.8,
+      "size": {
+        "w": 0.6,
+        "d": 0.45,
+        "h": 0.2
+      }
+    },
+    "bathtub": {
+      "file": "/models/bathtub.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.7,
+        "d": 0.75,
+        "h": 0.55
+      }
+    },
+    "shower": {
+      "file": "/models/shower.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.9,
+        "h": 2
+      }
+    },
+    "door": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "door-main": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 1.05,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "door-double": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 1.5,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "door-sliding": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "window": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": 0.9,
+      "size": {
+        "w": 1.2,
+        "d": 0.05,
+        "h": 1.2
+      }
+    },
+    "window-wide": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": 0.9,
+      "size": {
+        "w": 2.1,
+        "d": 0.05,
+        "h": 1.2
+      }
+    },
+    "window-full": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "opening": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "in-wall",
+      "mountHeight": null,
+      "size": {
+        "w": 1,
+        "d": 0.05,
+        "h": 2.1
+      }
+    },
+    "ceiling-light": {
+      "file": "/models/ceiling-light.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "ceiling",
+      "mountHeight": 0,
+      "size": {
+        "w": 0.4,
+        "d": 0.4,
+        "h": 0.08
+      }
+    },
+    "pendant": {
+      "file": "/models/pendant.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "ceiling",
+      "mountHeight": 0.7,
+      "size": {
+        "w": 0.32,
+        "d": 0.32,
+        "h": 0.3
+      }
+    },
+    "wall-light": {
+      "file": "/models/wall-light.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 1.8,
+      "size": {
+        "w": 0.16,
+        "d": 0.14,
+        "h": 0.24
+      }
+    },
+    "rug": {
+      "file": "/models/rug.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 2.4,
+        "d": 1.7,
+        "h": 0.012
+      }
+    },
+    "plant": {
+      "file": "/models/plant.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.55,
+        "d": 0.55,
+        "h": 1.3
+      }
+    },
+    "tv": {
+      "file": "/models/tv.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 1,
+      "size": {
+        "w": 1.25,
+        "d": 0.07,
+        "h": 0.72
+      }
+    },
+    "painting": {
+      "file": "/models/painting.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 1.45,
+      "size": {
+        "w": 0.9,
+        "d": 0.05,
+        "h": 0.7
+      }
+    },
+    "mirror": {
+      "file": "/models/mirror.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 1.1,
+      "size": {
+        "w": 0.7,
+        "d": 0.04,
+        "h": 1
+      }
+    },
+    "curtain": {
+      "file": "/models/curtain.glb",
+      "yaw": 0,
+      "upAxis": "z",
+      "fitFootprint": false,
+      "placement": "wall",
+      "mountHeight": 0.05,
+      "size": {
+        "w": 2,
+        "d": 0.12,
+        "h": 2.3
+      }
+    },
+    "pool": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 8,
+        "d": 4,
+        "h": 1.4
+      }
+    },
+    "pool-plunge": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 4,
+        "d": 2.4,
+        "h": 1.25
+      }
+    },
+    "pool-lap": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 12,
+        "d": 2.5,
+        "h": 1.35
+      }
+    },
+    "deck": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 4,
+        "d": 3,
+        "h": 0.12
+      }
+    },
+    "paving": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 5,
+        "d": 4,
+        "h": 0.06
+      }
+    },
+    "lawn": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 8,
+        "d": 6,
+        "h": 0.04
+      }
+    },
+    "tree": {
+      "file": "/models/tree.glb",
+      "yaw": 180,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 4.5,
+        "d": 4.5,
+        "h": 6
+      }
+    },
+    "tree-small": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 2.4,
+        "d": 2.4,
+        "h": 3.2
+      }
+    },
+    "hedge": {
+      "file": null,
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 3,
+        "d": 0.6,
+        "h": 1.5
+      }
+    },
+    "shrub": {
+      "file": "/models/shrub.glb",
+      "yaw": 270,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.9,
+        "h": 0.8
+      }
+    },
+    "planter-outdoor": {
+      "file": "/models/planter-outdoor.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.9,
+        "d": 0.45,
+        "h": 1.1
+      }
+    },
+    "lounger": {
+      "file": "/models/lounger.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.7,
+        "d": 1.98,
+        "h": 0.62
+      }
+    },
+    "parasol": {
+      "file": "/models/parasol.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 2.7,
+        "d": 2.7,
+        "h": 2.4
+      }
+    },
+    "pergola": {
+      "file": "/models/pergola.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 4,
+        "d": 3,
+        "h": 2.4
+      }
+    },
+    "fence": {
+      "file": "/models/fence.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 3,
+        "d": 0.1,
+        "h": 1.8
+      }
+    },
+    "outdoor-table": {
+      "file": "/models/outdoor-table.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 1.8,
+        "d": 0.9,
+        "h": 0.75
+      }
+    },
+    "outdoor-chair": {
+      "file": "/models/outdoor-chair.glb",
+      "yaw": 0,
+      "upAxis": null,
+      "fitFootprint": false,
+      "placement": "floor",
+      "mountHeight": null,
+      "size": {
+        "w": 0.55,
+        "d": 0.56,
+        "h": 0.85
+      }
+    }
+  }
+}
