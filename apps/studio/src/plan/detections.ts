@@ -585,6 +585,43 @@ export function summarise(walls: ProposedWall[]): {
  * as one -- the room takes the name of the space that dominates it rather than
  * of a cupboard inside it.
  */
+/**
+ * How many of the spaces the drawing shows actually became rooms.
+ *
+ * The measure the studio was missing. Enclosure was judged by "did we get any
+ * rooms at all", so a nine-room drawing that produced two rooms totalling
+ * 3.9 m2 was reported to the user as a success. Measured on five of the owner's
+ * own plans, the walls path covered 7 of 41 drawn spaces and the outline path
+ * covered 40 of 41 — and on three of the five the walls enclosed nothing, which
+ * was the ONLY case anything noticed.
+ *
+ * Fittings are excluded for the reason `namesFromDrawing` excludes them: a
+ * wardrobe is joinery, not a space, and counting it would set a target the
+ * geometry is not meant to hit.
+ *
+ * The anchor is `labelPoint` rather than a centroid, because a concave room's
+ * centroid is routinely outside it — the same fault, from a third direction, as
+ * the one that cost the Toilet its name and would have put a lamp in the room
+ * next door.
+ */
+export function roomsCovered(
+  rooms: Array<{ polygon: Vec2[] }>,
+  outlines: DetectedRoom[],
+  underlay: Underlay,
+): { covered: number; drawn: number } {
+  const drawn = (outlines ?? []).filter((region) => region.kind !== 'fitting')
+
+  let covered = 0
+  for (const region of drawn) {
+    const points = (region.polygon ?? []).map((point) => toWorld(point, underlay))
+    if (points.length < 3) continue
+    const anchor = labelPoint(points)
+    if (rooms.some((room) => pointInPolygon(anchor, room.polygon))) covered += 1
+  }
+
+  return { covered, drawn: drawn.length }
+}
+
 export function namesFromDrawing(
   rooms: Array<{ id: string; polygon: Vec2[] }>,
   outlines: DetectedRoom[],

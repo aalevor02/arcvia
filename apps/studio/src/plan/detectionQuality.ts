@@ -134,6 +134,43 @@ const PLAN_MIN_WALLS = 6
  * intends to finish by hand, and refusing outright would make that impossible.
  * What it must not do is stay silent, which is what it did before.
  */
+/**
+ * Should the outline rescue be tried at all?
+ *
+ * The old test was `rooms === 0`, and it let the worst results through.
+ * Measured on five of the owner's own plans, the walls path covered 7 of the 41
+ * spaces their drawings show and the outline path covered 40 — but only THREE
+ * of the five enclosed nothing at all, so only those three were ever rescued.
+ * One drawing of nine rooms produced two rooms totalling 3.9 m2 and was
+ * reported to the user as a success. That is the "it isn't doing anything" the
+ * owner described, and it was invisible from inside because the one number
+ * being checked was not zero.
+ *
+ * So the question is how much of the drawing the walls account for, not whether
+ * they account for any of it.
+ *
+ * ── Why three spaces, and why half ──────────────────────────────────────────
+ * The held-out villa markup draws ONE space: an open lift lobby the reader
+ * reports as a room and the owner's markup says is open circulation. Coverage
+ * there is 0 of 1 for the walls and 1 of 1 for the outlines, and the OUTLINES
+ * ARE WRONG — they seal 9 m2 of circulation into a room that has no fourth
+ * wall. One or two labelled spaces is not enough evidence to overrule measured
+ * geometry, and a plan that genuinely encloses nothing always has more than
+ * two. Half is the line between disagreeing with the walls and replacing them:
+ * the five real plans sit at 0, 0, 0, 11% and 43%, and the villa fixture — the
+ * one case where the walls are right — is excluded by the count, not the ratio.
+ *
+ * `rooms === 0` is kept as its own trigger regardless of how many spaces the
+ * drawing names, because nothing enclosed is unusable whatever the drawing says.
+ */
+export function shouldTryOutlines(
+  { rooms, covered, drawn }: { rooms: number; covered: number; drawn: number },
+): boolean {
+  if (drawn <= 0) return false
+  if (rooms === 0) return true
+  return drawn >= 3 && covered * 2 < drawn
+}
+
 export function assessDetection(walls: ProposedWall[], rooms: number): Verdict {
   if (walls.length === 0) {
     return {
