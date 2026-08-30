@@ -66,7 +66,7 @@ import {
 import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
 import { assessDetection, shouldTryOutlines } from '../plan/detectionQuality'
-import { proposeFurniture, type Proposal } from '../plan/furnish'
+import { proposeFurnitureForImport, type Proposal } from '../plan/furnish'
 import {
   automaticScalePerPixel,
   convertDetections,
@@ -680,7 +680,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // outlines were fittings in order to keep them out of the walls, so the
       // work is already done — making the user run a second pass for it would
       // be charging twice for one answer.
-      const pieces = proposeFurniture(result, traced)
+      const pieces = proposeFurnitureForImport(result, traced)
       showFurniture(pieces.length > 0 ? pieces : null)
 
       // Judge the result before offering it.

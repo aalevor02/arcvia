@@ -166,6 +166,45 @@ function collides(
  * with a generic arrangement. Turn it on for a bare plan, where a bedroom with
  * nothing in it genuinely is better shown with a bed than empty.
  */
+/**
+ * The furniture an IMPORT should offer, which is both halves.
+ *
+ * ── Why this exists rather than a bare flag at the call site ────────────────
+ * `assume` was off by default and NOTHING IN THE APP EVER TURNED IT ON, so the
+ * second half of proposeFurniture was unreachable: written, tested, documented,
+ * and dead. `FurnitureReview` even groups proposals under a `typical` heading
+ * for it -- "on a bare plan some are a guess from the room's name" -- a group
+ * that could never contain anything.
+ *
+ * Measured on five of the owner's own plans, furniture proposed at import:
+ *
+ *     1.png           0   ->   9
+ *     3.png           0   ->  11
+ *     4.png           1   ->   7
+ *     Avarana bsmt    3   ->   8
+ *     Avarana grnd    3   ->   8
+ *                     7   ->  43
+ *
+ * Two of the five furnished to ZERO. Those two draw their furniture as
+ * photographic imagery rather than as labelled outlines, so the reader has
+ * nothing to identify and the honest default produced an empty building.
+ *
+ * ── Why turning it on does not overwrite a drawn arrangement ────────────────
+ * That was the stated fear, and the guard for it is already in the code: a room
+ * is skipped entirely when anything drawn collides with it, so a bedroom the
+ * architect furnished is left exactly as drawn. The assumed pieces only reach
+ * rooms that had nothing. And they arrive labelled `typical` at 0.4 confidence
+ * with "a bedroom usually has one" attached, into a review that sorts by
+ * evidence and puts them last -- so the user sees what is a reading and what is
+ * a guess before any of it is placed.
+ */
+export function proposeFurnitureForImport(
+  detection: DetectionResult,
+  underlay: Underlay,
+): Proposal[] {
+  return proposeFurniture(detection, underlay, { assume: true })
+}
+
 export function proposeFurniture(
   detection: DetectionResult,
   underlay: Underlay,
