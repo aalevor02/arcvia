@@ -1062,14 +1062,62 @@ def reconstruct(
             # magnitude here, not a threshold to tune: the duplicates measure
             # 0.008 m and the real neighbours 1.08 m.
             DUPLICATE_M = 0.05
+
+            # ---- And the same object drawn twice with an OFFSET -------------
+            #
+            # Distance alone only catches an exact re-insert. Measured on the
+            # same villa, after the 0.05 m rule had already run, two pairs of
+            # the SAME BLOCK still overlapped:
+            #
+            #     bed-king / bed-king   45.6% overlap, 1.09 m apart
+            #     plant    / plant      64.1% overlap, 0.49 m apart
+            #
+            # Two solid objects cannot occupy the same floor. Two instances of
+            # ONE block that overlap are therefore one object drawn twice, not
+            # two objects — and unlike the cross-item overlaps in the same model
+            # (plant against bed-king at 37-40%, different blocks) there is no
+            # question of WHICH is wrong, because they are the same thing.
+            #
+            # 0.30 because distinct same-block objects do not overlap at all —
+            # two beds side by side touch at most — so anything above zero is
+            # already the anomaly, and 0.30 sits well clear of both the noise
+            # floor and the 45.6% actually observed.
+            DUPLICATE_OVERLAP = 0.30
+
+            def _footprint_rect(placement):
+                """Axis-aligned footprint. Rotations in plan are quarter turns."""
+                w, d = footprints.get(placement["block"], (0.0, 0.0))
+                if not w or not d:
+                    return None
+                turned = round((placement.get("rotation") or 0.0) / (math.pi / 2)) % 2
+                if turned:
+                    w, d = d, w
+                px, py = placement["position"]["x"], placement["position"]["y"]
+                return (px - w / 2, py - d / 2, px + w / 2, py + d / 2, w * d)
+
+            def _overlap_share(a, b):
+                if a is None or b is None:
+                    return 0.0
+                wide = min(a[2], b[2]) - max(a[0], b[0])
+                tall = min(a[3], b[3]) - max(a[1], b[1])
+                if wide <= 0 or tall <= 0:
+                    return 0.0
+                smaller = min(a[4], b[4])
+                return (wide * tall) / smaller if smaller else 0.0
+
             deduped, dropped = [], 0
             for placement in in_frame:
                 px, py = placement["position"]["x"], placement["position"]["y"]
                 block = placement["block"]
+                rect = _footprint_rect(placement)
                 if any(
                     kept["block"] == block
-                    and math.hypot(px - kept["position"]["x"],
+                    and (
+                        math.hypot(px - kept["position"]["x"],
                                    py - kept["position"]["y"]) <= DUPLICATE_M
+                        or _overlap_share(rect, _footprint_rect(kept))
+                        >= DUPLICATE_OVERLAP
+                    )
                     for kept in deduped
                 ):
                     dropped += 1
@@ -1077,7 +1125,8 @@ def reconstruct(
                 deduped.append(placement)
             if dropped:
                 print(f"ARCVIA_FIXTURE_DUPLICATES:{dropped} placement(s) collapsed "
-                      f"(same block within {DUPLICATE_M} m)")
+                      f"(same block within {DUPLICATE_M} m, or overlapping by "
+                      f"{DUPLICATE_OVERLAP:.0%})")
             in_frame = deduped
 
             for placement in in_frame:
