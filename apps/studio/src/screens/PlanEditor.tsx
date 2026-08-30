@@ -65,12 +65,13 @@ import {
 } from '../plan/deckDesign'
 import ImportPanel from '../components/ImportPanel'
 import { SceneChannel, type Peer } from '../lib/realtime'
-import { assessDetection } from '../plan/detectionQuality'
+import { assessDetection, shouldTryOutlines } from '../plan/detectionQuality'
 import { proposeFurniture, type Proposal } from '../plan/furnish'
 import {
   automaticScalePerPixel,
   convertDetections,
   namesFromDrawing,
+  roomsCovered,
   type DetectedObject,
   type DetectedRoom,
   type DetectedScale,
@@ -706,9 +707,10 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
               emptyPlan(),
             ),
           ),
-        ).length
+        )
 
-      let rooms = encloses(walls)
+      let enclosed = encloses(walls)
+      let rooms = enclosed.length
 
       // Last resort, and only from a standing start of nothing.
       //
@@ -756,13 +758,23 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       const beforeRescue = assessDetection(walls, rooms)
       const severalPlans = !beforeRescue.ok && (beforeRescue.clusters ?? 0) >= 3
 
+      // WHEN TO RESCUE: not "did the walls enclose anything" but "how much of
+      // the drawing did they account for". The measurement behind that, and the
+      // two guards on it, are in shouldTryOutlines -- including the held-out
+      // villa markup, the one case where the walls are right and the outlines
+      // would seal open circulation.
+      const before = roomsCovered(enclosed, result.rooms ?? [], traced)
+      const drawnSpaces = before.drawn
+
       let closedFromOutlines = false
-      if (!severalPlans && rooms === 0 && (result.rooms?.length ?? 0) > 0) {
+      if (!severalPlans && shouldTryOutlines({ rooms, ...before })) {
         const fromOutlines = convertDetections(result, traced, { useRoomPolygons: true })
-        const enclosed = encloses(fromOutlines)
-        if (enclosed > 0) {
+        const outlineRooms = encloses(fromOutlines)
+        const after = roomsCovered(outlineRooms, result.rooms ?? [], traced)
+        if (outlineRooms.length > 0 && after.covered > before.covered) {
           walls = fromOutlines
-          rooms = enclosed
+          enclosed = outlineRooms
+          rooms = outlineRooms.length
           closedFromOutlines = true
         }
       }
@@ -775,8 +787,9 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
         // walls trace the reader's room outlines rather than lines measured on
         // the drawing, so they are a starting point to correct, not a survey.
         setError(
-          `No walls in this drawing enclosed a room, so the plan was closed ` +
-          `using the ${rooms} room outline${rooms === 1 ? '' : 's'} the reader ` +
+          `The walls in this drawing accounted for ${before.covered} of the ` +
+          `${drawnSpaces} spaces it shows, so the plan was closed using the ` +
+          `${rooms} room outline${rooms === 1 ? '' : 's'} the reader ` +
           `found instead. Those are traced from shaded areas rather than ` +
           `measured from lines — check the walls before you build on them. ` +
           `If this sheet holds more than one drawing, crop it to a single ` +

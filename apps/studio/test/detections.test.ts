@@ -2,6 +2,7 @@ import {
   automaticScalePerPixel,
   convertDetections,
   namesFromDrawing,
+  roomsCovered,
   summarise,
   toWorld,
   type DetectionResult,
@@ -661,6 +662,58 @@ function face(x1: number, y1: number, x2: number, y2: number, confidence = 0.9) 
   const names = namesFromDrawing(rooms, regions, AVARANA)
   check('so the room the drawing named still exists to be named',
     Object.values(names).includes('Toilet'), JSON.stringify(names))
+}
+
+// ---- counting what the drawing asked for ------------------------------------
+// The number the studio was missing. Enclosure was judged by "did we get any
+// rooms at all", so a nine-room drawing that produced two rooms totalling
+// 3.9 m2 was reported to the user as a success.
+{
+  // UNDERLAY is 1000x500 at 0.01, so world x = nx*10 and world y = -ny*5.
+  const region = (name: string, kind: 'room' | 'fitting', box: number[]) => ({
+    polygon: [
+      { x: box[0], y: box[1] }, { x: box[2], y: box[1] },
+      { x: box[2], y: box[3] }, { x: box[0], y: box[3] },
+    ],
+    area: 0.04, name, kind, size: null, also: [],
+  })
+  const drawn = [
+    region('Bedroom', 'room', [0.1, 0.1, 0.3, 0.3]),
+    region('Kitchen', 'room', [0.5, 0.1, 0.7, 0.3]),
+    region('Wardrobe', 'fitting', [0.12, 0.12, 0.16, 0.16]),
+  ]
+  const bedroom = {
+    polygon: [{ x: 1, y: -0.5 }, { x: 3, y: -0.5 }, { x: 3, y: -1.5 }, { x: 1, y: -1.5 }],
+  }
+
+  const none = roomsCovered([], drawn, UNDERLAY)
+  check('a drawing of two spaces asks for two, the joinery not counted',
+    none.drawn === 2, String(none.drawn))
+  check('and a plan with no rooms covers none of them', none.covered === 0)
+
+  const half = roomsCovered([bedroom], drawn, UNDERLAY)
+  check('one room covers the one space it contains',
+    half.covered === 1 && half.drawn === 2, JSON.stringify(half))
+
+  // The same concave trap as the naming path: a centroid can sit outside its
+  // own room, so an L-shaped space would be counted as missing while the plan
+  // holds it perfectly well.
+  const ell = {
+    polygon: [
+      { x: 1, y: -1 }, { x: 5, y: -1 }, { x: 5, y: -2 },
+      { x: 2, y: -2 }, { x: 2, y: -4 }, { x: 1, y: -4 },
+    ],
+  }
+  const lShaped = [{
+    polygon: [
+      { x: 0.1, y: 0.2 }, { x: 0.5, y: 0.2 }, { x: 0.5, y: 0.4 },
+      { x: 0.2, y: 0.4 }, { x: 0.2, y: 0.8 }, { x: 0.1, y: 0.8 },
+    ],
+    area: 0.3, name: 'Kitchen', kind: 'room' as const, size: null, also: [],
+  }]
+  check('a concave space is counted as covered by the room that holds it',
+    roomsCovered([ell], lShaped, UNDERLAY).covered === 1,
+    JSON.stringify(roomsCovered([ell], lShaped, UNDERLAY)))
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

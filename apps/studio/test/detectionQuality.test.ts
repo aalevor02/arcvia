@@ -1,4 +1,9 @@
-import { assessDetection, countClusters, type ProposedWall } from '../src/plan/detectionQuality'
+import {
+  assessDetection,
+  countClusters,
+  shouldTryOutlines,
+  type ProposedWall,
+} from '../src/plan/detectionQuality'
 
 /**
  * Whether a detection worked.
@@ -103,6 +108,54 @@ const box = (offset: number, size = 4): ProposedWall[] => [
   // fine even if the building has separated wings.
   const wings = assessDetection([...box(0), ...box(30), ...box(60)], 3)
   check('separated wings that enclose rooms still pass', wings.ok, String(wings.ok))
+}
+
+// ---- how much of the drawing did the walls account for? ---------------------
+// The old trigger for the outline rescue was `rooms === 0`, and it let the
+// worst results through. Measured on five of the owner's own plans the walls
+// path covered 7 of the 41 spaces their drawings show and the outline path
+// covered 40 — but only three of the five enclosed NOTHING, so only those three
+// were rescued. A nine-room drawing that produced two rooms totalling 3.9 m2
+// was reported as a success, because the single number being checked was not
+// zero.
+{
+  check('nothing enclosed is still rescued, whatever the drawing shows',
+    shouldTryOutlines({ rooms: 0, covered: 0, drawn: 1 }))
+
+  // 3.png: nine spaces drawn, two rooms enclosed, one space covered.
+  check('two rooms out of a nine-room drawing is a failure, not a success',
+    shouldTryOutlines({ rooms: 2, covered: 1, drawn: 9 }))
+
+  // 4.png: the case the zero test could never have caught — six real rooms.
+  check('and so is six spaces out of fourteen',
+    shouldTryOutlines({ rooms: 6, covered: 6, drawn: 14 }))
+
+  // ---- but the walls must keep the benefit of the doubt ---------------------
+  // The held-out villa markup draws ONE space: an open lift lobby the reader
+  // reports as a room and the owner's markup says is open circulation. Coverage
+  // is 0 of 1 for the walls and 1 of 1 for the outlines, and the outlines are
+  // WRONG — they seal 9 m2 of circulation into a room with no fourth wall. So
+  // one or two labelled spaces cannot overrule measured geometry.
+  check('one drawn space does not overrule the walls that disagree with it',
+    !shouldTryOutlines({ rooms: 1, covered: 0, drawn: 1 }))
+  check('nor do two',
+    !shouldTryOutlines({ rooms: 1, covered: 0, drawn: 2 }))
+
+  check('a plan that covers most of its drawing is left alone',
+    !shouldTryOutlines({ rooms: 9, covered: 8, drawn: 9 }))
+
+  // Exactly half is not "thin". The line is drawn where the walls are covering
+  // less than the drawing shows, not merely not all of it.
+  check('half covered is not thin enough to replace',
+    !shouldTryOutlines({ rooms: 7, covered: 7, drawn: 14 }))
+  check('but one below half is', shouldTryOutlines({ rooms: 6, covered: 6, drawn: 14 }))
+
+  // A drawing with no labelled spaces gives nothing to measure against, so
+  // there is no evidence either way and the walls stand.
+  check('a drawing that names no spaces is never rescued on coverage',
+    !shouldTryOutlines({ rooms: 4, covered: 0, drawn: 0 }))
+  check('...not even when it encloses nothing, since there is nothing to trace',
+    !shouldTryOutlines({ rooms: 0, covered: 0, drawn: 0 }))
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
