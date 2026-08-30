@@ -10,7 +10,11 @@ import {
   ROOM_RECIPES,
 } from '../src/catalogue/recognise'
 import { CATALOGUE } from '../src/catalogue/items'
-import { proposeFurniture, summariseFurniture } from '../src/plan/furnish'
+import {
+  proposeFurniture,
+  proposeFurnitureForImport,
+  summariseFurniture,
+} from '../src/plan/furnish'
 import type { DetectionResult, DetectedRoom } from '../src/plan/detections'
 import type { Underlay } from '../src/plan/types'
 
@@ -169,6 +173,36 @@ const result = (rooms: DetectedRoom[]): DetectionResult => ({
     assumed.every((p) => p.evidence === 'typical'))
   check('a bed is among them', assumed.some((p) => p.item.startsWith('bed')))
   check('and it says why', (assumed[0]?.because ?? '').includes('usually'))
+}
+
+{
+  // ---- what an IMPORT offers, which is the thing the user actually gets ----
+  // `assume` was off by default and NOTHING EVER TURNED IT ON, so the whole
+  // second half of proposeFurniture was unreachable from the product. The tests
+  // above passed the flag directly and so could not see it: they proved the
+  // code worked, not that anything called it.
+  //
+  // Measured on five of the owner's own plans, furniture proposed at import was
+  // 0, 0, 1, 3, 3. The two zeroes draw their furniture as photographic imagery
+  // rather than labelled outlines, so the reader has nothing to identify and an
+  // upload produced an entirely empty building.
+  const bare = result([room('Bedroom', [0, 0, 0.4, 0.4])])
+
+  const offered = proposeFurnitureForImport(bare, underlay)
+  check('an import furnishes a named room the drawing left bare',
+    offered.length > 0, `${offered.length} pieces`)
+  check('and a bed is among them', offered.some((p) => p.item.startsWith('bed')))
+  check('and they are marked as guesses, so the review can rank them last',
+    offered.every((p) => p.evidence === 'typical'))
+
+  // The stated fear about turning this on, and the guard that answers it.
+  const drawn = result([
+    room('Bedroom', [0, 0, 0.4, 0.4]),
+    fitting(null, [0.1, 0.1, 0.3, 0.26]),
+  ])
+  check('but an import never adds to a room the architect furnished',
+    proposeFurnitureForImport(drawn, underlay).every((p) => p.evidence !== 'typical'),
+    JSON.stringify(proposeFurnitureForImport(drawn, underlay).map((p) => p.evidence)))
 }
 
 {
