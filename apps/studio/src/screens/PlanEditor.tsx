@@ -148,6 +148,16 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
   const [hint, setHint] = useState('Click to start a wall.')
   const [save, setSave] = useState<SaveState>('idle')
   const [error, setError] = useState<string | null>(null)
+  /**
+   * A caveat about a read that SUCCEEDED, kept apart from `error`.
+   *
+   * The outline rescue used to report itself through `setError`, which renders
+   * red with role="alert". So the best possible outcome of an upload -- a plan
+   * that covers every space the drawing shows -- was announced as a failure,
+   * and a screen reader interrupted to say so. The owner's word for the result
+   * was "not perfect at all", and this banner is the first thing on the page.
+   */
+  const [caveat, setCaveat] = useState<string | null>(null)
   const [notice, setNotice] = useState(true)
   /** The engine's account of a CAD import, shown until dismissed. */
   const [importSummary, setImportSummary] = useState<string | null>(null)
@@ -643,6 +653,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
 
     setDetecting(true)
     setError(null)
+    setCaveat(null)
     try {
       const result = await detectFloorplan(underlay.url)
 
@@ -768,6 +779,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       const drawnSpaces = before.drawn
 
       let closedFromOutlines = false
+      let covered = before.covered
       if (!severalPlans && shouldTryOutlines({ rooms, ...before })) {
         const fromOutlines = convertDetections(result, traced, { useRoomPolygons: true })
         const outlineRooms = encloses(fromOutlines)
@@ -776,6 +788,7 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
           walls = fromOutlines
           enclosed = outlineRooms
           rooms = outlineRooms.length
+          covered = after.covered
           closedFromOutlines = true
         }
       }
@@ -784,18 +797,21 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       // given is the multi-plan one and not a downstream symptom of it.
       const verdict = severalPlans ? beforeRescue : assessDetection(walls, rooms)
       if (closedFromOutlines) {
-        // Said plainly, because it changes what the user is accepting. These
-        // walls trace the reader's room outlines rather than lines measured on
-        // the drawing, so they are a starting point to correct, not a survey.
-        setError(
-          `The walls in this drawing accounted for ${before.covered} of the ` +
-          `${drawnSpaces} spaces it shows, so the plan was closed using the ` +
-          `${rooms} room outline${rooms === 1 ? '' : 's'} the reader ` +
-          `found instead. Those are traced from shaded areas rather than ` +
-          `measured from lines — check the walls before you build on them. ` +
-          `If this sheet holds more than one drawing, crop it to a single ` +
-          `floor plan and read it again: outlines from an elevation or a ` +
-          `section will have been closed as if they were rooms.`,
+        // A CAVEAT, not an error. The read worked -- it is about to say it
+        // covered every space the drawing shows -- and it changes what the user
+        // is accepting, because these walls trace the reader's shaded regions
+        // rather than lines measured on the drawing. Both halves belong in the
+        // sentence, and leading with the failed half was reporting a success as
+        // a fault.
+        setCaveat(
+          `Closed from the ${rooms} room outline${rooms === 1 ? '' : 's'} the ` +
+          `reader found, which cover ${covered} of the ${drawnSpaces} space` +
+          `${drawnSpaces === 1 ? '' : 's'} this drawing shows — the walls it ` +
+          `measured on their own covered ${before.covered}. Outlines are traced ` +
+          `from shaded areas rather than measured from lines, so check them ` +
+          `before you build on them. If this sheet holds more than one drawing, ` +
+          `crop it to a single floor plan and read it again: outlines from an ` +
+          `elevation or a section will have been closed as if they were rooms.`,
         )
       } else if (!verdict.ok) {
         setError(`${verdict.reason} ${verdict.detail}`)
@@ -1061,6 +1077,12 @@ export default function PlanEditor({ sceneId, start, onBack }: Props) {
       {error && (
         <p className="alert alert-error" role="alert" style={{ margin: 12 }}>
           {error}
+        </p>
+      )}
+
+      {caveat && (
+        <p className="alert" role="status" style={{ margin: 12 }}>
+          {caveat}
         </p>
       )}
 
