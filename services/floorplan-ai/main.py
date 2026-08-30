@@ -703,10 +703,39 @@ def detect_heuristic(
         ),
     )
 
+    # TWO INDEPENDENT DOOR SIGNALS, failing in different places, which is the
+    # whole reason for having both. A gap is an absence and cannot be seen where
+    # the tracer ran one wall straight through the doorway; an arc is a mark and
+    # cannot be seen where the draughtsman drew no swing. Measured on the
+    # owner's 1.png against an enumerated ground truth, gaps found 2 of 7
+    # doorways and arcs found 2 more, with no false positive on either side.
     openings = detect_openings(best.walls)
+    for arc in detect_swing_arcs(image, best.walls, best.scale):
+        if not any(_same_opening(arc, found) for found in openings):
+            openings.append(arc)
+
     return best.walls, openings, best.rooms, best.scale or deduce_scale(
         best.walls, openings
     )
+
+
+def _same_opening(one: Detection, other: Detection) -> bool:
+    """One doorway found twice, once as a gap and once as an arc.
+
+    The reach is HALF THE NARROWER opening, not a whole span. A first version
+    used the widest span of either and it silently swallowed the entire arc
+    pass: on 1.png the bedroom-2 and toilet-02 doors sit 75 and 79 px from the
+    nearest gap -- different doorways in different walls -- and a reach of one
+    1.57 m span reported both as already known. Measured, the real duplicate is
+    6 px apart and the nearest distinct pair is 75, so half the narrower span
+    separates them with an order of magnitude to spare.
+    """
+    span = lambda box: max(box[2], box[3])  # noqa: E731
+    reach = 0.5 * min(span(one.bbox), span(other.bbox))
+    return math.hypot(
+        (one.bbox[0] + one.bbox[2] / 2) - (other.bbox[0] + other.bbox[2] / 2),
+        (one.bbox[1] + one.bbox[3] / 2) - (other.bbox[1] + other.bbox[3] / 2),
+    ) <= reach
 
 
 def deduce_scale(
@@ -1464,6 +1493,297 @@ def merge_parallel(
             )
 
     return kept
+
+
+def _fit_circle(points: np.ndarray):
+    """Algebraic circle fit. Returns (cx, cy, r, rms residual in px) or None."""
+    x = points[:, 0].astype(np.float64)
+    y = points[:, 1].astype(np.float64)
+    design = np.column_stack([x, y, np.ones(len(x))])
+    try:
+        sol, *_ = np.linalg.lstsq(design, x * x + y * y, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+    cx, cy = sol[0] / 2, sol[1] / 2
+    r_squared = sol[2] + cx * cx + cy * cy
+    if r_squared <= 0:
+        return None
+    r = math.sqrt(r_squared)
+    return cx, cy, r, float(np.sqrt(np.mean((np.hypot(x - cx, y - cy) - r) ** 2)))
+
+
+def _sweep_degrees(points: np.ndarray, cx: float, cy: float) -> float:
+    """Degrees of turn the points cover, tolerant of the wrap at 180."""
+    angles = np.sort(np.degrees(np.arctan2(points[:, 1] - cy, points[:, 0] - cx)))
+    if len(angles) < 2:
+        return 0.0
+    return 360.0 - float(np.diff(np.concatenate([angles, [angles[0] + 360]])).max())
+
+
+def _ink_fraction(grey: np.ndarray, ax: float, ay: float, bx: float, by: float) -> float:
+    """How much of the line from a to b is drawn on.
+
+    Sampled across a narrow BAND rather than a single ray. The centre comes from
+    a circle fit and is good only to a few pixels, while a drawn leaf can be a
+    ONE-pixel column -- measured on 1.png, the bedroom-2 leaf occupies x = 573
+    exactly, with x = 576 already blank.
+
+    The hinge corner is skipped: the wall meets the arc there, so the first few
+    samples are ink whichever way the door faces.
+    """
+    height, width = grey.shape[:2]
+    length = math.hypot(bx - ax, by - ay)
+    if length <= 0:
+        return 0.0
+    nx, ny = -(by - ay) / length, (bx - ax) / length
+
+    samples, drawn = 0, 0
+    steps = 24
+    for step in range(3, steps - 1):
+        t = step / steps
+        px, py = ax + (bx - ax) * t, ay + (by - ay) * t
+        samples += 1
+        for offset in (-2, -1, 0, 1, 2):
+            x = int(round(px + nx * offset))
+            y = int(round(py + ny * offset))
+            if 0 <= y < height and 0 <= x < width and grey[y, x] < 150:
+                drawn += 1
+                break
+    return drawn / samples if samples else 0.0
+
+
+def _door_from_arc(
+    grey: np.ndarray, strokes: np.ndarray, arc: dict
+) -> tuple[float, float] | None:
+    """The direction the doorway lies in, as a unit vector, or None.
+
+    A swing is drawn as the leaf in its OPEN position plus the arc round to
+    closed, so one direction from the hinge has a line drawn along it and the
+    perpendicular one is the empty opening. Measured on 1.png, all three doors
+    read leaf 1.00 against doorway 0.00.
+
+    The four axis directions are probed rather than the arc's own endpoints. The
+    contour is a FRAGMENT of the sweep -- 37 to 51 degrees of the 90 the door
+    turns, broken by the text and walls it runs into -- so its ends reach
+    neither the leaf nor the opening. Axis alignment is the same assumption
+    `detect_openings` makes when it splits the world into horizontal and
+    vertical.
+
+    An earlier version chose the end nearest a wall and got both doors it found
+    BACKWARDS, reporting the leaf's own line as the opening: the leaf lies
+    against a wall too.
+    """
+    compass = {0: (1.0, 0.0), 90: (0.0, 1.0), 180: (-1.0, 0.0), 270: (0.0, -1.0)}
+    reach = lambda source, dx, dy: _ink_fraction(  # noqa: E731
+        source, arc["cx"], arc["cy"],
+        arc["cx"] + dx * arc["r"], arc["cy"] + dy * arc["r"],
+    )
+    # THE LEAF IS LOOKED FOR IN THE STROKES, NOT THE DRAWING. A leaf is a drawn
+    # line and survives the thin-ink step; a WALL is a filled mass and is
+    # removed by it. Measured on 3.png, the toilet-3 door read its own wall as
+    # the leaf in the raw image (1.00 downward) and put the doorway out into
+    # blank paper at right angles to the building. In the strokes that same
+    # direction reads 0.20 and the real leaf reads 1.00.
+    strokes_at = {angle: reach(strokes, dx, dy) for angle, (dx, dy) in compass.items()}
+    probes = {angle: reach(grey, dx, dy) for angle, (dx, dy) in compass.items()}
+
+    leaf = max(strokes_at, key=strokes_at.__getitem__)
+    # A door open at 90 degrees closes ACROSS the wall it hangs in, so the
+    # opening is perpendicular to the leaf -- the emptier of the two.
+    doorway = min(((leaf + 90) % 360, (leaf + 270) % 360), key=probes.__getitem__)
+
+    # Both tests. Without a drawn leaf this is some other arc; without a clear
+    # opening the "doorway" runs through ink, which a doorway does not.
+    # The opening is judged on the DRAWING, because a doorway has to be empty of
+    # everything, wall included -- not merely empty of strokes.
+    if strokes_at[leaf] < 0.4 or probes[doorway] > 0.35:
+        return None
+    return compass[doorway]
+
+
+def _arc_runs(points: np.ndarray):
+    """The whole stroke, and then pieces of it.
+
+    A door is drawn as a leaf AND a sweep, and where they touch -- which is
+    every cleanly drawn door, and every vector export -- they trace as ONE
+    contour. That contour is a straight line joined to a curve, and it fits no
+    circle at all: measured on a drawn fixture, the joined stroke fits at 8.38
+    px rms and covers 262 degrees, so it fails every test the arc has to pass.
+    The arc is still in there; it is just not the whole of what was traced.
+
+    The pieces are windows rather than a split at a corner, because the corner
+    is not always where the geometry changes: a contour walks OUT along one side
+    of the leaf, round the sweep, and BACK along the other side, so the arc is a
+    contiguous run somewhere in the middle rather than a labelled section.
+
+    The whole stroke comes first, so a clean arc costs one fit.
+    """
+    yield points
+    if len(points) < 120:
+        return
+    for pieces in (2, 3, 4):
+        window = len(points) // pieces
+        if window < 40:
+            break
+        for start in range(0, len(points) - window + 1, max(window // 2, 1)):
+            yield points[start:start + window]
+
+
+def detect_swing_arcs(
+    image: np.ndarray,
+    walls: list[WallSegment],
+    scale: PlanScale | None,
+) -> list[Detection]:
+    """
+    Doors from the swing arc the draughtsman drew.
+
+    ── Why this exists beside detect_openings ──────────────────────────────────
+    `detect_openings` looks for a GAP between two collinear walls, and a gap is
+    an ABSENCE. Measured on the owner's 1.png against an enumerated ground truth
+    (realdecks/avarana-cottage3-1png.doors-groundtruth.md), that method cannot
+    reach most doors on that sheet -- and not for the reason it first appeared:
+
+        LIFT door    (x 778, y 488-547)    ONE wall at x 778 runs y 449 to 672
+        BED-1 slider (x 340-532, y 1030)   ONE wall runs x 270 to 910 at y 1032
+        BED-2 slider (x 562-757, y 1030)   the SAME wall, through both sliders
+
+    The walls either side are not missing. The tracer runs ONE continuous wall
+    straight through the doorway, so there are not two segments to find a gap
+    between. No threshold on the opening code can fix that, and loosening the
+    collinearity tolerance cannot either, because one segment cannot pair with
+    itself.
+
+    An arc is the opposite kind of evidence. It is not an absence: it is a mark
+    made on purpose that says door here, hinged here, this wide. Three
+    properties separate it from every other curve on a furnished plan, and each
+    was measured before this was written:
+
+      1. THIN. Walls and furniture are filled masses; the arc is one stroke.
+         Opening with a 7 px disc keeps whatever the disc fits inside, and
+         subtracting that leaves line work.
+      2. Its radius is a DOOR WIDTH, 0.6 to 1.3 m. Not a general circle.
+      3. It FITS A CIRCLE ALMOST EXACTLY, and this is what does the real work.
+         On 1.png the arcs sit on their circle at 0.24, 0.24 and 0.25 px rms
+         while the WC bowl -- an oval, the obvious false positive, and the only
+         one that ever appeared -- fits at 1.87 px. Seven times worse.
+
+    Strokes are collected across a range of darkness thresholds because the arcs
+    on one sheet are not equally dark: at 130 this finds the toilet door and
+    misses the lobby door, and at 135 the reverse.
+
+    ── What it does not do ─────────────────────────────────────────────────────
+    It finds nothing for a door drawn without a swing -- a lift door, a sliding
+    door -- and on 1.png that is three of the seven doorways. Those need the
+    wall tracer to stop bridging them, which is a different repair.
+
+    No wall is required here, deliberately. The wall list is incomplete, which
+    is the whole reason this pass exists, so demanding a host from it would
+    discard the doors it was written to recover. The studio makes that check at
+    the point it matters, cutting only where a wall actually crosses the
+    opening, so an arc with nothing behind it costs nothing.
+    """
+    if image is None:
+        return []
+
+    height, width = image.shape[:2]
+    if scale and scale.metres_per_unit:
+        metres_per_px = scale.metres_per_unit / max(width, 1)
+        r_min, r_max = 0.6 / metres_per_px, 1.3 / metres_per_px
+    else:
+        # No scale yet -- `deduce_scale` runs after this. Fall back to the same
+        # kind of image-relative band `detect_openings` uses for its spans.
+        r_min, r_max = 0.03 * width, 0.15 * width
+
+    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    disc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+
+    candidates: list[dict] = []
+    for threshold in range(105, 181, 5):
+        ink = (grey < threshold).astype(np.uint8) * 255
+        strokes = cv2.subtract(ink, cv2.morphologyEx(ink, cv2.MORPH_OPEN, disc))
+        contours, _ = cv2.findContours(strokes, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        for contour in contours:
+            whole = contour.reshape(-1, 2)
+            if len(whole) < 40:
+                continue
+            for points in _arc_runs(whole):
+                fit = _fit_circle(points)
+                if fit is None:
+                    continue
+                cx, cy, r, rms = fit
+                if not (r_min <= r <= r_max):
+                    continue
+                # 0.6 px sits more than twice clear of the measured arcs (0.25)
+                # and three times clear of the oval, the only false positive
+                # ever seen on a real sheet.
+                if rms > 0.6:
+                    continue
+                if not (30 <= _sweep_degrees(points, cx, cy) <= 130):
+                    continue
+                candidates.append({"cx": cx, "cy": cy, "r": r, "rms": rms})
+                break
+
+    # One stroke has an inner and an outer contour and is found again at every
+    # threshold it survives, so a single door yields many candidates. They are
+    # GROUPED rather than reduced to one, because the best-FITTING candidate is
+    # not always the best-POSITIONED one: on 1.png the bedroom-2 door's
+    # lowest-residual fit sits five pixels off, and the leaf it must find is a
+    # single-pixel column. Those five pixels were the difference between reading
+    # that leaf at 1.00 and at 0.00, and so between finding the door and not.
+    candidates.sort(key=lambda c: c["rms"])
+    clusters: list[list[dict]] = []
+    for arc in candidates:
+        for cluster in clusters:
+            head = cluster[0]
+            if (math.hypot(arc["cx"] - head["cx"], arc["cy"] - head["cy"]) < 0.3 * head["r"]
+                    and abs(arc["r"] - head["r"]) < 0.3 * head["r"]):
+                cluster.append(arc)
+                break
+        else:
+            clusters.append([arc])
+
+    # One mid-threshold stroke image, used to tell a drawn leaf from a wall.
+    mid = (grey < 150).astype(np.uint8) * 255
+    leaf_strokes = np.where(
+        cv2.subtract(mid, cv2.morphologyEx(mid, cv2.MORPH_OPEN, disc)) > 0, 0, 255
+    ).astype(np.uint8)
+
+    thicknesses = sorted(wall.thickness for wall in walls if wall.thickness)
+    thick_px = max(
+        (thicknesses[len(thicknesses) // 2] if thicknesses else 0.0) * height, 3.0
+    )
+
+    detections: list[Detection] = []
+    for cluster in clusters:
+        for arc in cluster:
+            direction = _door_from_arc(grey, leaf_strokes, arc)
+            if direction is None:
+                continue
+
+            end_x = arc["cx"] + direction[0] * arc["r"]
+            end_y = arc["cy"] + direction[1] * arc["r"]
+            if direction[1] == 0:
+                x0, x1 = sorted((arc["cx"], end_x))
+                bbox = [x0 / width, (arc["cy"] - thick_px / 2) / height,
+                        (x1 - x0) / width, thick_px / height]
+            else:
+                y0, y1 = sorted((arc["cy"], end_y))
+                bbox = [(arc["cx"] - thick_px / 2) / width, y0 / height,
+                        thick_px / width, (y1 - y0) / height]
+
+            detections.append(
+                Detection(
+                    label="opening",
+                    bbox=[round(float(v), 4) for v in bbox],
+                    # Higher than the 0.6 a gap gets. A gap might be a doorway
+                    # or a missing wall; an arc was drawn to mean a door.
+                    confidence=0.85,
+                    attaches_to="wall",
+                )
+            )
+            break
+
+    return detections
 
 
 def detect_openings(walls: list[WallSegment]) -> list[Detection]:
