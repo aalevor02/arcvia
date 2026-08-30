@@ -216,6 +216,14 @@ export function proposeFurniture(
 
   const proposals: Proposal[] = []
   const taken: { centre: Vec2; width: number; depth: number }[] = []
+  /**
+   * Rooms the architect actually drew something in.
+   *
+   * Recorded by IDENTITY, from the same `enclosingRoom` call that attributes
+   * the fitting, rather than inferred later from geometry -- see the guard
+   * below for what inferring it cost.
+   */
+  const furnished = new Set<DetectedRoom>()
 
   // ---- What was drawn ------------------------------------------------------
   for (const fitting of fittings) {
@@ -244,6 +252,7 @@ export function proposeFurniture(
       because: found.because,
     })
     taken.push({ centre: box.centre, width: box.width, depth: box.depth })
+    if (room) furnished.add(room)
   }
 
   if (!assume) return proposals
@@ -258,9 +267,30 @@ export function proposeFurniture(
     // Nothing is placed in a room that already has something drawn in it. The
     // architect furnished that room; adding a second bed beside theirs is not
     // help.
-    if (taken.some((slot) => collides(slot, { centre: box.centre, width: box.width, depth: box.depth }))) {
-      continue
-    }
+    //
+    // ── Why membership and not a collision test ─────────────────────────────
+    // This asked whether any placed item's footprint overlapped the ROOM'S
+    // BOUNDING BOX. A bounding box is not the room. Rooms are not rectangles,
+    // so their boxes OVERLAP, and an item standing squarely in one room lands
+    // inside the box of another.
+    //
+    // Measured on the owner's 1.png: BEDROOM-2 is 5.2 x 6.3 m with nothing
+    // drawn in it anywhere, and it came back empty because of a 45 cm SIDE
+    // TABLE assumed into the FOYER, two and a half metres away through a wall.
+    // The foyer runs y -10.0..-5.4 and bedroom-2 runs y -15.4..-9.1, so their
+    // boxes share a strip, and the table sat in it.
+    //
+    // The owner reported it as "Bedroom-2 gets no furniture". The real fault is
+    // that ANY room can be emptied by ANY item near its box, and which rooms
+    // lose out depends on the order the reader happens to return them in.
+    //
+    // This is the same fault as the concave-centroid one that cost the Toilet
+    // its name and would have lit the room next door: a room's convex
+    // approximation is not the room.
+    //
+    // Per-item collision is still done, by `freeSpot` below, which is where it
+    // belongs: it compares an item to an item.
+    if (furnished.has(room)) continue
 
     for (const id of recipe) {
       const item = BY_ID.get(id)

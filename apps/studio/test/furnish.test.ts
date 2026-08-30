@@ -206,6 +206,46 @@ const result = (rooms: DetectedRoom[]): DetectionResult => ({
 }
 
 {
+  // ---- a room's bounding box is not the room -------------------------------
+  // The "already furnished" guard used to ask whether any placed item's
+  // footprint overlapped the room's BOUNDING BOX. Rooms are not rectangles, so
+  // their boxes overlap, and an item standing squarely in one room lands inside
+  // the box of another.
+  //
+  // Measured on the owner's 1.png: BEDROOM-2, 5.2 x 6.3 m with nothing drawn in
+  // it anywhere, came back empty because of a 45 cm SIDE TABLE assumed into the
+  // FOYER, two and a half metres away through a wall. The foyer runs
+  // y -10.0..-5.4 and bedroom-2 runs y -15.4..-9.1; their boxes share a strip
+  // and the table sat in it.
+  //
+  // Reproduced here with an L-shaped bedroom wrapped around a foyer, which is
+  // the arrangement that makes the two boxes overlap. The wardrobe is DRAWN so
+  // its position is fixed rather than chosen by freeSpot.
+  const lShaped: DetectedRoom = {
+    polygon: [
+      { x: 0.35, y: 0.35 }, { x: 0.95, y: 0.35 }, { x: 0.95, y: 0.95 },
+      { x: 0.05, y: 0.95 }, { x: 0.05, y: 0.75 }, { x: 0.35, y: 0.75 },
+    ],
+    area: 0.4, name: 'Bedroom', kind: 'room', size: null, also: [],
+  }
+  const wrapped = result([
+    room('Foyer', [0.05, 0.35, 0.30, 0.70]),   // sits in the L's notch
+    lShaped,
+    fitting('WARDROBE', [0.10, 0.45, 0.22, 0.60]),
+  ])
+
+  const pieces = proposeFurnitureForImport(wrapped, underlay)
+  check('the drawn wardrobe is attributed to the foyer it is in',
+    pieces.some((p) => p.item === 'wardrobe' && p.room === 'Foyer'),
+    JSON.stringify(pieces.map((p) => `${p.item}@${p.room}`)))
+  check('and the bedroom whose BOX it falls inside is still furnished',
+    pieces.some((p) => p.room === 'Bedroom'),
+    JSON.stringify(pieces.map((p) => `${p.item}@${p.room}`)))
+  check('with a bed, which is the thing the owner noticed was missing',
+    pieces.some((p) => p.room === 'Bedroom' && p.item.startsWith('bed')))
+}
+
+{
   // The architect already furnished this room. Adding to it is not help.
   const detection = result([
     room('Bedroom', [0, 0, 0.4, 0.4]),
