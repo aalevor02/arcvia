@@ -1,5 +1,7 @@
+import * as THREE from 'three'
+import { buildFloorGeometry } from '../src/plan/buildGeometry'
 import { openingsFromDetection } from '../src/plan/detectedOpenings'
-import { addWall, activeFloor, emptyPlan } from '../src/plan/planStore'
+import { addObject, addWall, activeFloor, emptyPlan } from '../src/plan/planStore'
 import type { Underlay, Vec2 } from '../src/plan/types'
 
 let passed = 0
@@ -154,6 +156,39 @@ const at = (x: number, y: number): Vec2 => ({ x, y })
   check('and it is not narrowed to a door width',
     cut.length === 1 && Math.abs(cut[0].size.width - 3.69) < 0.01,
     cut.map((o) => String(o.size.width)).join())
+}
+
+// ---- and the opening actually reaches the model ------------------------------
+// The three links of this chain are converter -> addObject -> buildFloorGeometry,
+// and the middle one is the whole point: `openingsIn` only cuts for an object
+// that NAMES a wallId. An object placed at the same spot without one leaves the
+// wall solid and hangs a door leaf against it, which looks almost right in plan
+// and is a wall you walk into in 3D.
+//
+// Counting meshes separates them. A bare wall is one mesh; cut, it becomes
+// three -- a pier each side and the lintel over.
+{
+  let plan = emptyPlan()
+  plan = addWall(plan, at(2, -5), at(8, -5), { thickness: 0.15, snapRadius: 0.01 })
+  const wallId = Object.keys(activeFloor(plan).walls)[0]
+  const size = { width: 1, depth: 0.05, height: 2.1 }
+  const place = (host?: string) =>
+    addObject(plan, { item: 'door', position: at(5, -5), rotation: 0, wallId: host, size })
+
+  const meshes = (floor: Parameters<typeof buildFloorGeometry>[0]) => {
+    let n = 0
+    buildFloorGeometry(floor, []).traverse((o) => { if ((o as THREE.Mesh).isMesh) n += 1 })
+    return n
+  }
+
+  const bare = meshes(activeFloor(plan))
+  const loose = meshes(activeFloor(place()))
+  const hosted = meshes(activeFloor(place(wallId)))
+
+  check('a door with no host leaves the wall solid', loose - bare === 4,
+    `${bare} -> ${loose}: the leaf only`)
+  check('a hosted opening cuts the wall into piers and a lintel',
+    hosted - loose === 2, `${loose} -> ${hosted}`)
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
