@@ -181,14 +181,14 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7,
                 aim = (best[1], best[2])
                 notes.append("aimed at glazing")
 
-        # No glazing to aim at ? then aim at what is IN the room.
+        # No glazing to aim at — then aim at what is IN the room.
         #
-        # ?? Why this matters more than it looks ???????????????????????????????
+        # ── Why this matters more than it looks ───────────────────────────────
         # The glazing branch above is right and it almost never fires. Measured
         # across every reconstruction on this machine, 129 of 132 models carry
         # ZERO windows, so `op.kind != "window"` rejects everything and every
         # interior in every one of those models falls through to the longest
-        # axis ? which points the camera at the far wall. The comment above
+        # axis — which points the camera at the far wall. The comment above
         # already names the result: "a correctly-lit picture of nothing". That
         # is exactly what the villa renders, a 14.9 m look down the foyer at
         # plaster.
@@ -197,7 +197,7 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7,
         # reconstruction knows where it is: each fixture carries a plan position
         # and a resolved catalogue id. A bedroom camera should look at the bed.
         #
-        # ?? Containment, never proximity ??????????????????????????????????????
+        # ── Containment, never proximity ──────────────────────────────────────
         # Deliberately `poly.contains`, not "nearest fixture to the eye".
         # claude-d8fec1 measured the cost of the proximity version on the raster
         # side today: matching a detection to a window by centre-distance
@@ -226,7 +226,7 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7,
                 # And LOWER the target, which the first version of this did not
                 # and which made the whole change do nothing visible. Aiming at
                 # a bed's x,y while the target height stays at eye level looks
-                # straight OVER it at the wall behind ? measured, and the
+                # straight OVER it at the wall behind — measured, and the
                 # bedroom rendered as plaster with a skirting board.
                 #
                 # 0.7 m is the top of most furniture (a bed is 0.6, a table

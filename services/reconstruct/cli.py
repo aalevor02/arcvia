@@ -992,8 +992,16 @@ def reconstruct(
         wall_stats["layers"] = summarise_by_layer(walls, indoor_walls)
 
         opening_issues: list[dict] = []
+        # Separate from `opening_issues` on purpose. That list is the review
+        # queue of openings that could NOT be hosted, and the API asserts one
+        # entry per unassigned opening (services/api/test/cad.mjs:255). An
+        # ambiguous host is the opposite finding — the opening WAS placed — so
+        # mixing them made 9 issues against 0 unassigned openings and broke two
+        # API tests.
+        opening_ambiguities: list[dict] = []
         block_holes, block_unhosted = op.from_sized_blocks(
             in_frame, walls, kernel.guess_item, issues=opening_issues,
+            ambiguities=opening_ambiguities,
         )
 
         # ---- Openings the drawing DRAWS rather than blocks ------------------
@@ -1142,6 +1150,10 @@ def reconstruct(
             "walls": walls, "rooms": rooms, "holes": holes,
             "labels": labels,
             "unhosted": unhosted, "openingIssues": opening_issues,
+            # Openings that WERE hosted, but where a second wall was equally
+            # close and list order decided. Its own key so `openingIssues`
+            # keeps meaning "could not be hosted" and nothing else.
+            "openingAmbiguities": opening_ambiguities,
             # Reported, not just done. A bridge MERGES two walls the drawing
             # drew separately, which changes wall count, wall run and the bill;
             # a reviewer looking at a wall that is not in the drawing has to be
@@ -1288,6 +1300,7 @@ def reconstruct(
     holes = storey["holes"]
     unhosted = storey["unhosted"]
     opening_issues = storey["openingIssues"]
+    opening_ambiguities = storey.get("openingAmbiguities") or []
     opening_bridges = storey.get("openingBridges") or []
     fixtures = storey["fixtures"]
     chosen = storey["chosen"]
@@ -1463,6 +1476,134 @@ def reconstruct(
                 0,
             ))
 
+        # ---- Rooms and doors, but not one window ----------------------------
+        #
+        # `openings-present` above is satisfied by DOORS alone, and on this
+        # corpus that is almost always what happens. Measured 2026-08-29 across
+        # every reconstruction on this machine: 129 of 132 models carry zero
+        # windows, and every one of them verified CLEAN. A building that cannot
+        # admit daylight shipped 129 times with nothing saying so — and the
+        # first place it shows is a render, where an interior comes back either
+        # blown out or black depending on whether it has a ceiling.
+        #
+        # A WARNING and not blocking, deliberately. A drawing that genuinely
+        # draws no windows is a real thing — a basement, a services layout, a
+        # detail frame — and refusing to build it would be wrong. What is not
+        # acceptable is silence.
+        #
+        # The message names the two causes actually observed, because both are
+        # invisible from the output and neither is guessable:
+        #   * the client draws windows as LINEWORK and never as blocks (true of
+        #     all 7 drawings in the Casa Altinho corpus: 0 window blocks, 2,280
+        #     window-layer entities), so nothing arrives from `from_sized_blocks`
+        #   * that linework sits OUTSIDE the built frame on a multi-drawing
+        #     sheet, so `cli.py`'s opening-face filter excludes it. Sheets here
+        #     carry a median of 8 drawings.
+        window_count = sum(
+            1 for h in result["holes"] if getattr(h, "kind", None) == "window"
+        )
+        if result["rooms"] and window_count == 0:
+            door_count = len(result["holes"]) - window_count
+            verdict.checks.append(vf.Check(
+                "windows-present",
+                "warning",
+                f"{title} reconstructed {len(result['rooms'])} rooms and "
+                f"{door_count} door(s) but NO windows. Interiors will be lit "
+                "through doorways only, so renders of them will not be usable. "
+                "Two causes are common and neither is visible from the output: "
+                "the drawing may encode windows as linework rather than as "
+                "blocks, or that linework may sit outside this frame on a "
+                "sheet carrying several drawings — check the other frames with "
+                "--frame N.",
+                0,
+            ))
+
+    # ---- Openings whose host wall was decided by list order -----------------
+    #
+    # `host()` keeps the nearest wall on a strict `<`, so two walls at the same
+    # distance are separated by their index and nothing else. Measured on the
+    # villa: 3 of 4 doors, and across both storeys 9 openings with rival
+    # distances of 0.005 to 0.14 m — seven of them under 7 cm.
+    #
+    # It matters beyond the picture. The host wall sets the opening's reveal
+    # depth AND `quantify` deducts the opening from the wall it is hosted on,
+    # so an arbitrary choice between a 0.115 m partition and a 0.23 m wall puts
+    # the deduction on the wrong wall in the bill of quantities.
+    #
+    # A warning, not a block: the opening is real and refusing it would lose a
+    # door. The detail sits in `openingAmbiguities` with both candidates and
+    # their thicknesses, so a reviewer who knows the drawing can settle it.
+    if opening_ambiguities:
+        worst = min(a["rivalDistance"] for a in opening_ambiguities)
+        differing = sum(
+            1 for a in opening_ambiguities
+            if a["hostWallThickness"] != a["rivalWallThickness"]
+        )
+        verdict.checks.append(vf.Check(
+            "opening-host-ambiguous",
+            "warning",
+            f"{len(opening_ambiguities)} opening(s) were hosted on a wall that "
+            "another wall was equally close to — the tie was broken by wall "
+            f"order, not by geometry (closest rival {worst:.3f} m)."
+            + (f" {differing} of them "
+               + ("sits" if differing == 1 else "sit")
+               + " between walls of DIFFERENT thickness, so the reveal depth "
+                 "and the bill-of-quantities deduction depend on which was "
+                 "chosen." if differing else "")
+            + " See openingAmbiguities.",
+            len(opening_ambiguities),
+        ))
+
+    # ---- A fragment built while the building sat unbuilt beside it ----------
+    #
+    # The console already prints every frame, marks the one built and suggests
+    # `--frame N`. That is good reporting and it is not enough: it is a PRINT,
+    # so nothing reaches building.json, and the API, the studio and anyone
+    # reading the artifact later see a model that verified clean with no hint
+    # that a far larger drawing on the same sheet was passed over.
+    #
+    # Measured 2026-08-29 on REDDY- SITE PLAN FOR 3D 17-2-24: the ranker built
+    # frame 0 — 12 walls, 2 rooms — while frame 1 carried 161 walls and frame 2
+    # carried 99. A thirteen-fold difference, and the output looked healthy.
+    # DOWN VILLA is the control: frames 0 and 1 are 44 and 50 walls, both real
+    # floor plans of the same house, and this must stay quiet there.
+    #
+    # Deliberately NOT a change to frame ranking. Choosing between drawings on
+    # a sheet is a genuine judgement — a site layout legitimately carries more
+    # walls than the floor plan somebody wants — and a heuristic that overrode
+    # the ranker here would trade a visible wrong choice for an invisible one.
+    # This says "look", and leaves the choosing alone.
+    #
+    # Gated on FEW ROOMS as well as a big alternative, because room count is
+    # what distinguishes a fragment from a small-but-complete plan. Two rooms
+    # from a 12-wall frame is a fragment; 25 rooms from a 44-wall frame is a
+    # house.
+    if frames and len(frames) > 1:
+        # Positionally, exactly as line 727 picks it. Selecting by `.index`
+        # instead would silently identify a different frame the moment index
+        # and position diverge, and this check would then describe a build that
+        # did not happen.
+        built = frames[min(frame_index, len(frames) - 1)]
+        biggest = max(frames, key=lambda f: len(f.wall_indices))
+        if biggest is not built:
+            built_walls = len(built.wall_indices)
+            other_walls = len(biggest.wall_indices)
+            total_rooms = sum(len(r["rooms"]) for _l, r, _s in quality_storeys)
+            if total_rooms <= 3 and built_walls and other_walls >= 3 * built_walls:
+                label = biggest.title or ""
+                verdict.checks.append(vf.Check(
+                    "frame-choice",
+                    "warning",
+                    f"Built frame {built.index} ({built_walls} walls, "
+                    f"{total_rooms} room(s)) while frame {biggest.index} on the "
+                    f"same sheet carries {other_walls} walls"
+                    + (f" ({label})" if label else "")
+                    + f" — {other_walls / built_walls:.0f}x more. This may be a "
+                    "fragment rather than the drawing you wanted; build the "
+                    f"other with --frame {biggest.index}.",
+                    built_walls,
+                ))
+
     # Which room each mesh belongs to, so a floor is tagged for what it IS
     # (`floor_bath`, not a generic floor). Mesh names carry `room<N>` by
     # construction — build/solidify.py `_room_mesh_slug` — and the index is
@@ -1548,6 +1689,11 @@ def reconstruct(
         # hosted. The aggregate warning is useful, but cannot highlight or fix
         # a missing wall without these targets.
         "openingIssues": all_opening_issues,
+        # Hosted openings whose host wall was NOT decided by geometry: a
+        # second wall was equally close and list order broke the tie. Kept
+        # apart from `openingIssues`, which the API reads as the review
+        # queue of openings that could not be hosted at all.
+        "openingAmbiguities": opening_ambiguities,
         "build": {**wall_build, **slab_build, **finish_build, **fixture_build},
         "verify": verdict.as_dict(),
         "glb": manifest,
@@ -1980,8 +2126,14 @@ def deliverables(model_path: str, out_dir: str) -> dict:
     walls = [_W(d) for d in model["elements"]["walls"]]
     holes = [_O(d) for d in model["elements"].get("openings", [])]
 
+    # Fixtures are passed so an interior camera has something to look at when
+    # the room has no glazing — which, on this corpus, is every room in almost
+    # every model. Read from the model dict rather than re-derived: the
+    # reconstruction already resolved each one to a catalogue id and a plan
+    # position, and deriving them twice is how two consumers end up disagreeing.
     views = cameras.solve(spaces, walls, openings=holes,
-                          height=model.get("wallHeight", 2.7))
+                          height=model.get("wallHeight", 2.7),
+                          fixtures=model["elements"].get("fixtures", []))
     stem = Path(model.get("source", "building")).stem
     plan = render_plan(model, out / f"{stem}.plan.svg")
 
