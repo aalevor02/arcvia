@@ -713,6 +713,13 @@ def detect_heuristic(
     for arc in detect_swing_arcs(image, best.walls, best.scale):
         if not any(_same_opening(arc, found) for found in openings):
             openings.append(arc)
+    # THIRD SIGNAL, and it is last because it is the weakest evidence of the
+    # three: a gap is an absence, an arc is a mark made on purpose, and a
+    # thinning is an inference from how the wall is drawn. Anything the first
+    # two already found keeps their reading of it.
+    for glazed in detect_glazed_openings(image, best.walls, best.rooms, best.scale):
+        if not any(_same_opening(glazed, found) for found in openings):
+            openings.append(glazed)
 
     return best.walls, openings, best.rooms, best.scale or deduce_scale(
         best.walls, openings
@@ -1782,6 +1789,250 @@ def detect_swing_arcs(
                 )
             )
             break
+
+    return detections
+
+
+def _ink_runs_across(
+    ink: np.ndarray, cx: int, cy: int, horizontal: bool, reach: int, spread: int = 6
+) -> int:
+    """How many separate strokes lie ACROSS the wall here.
+
+    The discriminator that makes this pass usable. A wall that is merely thinner
+    reads as ONE run; glazing is drawn as two or more lines with white between
+    them, and a door leaf inside its frame the same. Measured on 1.png:
+
+        BED-1 slider  3      an unnamed thin section  1
+        BED-2 slider  3      another                  1
+        LIFT door     5      another                  1
+
+    Every true opening at 3 or more, every false one at exactly 1, with nothing
+    in between.
+    """
+    height, width = ink.shape[:2]
+    counts = []
+    # Sampled ALONG the opening, at fractions of its own length. A fixed few
+    # pixels either side of the centre all land on the same spot, and on a
+    # slider that spot is the MULLION -- solid, one run, and the whole opening
+    # is thrown away. Found on a drawn fixture with a central post.
+    step = max(spread // 3, 2)
+    for offset in (-3 * step, -step, 0, step, 3 * step):
+        if horizontal:
+            x = cx + offset
+            if not (0 <= x < width):
+                continue
+            line = ink[max(0, cy - reach):min(height, cy + reach), x]
+        else:
+            y = cy + offset
+            if not (0 <= y < height):
+                continue
+            line = ink[y, max(0, cx - reach):min(width, cx + reach)]
+        runs, previous = 0, 0
+        for value in line:
+            if value and not previous:
+                runs += 1
+            previous = int(value)
+        counts.append(runs)
+    return int(np.median(counts)) if counts else 0
+
+
+def detect_glazed_openings(
+    image: np.ndarray,
+    walls: list[WallSegment],
+    rooms: list[Room],
+    scale: PlanScale | None,
+) -> list[Detection]:
+    """
+    Openings that are drawn as a THINNING of the wall rather than a gap in it.
+
+    ── The third signal, and why two were not enough ───────────────────────────
+    `detect_openings` finds a gap between collinear walls; `detect_swing_arcs`
+    finds a drawn swing. Measured against an enumerated ground truth
+    (realdecks/avarana-cottage3-1png.doors-groundtruth.md) the two together
+    reach 4 of the 7 doorways on that sheet. The three they miss are a lift door
+    and two 2.9 m glazed sliding doors, and neither method can ever see them:
+
+      - There is no gap. This was checked on the INK, not on the tracer's
+        output, after a first explanation blamed the tracer and was wrong:
+            verandah wall, horizontal ink at y 1032:  ONE solid run, x 270..910
+            lift wall,     vertical ink at x 778:     ONE solid run, y 449..672
+        The drawing genuinely has continuous ink there.
+      - There is no swing. A lift door and a slider do not have one to draw.
+
+    What IS there is a thinning. Ink measured across the wall:
+
+        verandah wall   solid 18-19 px    SLIDER 1  7    SLIDER 2  7
+        lift wall       solid 17-21 px    LIFT DOOR 7
+
+    A consistent 2.5 to 3x thinning, bounded by solid piers, because that is how
+    an architect draws glazing and a lift car door.
+
+    ── Why the obvious version of this must not ship ──────────────────────────
+    Thinning alone finds all three and is nowhere near precise enough to cut
+    geometry with. Measured before any of it was written into the reader:
+
+        thinned sections bounded by piers                    3 of 14 correct
+        and requiring the two sides to be different spaces   3 of 8 correct
+
+    Five phantom holes a sheet, each of which is a HOLE THROUGH A WALL. Three
+    further tests earn their place, each measured rather than guessed:
+
+      1. STROKES ACROSS THE WALL. See `_ink_runs_across`: true openings read 3,
+         3 and 5, and every false one reads exactly 1. This is what separates
+         glazing from a wall that happens to be thinner.
+      2. FRAGMENTS ARE MERGED FIRST. A mullion is drawn solid, so one slider
+         arrives as several thin runs. Unmerged, the BED-2 slider measured 1.76 m
+         against a true 2.94 m -- 40% short -- and its far fragment looked like a
+         separate false positive.
+      3. BOTH SIDES MUST BE A NAMED SPACE, AND DIFFERENT ONES. An opening is a
+         way THROUGH the building. This also keeps windows out by construction:
+         an exterior window has open ground on one side and no region there, so
+         it never qualifies. Windows are deliberately not converted to geometry
+         -- the vision pass returned 5, 5, 5, 4 and 3 over five reads of one file
+         -- and this pass must not smuggle them in through the back door.
+    """
+    if image is None or not walls or not rooms:
+        return []
+
+    height, width = image.shape[:2]
+    metres_per_px = (
+        scale.metres_per_unit / max(width, 1)
+        if scale and scale.metres_per_unit
+        else 1.0 / max(width, 1)
+    )
+    ink = (cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) < 150).astype(np.uint8)
+
+    polygons = [
+        (
+            room.name,
+            np.array([[p.x * width, p.y * height] for p in room.polygon], np.float32),
+        )
+        for room in rooms
+        if room.kind in ("room", "outdoor") and len(room.polygon) >= 3
+    ]
+
+    def space_at(x: float, y: float) -> str | None:
+        for index, (name, polygon) in enumerate(polygons):
+            if cv2.pointPolygonTest(polygon, (float(x), float(y)), False) >= 0:
+                return name or f"#{index}"
+        return None
+
+    # A mullion, a frame post, a door stile: solid, and narrow. Runs either side
+    # of one are the same opening.
+    mullion = max(int(round(0.3 / metres_per_px)), 3)
+
+    detections: list[Detection] = []
+    for wall in walls:
+        x0, y0 = wall.start.x * width, wall.start.y * height
+        x1, y1 = wall.end.x * width, wall.end.y * height
+        horizontal = abs(x1 - x0) >= abs(y1 - y0)
+
+        low, high = (
+            (int(min(x0, x1)), int(max(x0, x1)))
+            if horizontal
+            else (int(min(y0, y1)), int(max(y0, y1)))
+        )
+        if high - low < 40:
+            continue
+
+        # TIGHT TO THE WALL. Three thicknesses reaches past it and measures
+        # whatever is beside it -- a wardrobe elevation, a planter, the border of
+        # a lift car. That inflates the "solid" baseline and then the wall ITSELF
+        # reads as a thinning: measured on 1.png, two of the three false
+        # positives were solid wall with furniture imagery drawn alongside it.
+        band = max(int(round(wall.thickness * width * 1.6)), 10)
+        fixed = int(round((y0 + y1) / 2 if horizontal else (x0 + x1) / 2))
+        near = max(0, fixed - band // 2)
+        far = min(height if horizontal else width, fixed + band // 2)
+        strip = (
+            ink[near:far, low:high].sum(axis=0)
+            if horizontal
+            else ink[low:high, near:far].sum(axis=1)
+        )
+        if len(strip) < 40:
+            continue
+
+        # The 80th percentile, not the median. A wall that is MOSTLY glazing --
+        # the verandah wall is 60% slider -- has a median equal to its glazing,
+        # and then nothing reads as thin at all.
+        solid = float(np.percentile(strip, 80))
+        if solid < 8:
+            continue
+
+        thin = strip < solid * 0.55
+        runs: list[list[int]] = []
+        start = None
+        for index, is_thin in enumerate(thin):
+            if is_thin and start is None:
+                start = index
+            if not is_thin and start is not None:
+                runs.append([start, index])
+                start = None
+        if start is not None:
+            runs.append([start, len(thin)])
+
+        merged: list[list[int]] = []
+        for run in runs:
+            if merged and run[0] - merged[-1][1] <= mullion:
+                merged[-1][1] = run[1]
+            else:
+                merged.append(run)
+
+        for begin, end in merged:
+            # Solid wall at both ends. Without a pier either side this is not an
+            # opening in a wall, it is where the wall stops.
+            if begin <= 3 or end >= len(thin) - 3:
+                continue
+            span = (end - begin) * metres_per_px
+            if not (0.6 <= span <= 4.0):
+                continue
+
+            centre = low + (begin + end) / 2
+            cx, cy = (centre, fixed) if horizontal else (fixed, centre)
+            # Reach just across the WALL, not across the band the thickness was
+            # measured in. The band is three wall thicknesses, and a probe that
+            # long leaves the wall entirely and counts whatever it meets on the
+            # far side -- which turned four false positives into passes.
+            across = int(solid * 1.5) + 2
+            if _ink_runs_across(
+                ink, int(cx), int(cy), horizontal, across, spread=(end - begin) // 3
+            ) < 2:
+                continue
+
+            reach = band
+            if horizontal:
+                sides = (space_at(cx, fixed - reach), space_at(cx, fixed + reach))
+            else:
+                sides = (space_at(fixed - reach, cy), space_at(fixed + reach, cy))
+            if sides[0] is None or sides[1] is None or sides[0] == sides[1]:
+                continue
+
+            thick_px = max(band / 3.0, 3.0)
+            if horizontal:
+                bbox = [
+                    (low + begin) / width,
+                    (fixed - thick_px / 2) / height,
+                    (end - begin) / width,
+                    thick_px / height,
+                ]
+            else:
+                bbox = [
+                    (fixed - thick_px / 2) / width,
+                    (low + begin) / height,
+                    thick_px / width,
+                    (end - begin) / height,
+                ]
+
+            detections.append(
+                Detection(
+                    label="opening",
+                    bbox=[round(float(v), 4) for v in bbox],
+                    # Below an arc, which was drawn to mean a door, and above a
+                    # bare gap, which might be a missing wall.
+                    confidence=0.7,
+                    attaches_to="wall",
+                )
+            )
 
     return detections
 
