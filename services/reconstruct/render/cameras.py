@@ -221,7 +221,13 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7,
                 # Ties keep the first, which is the drawing's own order.
                 if biggest is None or area > biggest[0]:
                     biggest = (area, fx, fy)
-            if biggest is not None:
+            if biggest is None:
+                # Nothing in the room to look at. Said out loud, because an
+                # empty room renders as a correctly-lit picture of nothing and
+                # the frame gives a reviewer no way to tell that from a
+                # renderer fault. Measured on the villa: 18 of 25 interiors.
+                notes.append("no furniture in this room")
+            else:
                 aim = (biggest[1], biggest[2])
                 # And LOWER the target, which the first version of this did not
                 # and which made the whole change do nothing visible. Aiming at
@@ -363,7 +369,26 @@ def solve(spaces, walls, openings=None, height: float = 2.7,
     views: list[View] = []
     inside = interior_views(spaces, openings=openings, walls=walls, height=height,
                             fixtures=fixtures)
-    inside.sort(key=lambda v: -v.clearance)
+    # Best interior first, and "best" is not clearance alone.
+    #
+    # Clearance says how much ROOM there is to stand in; it says nothing about
+    # whether there is anything to photograph. Sorting on it alone puts the
+    # biggest empty hall at the front, and a caller taking `--limit 6` renders
+    # six correctly-lit pictures of nothing while the furnished bedroom waits at
+    # position eleven. Measured on the villa: 25 interiors, 7 with anything in
+    # them at all.
+    #
+    # A room with a subject outranks a bigger empty one; clearance still orders
+    # within each group, and nothing is dropped — an empty room is a real room
+    # and somebody may want it. This only decides what gets rendered FIRST when
+    # the budget runs out, which on a CPU renderer it always does.
+    def _worth(view: View) -> tuple:
+        has_subject = any(
+            note in ("aimed at furniture", "aimed at glazing") for note in view.notes
+        )
+        return (has_subject, view.clearance)
+
+    inside.sort(key=_worth, reverse=True)
     views.extend(inside)
     views.extend(exterior_views(walls, height=height, count=orbit))
 
@@ -388,5 +413,17 @@ def summarise(views: list[View]) -> dict:
         ),
         "bestClearance": round(
             max((v.clearance for v in views if v.kind == "interior"), default=0.0), 2
+        ),
+        # How many interiors have anything to look at. Reported because
+        # "25 interior views" and "7 interior views worth rendering" are very
+        # different statements about a job, and only the first was visible.
+        "withSubject": sum(
+            1 for v in views
+            if v.kind == "interior"
+            and any(n in ("aimed at furniture", "aimed at glazing") for n in v.notes)
+        ),
+        "empty": sum(
+            1 for v in views
+            if v.kind == "interior" and "no furniture in this room" in v.notes
         ),
     }
