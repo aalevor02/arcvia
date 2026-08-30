@@ -119,6 +119,59 @@ def host(px: float, py: float, walls, radius: float = HOST_RADIUS):
     return best_index, best_along
 
 
+#: How much closer the chosen wall must be than the runner-up before the choice
+#: counts as DECIDED rather than arbitrary.
+#:
+#: 0.06 m is half a half-brick partition: below that, two candidate walls are
+#: closer to each other than the thinnest wall this corpus contains, so nothing
+#: about the geometry separates them.
+HOST_MARGIN = 0.06
+
+
+def host_contest(px: float, py: float, walls, chosen: int,
+                 margin: float = HOST_MARGIN):
+    """
+    The other wall that was almost as good a host, if there is one.
+
+    ── Why an opening needs this and a wall does not ─────────────────────────
+    `host` takes the nearest wall on a strict `<`, so when two walls are
+    EQUALLY close the first in list order wins — and list order is not a fact
+    about the building. Measured on the villa: 2 of 4 doors sit at distance
+    0.000 from two different walls, both times a COLLINEAR pair. Door 0 could
+    host on a 0.115 m partition or on a 0.23 m wall lying along the same line,
+    and nothing in the geometry chooses.
+
+    That is not cosmetic. The host wall sets the opening's reveal depth, and
+    `quantify` deducts the opening from the wall it is hosted on — so an
+    arbitrary choice between a 115 mm and a 230 mm wall puts the deduction on
+    the wrong wall in the bill of quantities.
+
+    This does NOT pick a better wall, deliberately. A 750 mm door is a
+    plausible opening in either a half-brick partition or a nine-inch wall, so
+    "prefer the thicker" would be an invented rule dressed as a measurement.
+    The honest move is the one the rest of this module makes: report the
+    ambiguity and let a reviewer who knows the drawing settle it.
+
+    Returns `(index, perp)` of the runner-up, or `None` when the choice was
+    decided by more than `margin`.
+    """
+    if chosen is None or chosen >= len(walls):
+        return None
+
+    _, chosen_perp = _project(px, py, walls[chosen])
+    runner, runner_perp = None, float("inf")
+    for i, wall in enumerate(walls):
+        if i == chosen:
+            continue
+        _, perp = _project(px, py, wall)
+        if perp < runner_perp:
+            runner, runner_perp = i, perp
+
+    if runner is None or runner_perp - chosen_perp > margin:
+        return None
+    return runner, runner_perp
+
+
 def _nearest_wall_distance(px: float, py: float, walls) -> float | None:
     """Euclidean distance to the nearest finite wall segment."""
     best = float("inf")
@@ -350,6 +403,7 @@ def from_text_labels(labels, walls) -> tuple[list, list[Opening], int]:
 
 def from_sized_blocks(
     placements, walls, guess_item, issues: list[dict] | None = None,
+    ambiguities: list[dict] | None = None,
 ) -> tuple[list[Opening], int]:
     """
     Openings from `D750` / `W1200` style block names.
@@ -399,6 +453,42 @@ def from_sized_blocks(
                     ),
                 })
             continue
+
+        # Hosted — but was the host actually DECIDED? Recorded rather than
+        # resolved: see `host_contest`. An opening whose host was a coin toss
+        # still gets built, because refusing it would lose a real door; what it
+        # must not do is arrive looking settled.
+        #
+        # ── Why this is NOT an `issues` entry ─────────────────────────────────
+        # It was, in the first version, and that broke a contract nobody had
+        # written down but which the API asserts: `openingIssues` is not a log,
+        # it is the REVIEW LIST OF UNHOSTED OPENINGS, one entry per unassigned
+        # opening. `services/api/test/cad.mjs:255` asserts
+        # `openingIssues.length === openingsUnassigned`, and every entry must
+        # carry `block`, `registeredPosition` and `nearestWallDistance`.
+        # Putting nine hosted-but-ambiguous doors in there produced 9 issues
+        # against 0 unassigned openings and failed two API tests — found by
+        # claude-d8fec1 running the suite, not by me.
+        #
+        # These are the opposite kind of finding: the opening WAS hosted. It
+        # gets its own channel so the review list keeps meaning exactly one
+        # thing.
+        if ambiguities is not None:
+            contest = host_contest(px, py, walls, index)
+            if contest is not None:
+                rival, rival_perp = contest
+                ambiguities.append({
+                    "source": "blockSized",
+                    "block": placement["block"],
+                    "kind": item,
+                    "position": {"x": round(px, 4), "y": round(py, 4)},
+                    "reason": "host-wall-ambiguous",
+                    "hostWall": index,
+                    "hostWallThickness": round(walls[index].thickness, 4),
+                    "rivalWall": rival,
+                    "rivalWallThickness": round(walls[rival].thickness, 4),
+                    "rivalDistance": round(rival_perp, 4),
+                })
 
         wall = walls[index]
         # Clamp rather than reject. A door 3 cm past the end of a wall is a

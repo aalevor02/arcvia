@@ -40,6 +40,12 @@ EYE_HEIGHT = 1.55
 #: Below this there is not enough room to see anything but the wall in front.
 MIN_CLEARANCE = 0.6
 
+#: Height to aim at when the subject is a piece of furniture rather than a
+#: window. The top of most furniture: a bed is 0.6 m, a table 0.75, a sofa
+#: 0.82. Aiming at eye level instead looks straight over the object at the
+#: wall behind it, which is what the first version of the furniture aim did.
+FURNITURE_AIM_HEIGHT = 0.7
+
 #: 24 mm equivalent. Interiors are shot wide; anything longer and a normal room
 #: fills the frame with one wall.
 INTERIOR_FOV_DEG = 74.0
@@ -133,7 +139,8 @@ def _longest_axis(poly: Polygon) -> tuple[float, float]:
     return best
 
 
-def interior_views(spaces, openings=None, walls=None, height: float = 2.7) -> list[View]:
+def interior_views(spaces, openings=None, walls=None, height: float = 2.7,
+                   fixtures=None) -> list[View]:
     """One camera per room, standing where there is most space."""
     views: list[View] = []
 
@@ -155,6 +162,7 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7) -> li
         # thing in the frame and the exposure calibrates on it; pointing at a
         # blank wall instead produces a correctly-lit picture of nothing.
         aim = None
+        aim_z = EYE_HEIGHT * 0.92
         if openings and walls:
             best = None
             for op in openings:
@@ -173,6 +181,61 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7) -> li
                 aim = (best[1], best[2])
                 notes.append("aimed at glazing")
 
+        # No glazing to aim at — then aim at what is IN the room.
+        #
+        # ── Why this matters more than it looks ───────────────────────────────
+        # The glazing branch above is right and it almost never fires. Measured
+        # across every reconstruction on this machine, 129 of 132 models carry
+        # ZERO windows, so `op.kind != "window"` rejects everything and every
+        # interior in every one of those models falls through to the longest
+        # axis — which points the camera at the far wall. The comment above
+        # already names the result: "a correctly-lit picture of nothing". That
+        # is exactly what the villa renders, a 14.9 m look down the foyer at
+        # plaster.
+        #
+        # Furniture is the other thing worth looking at, and by this point the
+        # reconstruction knows where it is: each fixture carries a plan position
+        # and a resolved catalogue id. A bedroom camera should look at the bed.
+        #
+        # ── Containment, never proximity ──────────────────────────────────────
+        # Deliberately `poly.contains`, not "nearest fixture to the eye".
+        # claude-d8fec1 measured the cost of the proximity version on the raster
+        # side today: matching a detection to a window by centre-distance
+        # credited a detection sitting on a DIFFERENT feature 0.021 away, and
+        # the metric moved the wrong way while looking better. Two rooms share a
+        # wall, so the nearest fixture to a camera can easily be the neighbour's
+        # bed, seen through masonry. A point is either in this room or it is
+        # not.
+        if aim is None and fixtures:
+            biggest = None
+            for fixture in fixtures:
+                position = fixture.get("position") or {}
+                fx, fy = position.get("x"), position.get("y")
+                if fx is None or fy is None:
+                    continue
+                if not poly.contains(Point(fx, fy)):
+                    continue
+                footprint = fixture.get("footprint") or {}
+                area = float(footprint.get("w") or 0) * float(footprint.get("d") or 0)
+                # Largest first: a bed says what a bedroom is, a plant does not.
+                # Ties keep the first, which is the drawing's own order.
+                if biggest is None or area > biggest[0]:
+                    biggest = (area, fx, fy)
+            if biggest is not None:
+                aim = (biggest[1], biggest[2])
+                # And LOWER the target, which the first version of this did not
+                # and which made the whole change do nothing visible. Aiming at
+                # a bed's x,y while the target height stays at eye level looks
+                # straight OVER it at the wall behind — measured, and the
+                # bedroom rendered as plaster with a skirting board.
+                #
+                # 0.7 m is the top of most furniture (a bed is 0.6, a table
+                # 0.75, a sofa 0.82), so the object lands in the lower middle of
+                # the frame with the room above it. That is where an archviz
+                # interior puts it.
+                aim_z = FURNITURE_AIM_HEIGHT
+                notes.append("aimed at furniture")
+
         if aim is None:
             dx, dy = _longest_axis(poly)
             reach = max(poly.bounds[2] - poly.bounds[0], poly.bounds[3] - poly.bounds[1])
@@ -183,7 +246,7 @@ def interior_views(spaces, openings=None, walls=None, height: float = 2.7) -> li
                 id=f"interior-{space.index}",
                 kind="interior",
                 eye=(eye.x, eye.y, EYE_HEIGHT),
-                target=(aim[0], aim[1], EYE_HEIGHT * 0.92),
+                target=(aim[0], aim[1], aim_z),
                 fov=INTERIOR_FOV_DEG,
                 clearance=clearance,
                 space=space.index,
@@ -295,10 +358,11 @@ def plan_view(walls, cut_height: float = 1.2) -> View | None:
 
 
 def solve(spaces, walls, openings=None, height: float = 2.7,
-          orbit: int = 4) -> list[View]:
+          orbit: int = 4, fixtures=None) -> list[View]:
     """Every view the model can support, best interior first."""
     views: list[View] = []
-    inside = interior_views(spaces, openings=openings, walls=walls, height=height)
+    inside = interior_views(spaces, openings=openings, walls=walls, height=height,
+                            fixtures=fixtures)
     inside.sort(key=lambda v: -v.clearance)
     views.extend(inside)
     views.extend(exterior_views(walls, height=height, count=orbit))
