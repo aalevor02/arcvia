@@ -32,6 +32,7 @@ const targets = entries.length
       'test/underlay.test.ts',
       'test/detections.test.ts',
       'test/detectedOpenings.test.ts',
+      'test/viewerFailure.test.ts',
       'test/objects.test.ts',
       'test/lightmapUV.test.ts',
       'test/credits.test.ts',
