@@ -26,6 +26,10 @@ export interface Brand {
     accent: string
     accentHover: string
     accentSoft: string
+    /** Accent used as TEXT on a light background. See the config for why. */
+    accentInk: string
+    /** Accent used as TEXT on `ink`. See the config for why. */
+    accentOnDark: string
     signal: string
     warn: string
     danger: string

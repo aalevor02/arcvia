@@ -40,6 +40,28 @@ export const brand = {
     accentHover: '#2357cc',
     accentSoft: '#e8f0ff', // tinted fill behind accent content
 
+    // ---- Accent as TEXT, which is a different problem from accent as a fill
+    //
+    // `accent` measures 4.53:1 on white — over the 4.5:1 WCAG AA needs for
+    // normal text, and only just. That margin is gone the moment the text sits
+    // on anything tinted, and the site tints constantly. Measured in the
+    // browser on the built homepage, the `.eyebrow` label (12px, 600) came out:
+    //
+    //     on surfaceAlt #f6f8fb   4.25:1   FAIL
+    //     on ink        #12161d   4.01:1   FAIL
+    //     on accentSoft #e8f0ff   3.95:1   FAIL
+    //
+    // Three of the four backgrounds it is actually used on. A fill does not
+    // have this problem, which is why one accent was enough until now.
+    //
+    // No single value fixes it: the light backgrounds need a DARKER blue and
+    // the dark panel needs a LIGHTER one — pushing `accent` down to pass on
+    // surfaceAlt takes it to 2.85:1 on ink, which is worse than where it
+    // started. So there are two, and which one applies is a property of the
+    // background rather than of the text.
+    accentInk: '#2357cc', // accent text on white / surfaceAlt / accentSoft — 5.5-6.0:1
+    accentOnDark: '#8ab4ff', // accent text on ink — 8.7:1
+
     signal: '#00c2a8', // success / "render complete"
     warn: '#f5a524',
     danger: '#e5484d',
