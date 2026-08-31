@@ -87,11 +87,43 @@ const title = 'Walkthrough'
       .overlay { position: fixed; pointer-events: none; z-index: 2; }
       .overlay > * { pointer-events: auto; }
 
+      /*
+       * ⚠ The background of this bar is A 3D SCENE, not a colour.
+       *
+       * The scrim below was tuned against the viewer's own dark clear colour
+       * (#11151c) and fails completely on a real model. Measured off the
+       * rendered pixels of a reconstructed villa — pale walls under a bright
+       * sky — at 390px:
+       *
+       *   "Made with Arcvia"   glyph (154,163,178) on (155,157,160)   1.07:1
+       *   the project name     glyph (232,235,240) on (164,166,166)   2.05:1
+       *
+       * 1.07:1 is invisible. The scrim starts at .55 and reaches transparent
+       * within the bar's own height, so by the time it is behind the text it
+       * is around .2 — plenty over a dark scene, nothing over a bright one.
+       *
+       * NO FIXED SCRIM CAN BE CORRECT HERE, which is why the fix is not simply
+       * a bigger number: the ground is whatever the architect's model happens
+       * to look like, and the next one may be brighter still. A shadow travels
+       * with the glyphs, so it holds on any scene — the standard treatment for
+       * text over imagery. The scrim is deepened and given a longer falloff as
+       * well, because the two together are what get a 12px label over the 4.5
+       * it needs, and neither does it alone.
+       */
       #topbar { top: 0; left: 0; right: 0; display: flex; align-items: center;
         justify-content: space-between; gap: 12px; padding: 14px 18px;
-        background: linear-gradient(to bottom, rgba(0,0,0,.55), transparent); }
+        background: linear-gradient(to bottom, rgba(0,0,0,.72) 0%,
+          rgba(0,0,0,.45) 55%, transparent 100%); }
+      /* Three rings, not one: a tight dark ring does the contrast work right at
+         the glyph edge, the 2px drop gives shape, and the wide soft one lifts
+         the whole bar off a busy scene. */
+      #topbar > * { text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.95),
+        0 0 10px rgba(0,0,0,.75); }
       #name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
-      #brand { font-size: 12px; color: var(--muted); text-decoration: none; }
+      /* Lifted from --muted, which at 12px over an unknown scene made this the
+         least legible text on the page — 1.07:1 measured, i.e. invisible. Kept
+         a step below #name so the credit still reads as secondary. */
+      #brand { font-size: 12px; color: #dfe5ef; text-decoration: none; }
       #brand:hover { color: var(--ink); }
 
       #controls { bottom: 0; left: 0; right: 0; display: flex; justify-content: center;
