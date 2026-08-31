@@ -286,6 +286,22 @@ function runBuild() {
       run('build:web-crawl-policy', npm, ['run', 'crawlcheck', `--workspace=${workspace}`], ROOT, {
         family: 'build',
       })
+
+      // The only browser suite in the repo. It drives the published walkthrough
+      // — the page a client actually opens — and asserts what is on screen when
+      // the model does not arrive, which is a question no other check here can
+      // ask: linkcheck asks whether pages resolve, crawl-policy asks what the
+      // files tell crawlers, and the studio runner's own comment says DOM and
+      // WebGL work belongs in a browser test.
+      //
+      // Playwright is resolved from the GLOBAL install rather than being a
+      // dependency of this repo. When it or its browser is missing the suite
+      // exits 3, which `run` above already reports as `blocked` — so a machine
+      // that is not set up says so, instead of going quietly green or being
+      // mistaken for a regression in the site.
+      run('build:web-walkthrough', npm, ['run', 'walkthroughcheck', `--workspace=${workspace}`], ROOT, {
+        family: 'build',
+      })
     }
   }
 }
