@@ -9,6 +9,9 @@ const nav = [
   { label: 'Enterprise', href: '/enterprise/' },
   { label: 'Referral', href: '/referral/' },
 ]
+
+const currentPath = Astro.url.pathname
+const isCurrent = (href: string) => !href.includes('#') && currentPath === href
 ---
 
 <header
@@ -28,7 +31,13 @@ const nav = [
         nav.map((item) => (
           <a
             href={item.href}
-            class="text-sm text-ink-soft transition-colors hover:text-ink"
+            aria-current={isCurrent(item.href) ? 'page' : undefined}
+            class:list={[
+              'text-sm transition-colors',
+              isCurrent(item.href)
+                ? 'font-medium text-ink'
+                : 'text-ink-soft hover:text-ink',
+            ]}
           >
             {item.label}
           </a>
@@ -82,7 +91,16 @@ const nav = [
     <nav aria-label="Mobile" class="shell flex flex-col py-3">
       {
         nav.map((item) => (
-          <a href={item.href} class="py-2.5 text-sm text-ink-soft hover:text-ink">
+          <a
+            href={item.href}
+            aria-current={isCurrent(item.href) ? 'page' : undefined}
+            class:list={[
+              'py-2.5 text-sm',
+              isCurrent(item.href)
+                ? 'font-medium text-ink'
+                : 'text-ink-soft hover:text-ink',
+            ]}
+          >
             {item.label}
           </a>
         ))
@@ -104,9 +122,26 @@ const nav = [
   const toggle = document.getElementById('nav-toggle')
   const panel = document.getElementById('mobile-nav')
 
+  const closeMenu = (returnFocus = false) => {
+    panel?.classList.add('hidden')
+    toggle?.setAttribute('aria-expanded', 'false')
+    toggle?.setAttribute('aria-label', 'Open menu')
+    if (returnFocus && toggle instanceof HTMLElement) toggle.focus()
+  }
+
   toggle?.addEventListener('click', () => {
     const open = panel?.classList.toggle('hidden') === false
     toggle.setAttribute('aria-expanded', String(open))
     toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu')
+  })
+
+  panel?.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', () => closeMenu())
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && panel?.classList.contains('hidden') === false) {
+      closeMenu(true)
+    }
   })
 </script>
