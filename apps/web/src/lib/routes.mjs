@@ -51,29 +51,30 @@ export const PRIVATE_ROUTES = [
   '/handoff/',
   '/team/',
 
-  // See the note below — this is the one entry that is a business decision.
-  '/register/',
+  // `/register/` deliberately IS NOT here — see the note below.
 
   // An indexed 404 competes with the real pages it exists to replace.
   '/404',
 ]
 
 /**
- * ⚠ `/register/` is the only entry here that is a judgement call rather than a
- * technical fact, and it is listed as private **only because that is what the
- * site already did**. This change fixes a contradiction; it does not quietly
- * re-set anyone's SEO policy.
+ * ⚠ `/register/` IS INDEXABLE, and that is a deliberate decision rather than an
+ * omission — the owner made the call on 2026-08-31.
  *
- * For indexing it: for most SaaS the sign-up page is a legitimate landing page
- * for brand-intent searches ("arcvia sign up"), and it is the shortest path
- * from a search result to an account.
+ * It used to carry `noindex`, inherited rather than chosen: the page was one of
+ * the seven that this file's fix caught, and it was left private in that commit
+ * so the fix corrected a contradiction without quietly re-setting anyone's SEO.
+ * The policy question was then asked separately and answered.
  *
- * For keeping it out: `/` already carries the same call to action with the
- * context a cold visitor needs, and the page is currently fronted by a "free
- * while in beta" offer that will not always be true.
+ * The reasoning, so it is not silently reverted: sign-up is a legitimate
+ * landing page for brand-intent searches ("arcvia sign up") and the shortest
+ * path from a search result to an account. The case against — that `/` already
+ * carries the same call to action, and that the page fronts a "free while in
+ * beta" offer that will not always be true — is real but weaker; when the beta
+ * offer ends, the page's copy is what should change, not its visibility.
  *
- * To flip it, delete the `'/register/'` line above. Nothing else changes — the
- * meta tag, the sitemap and robots.txt all read this list.
+ * To reverse it, add `'/register/'` back to the list above. Nothing else needs
+ * to change: the meta tag, the sitemap and robots.txt all read this list.
  */
 
 /**

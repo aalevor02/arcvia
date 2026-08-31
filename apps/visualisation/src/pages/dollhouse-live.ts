@@ -79,7 +79,13 @@ export function liveScene(type: VillaType): HTMLElement {
       h('p', { style: 'margin-top:22px' }, enter),
     ),
   )
-  enter.addEventListener('click', () => void start())
+  // `start` now rejects when the model cannot be loaded, rather than resolving
+  // as though it had worked. `onError` has already put the reason on screen and
+  // re-enabled this button, so there is nothing to add here — but the rejection
+  // still has to be consumed, or it surfaces in the visitor's console as an
+  // unhandled promise rejection. The value of the throw is that everything after
+  // the load in `start` no longer runs against an empty scene.
+  enter.addEventListener('click', () => void start().catch(() => {}))
   stage.appendChild(cover)
 
   async function start(): Promise<void> {

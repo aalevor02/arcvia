@@ -763,9 +763,34 @@ export class SceneViewer {
       this.needsRender = true
       this.options.onReady?.({ triangles: Math.round(triangles), objects })
     } catch (error) {
-      this.options.onError?.(
-        error instanceof Error ? error : new Error('Could not load the model.'),
-      )
+      const failure = error instanceof Error ? error : new Error('Could not load the model.')
+      this.options.onError?.(failure)
+
+      // ⚠ Rethrow. Reporting is not the same as succeeding, and this used to do
+      // only the first — `onError` fired and the promise RESOLVED, so `await
+      // loadModel(url)` continued into the success path with no model in the
+      // scene.
+      //
+      // What that looked like, measured on the published walkthrough with a
+      // scene whose GLB 404s: the client got a serene empty sky-and-ground
+      // world with the full chrome on top of it — room chip, "Walk through it",
+      // "Overview", "Leave a note" — and no error anywhere. `view/index.astro`
+      // DID write one, via this callback, and then deleted it four hundred
+      // lines later when its success path ran `els.status.classList.add('gone')`
+      // and revealed the controls. A message that is overwritten by the
+      // success path is not an error report.
+      //
+      // The callers already assumed this contract. `apps/studio`'s SceneView
+      // has attached `.catch(() => setStatus('The stored model could not be
+      // loaded.'))` to this call since it was written, and that handler had
+      // never once run — while its `.then()` reported "Ready" over a failed
+      // load. Rejecting makes the code that was already there correct.
+      //
+      // `onError` is kept as well as the throw: it carries the specific message
+      // to a UI that is already showing a progress bar, while the throw is what
+      // stops the caller proceeding. They answer different questions — what to
+      // tell the visitor, and whether to carry on.
+      throw failure
     } finally {
       draco.dispose()
     }

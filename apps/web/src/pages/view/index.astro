@@ -52,6 +52,33 @@ const title = 'Walkthrough'
         --line: rgba(255, 255, 255, 0.12);
       }
       * { box-sizing: border-box; }
+
+      /*
+       * ⚠ `hidden` only hides by default, and every id rule below beats it.
+       *
+       * The browser's own `[hidden] { display: none }` has the lowest possible
+       * specificity, so `#controls { display: flex }` silently wins and the
+       * attribute does nothing. Measured on a walkthrough whose model 404s:
+       * #controls carried `hidden`, and checkVisibility() still returned true,
+       * the buttons had 37px boxes, focus landed on "Walk through it", and a
+       * screen reader announced all three — over an error page with nothing to
+       * walk through. They were merely painted behind the status panel, which
+       * is why nobody had noticed: invisible to sighted users, fully present to
+       * everyone else.
+       *
+       * Two elements were affected — #controls and #views — and three others
+       * (#gate, #note, #panoramaDialog) had each been given their own
+       * `[hidden]` guard by hand. Guarding one rule at a time is what left the
+       * other two behind, so this closes the class instead: one rule that
+       * cannot be outranked, covering every element that is hidden today and
+       * every one added later.
+       *
+       * Safe here because nothing sets `style.display` to REVEAL a hidden
+       * element — the three inline assignments in this file only ever set
+       * 'none' or ''.
+       */
+      [hidden] { display: none !important; }
+
       html, body { margin: 0; height: 100%; background: var(--ground); color: var(--ink);
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
       #stage { position: fixed; inset: 0; }
@@ -79,7 +106,6 @@ const title = 'Walkthrough'
 
       #panoramaDialog { position: fixed; inset: 0; z-index: 5; display: grid;
         place-items: center; padding: 18px; background: rgba(4, 6, 10, .9); }
-      #panoramaDialog[hidden] { display: none; }
       #panoramaPanel { width: min(1100px, 96vw); padding: 14px; border-radius: 14px;
         background: #10141b; border: 1px solid var(--line); box-shadow: 0 20px 80px #000; }
       #panoramaHead { display: flex; align-items: center; justify-content: space-between;
@@ -121,7 +147,6 @@ const title = 'Walkthrough'
 
       #gate { position: fixed; inset: 0; z-index: 4; display: grid; place-content: center;
         gap: 10px; padding: 24px; background: var(--ground); text-align: center; }
-      #gate[hidden] { display: none; }
       #gate p { margin: 0; color: var(--muted); font-size: 13px; }
       #gate input { font: inherit; font-size: 14px; text-align: center; padding: 10px 14px;
         border-radius: 999px; border: 1px solid var(--line); background: #10141b;
@@ -147,13 +172,11 @@ const title = 'Walkthrough'
         max-height: 46vh; overflow: auto; padding: 14px 16px; border-radius: 12px;
         background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
         font-size: 12px; line-height: 1.55; z-index: 2; }
-      #credits[hidden] { display: none; }
 
       #note { position: fixed; right: 18px; bottom: 68px; width: min(360px, 78vw);
         display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px;
         background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
         font-size: 13px; z-index: 2; }
-      #note[hidden] { display: none; }
       #note textarea, #note input[type='text'] {
         font: inherit; color: var(--ink); background: #10141b; width: 100%;
         border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical;
@@ -579,10 +602,45 @@ const title = 'Walkthrough'
             els.bar.style.width = `${Math.round(fraction * 100)}%`
             els.detail.textContent = 'Loading the model…'
           },
-          onError: (error: Error) => fail('Could not load the walkthrough', error.message),
+          // ── What a buyer is told, versus what a developer needs ───────────
+          // three.js reports a failed load as
+          //   fetch for "https://api.../uploads/scenes/x/model.glb"
+          //   responded with 404: Not Found
+          // which is exactly right for the console and wrong for the page. The
+          // person reading it is a client following a link from an estate
+          // agent; a storage path tells them nothing they can act on, and it
+          // publishes the API's internal layout to everyone who is sent a
+          // walkthrough.
+          //
+          // The two cases are worth separating for the same reason the fetch
+          // above separates 5xx from 4xx: "not there yet" is something the
+          // architect can fix and the client should chase, while anything else
+          // is worth a reload before anyone is telephoned.
+          onError: (error: Error) => {
+            console.error('Model load failed:', error)
+            const missing = /\b404\b|not found/i.test(error.message)
+            fail(
+              missing ? 'This walkthrough is not ready yet' : 'Could not load the walkthrough',
+              missing
+                ? 'Its 3D model has not been uploaded. Please contact whoever sent you this link.'
+                : 'The model could not be loaded. Please reload the page, or try again shortly.',
+            )
+          },
         })
 
-        await viewer.loadModel(absolute(scene.modelUrl))
+        // The catch is empty on purpose and the `return` is the point: the
+        // `onError` above has already put a specific message on screen, and
+        // what this stops is everything below — which ends by hiding the status
+        // panel and revealing the controls. Without it a client whose model
+        // failed to load got the full walkthrough chrome over an empty world,
+        // with the error silently overwritten. Do not "improve" this by letting
+        // it fall through to the outer catch: that would replace the specific
+        // message with the generic one.
+        try {
+          await viewer.loadModel(absolute(scene.modelUrl))
+        } catch {
+          return
+        }
 
         // The bake, if there is one. Applied before the first frame is shown, so
         // the client never sees the flat version and then a jump.
