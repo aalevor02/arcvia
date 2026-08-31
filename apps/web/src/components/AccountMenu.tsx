@@ -80,12 +80,20 @@ export default function AccountMenu() {
   }, [open])
 
   if (!user) {
+    // `whitespace-nowrap` on both, because these are the only two controls in
+    // the header whose label is a PHRASE. At 390px — the commonest phone width
+    // — the flex bar has to give the island 229px and can spare 209, so both
+    // labels broke mid-phrase: "Sign in" became "Sign" over "in" at 42px wide,
+    // and "Get started free" became two lines 56px tall inside a 64px header.
+    // Measured, not eyeballed: `Range.getClientRects().length` counts line
+    // boxes, and it went 2 -> 1 for both. They cost 6px more on one line and
+    // the bar still has ~58px of slack, so nothing else is pushed out.
     return (
       <div className="flex items-center gap-3">
-        <a href="/login/" className="inline-flex text-sm font-medium">
+        <a href="/login/" className="inline-flex whitespace-nowrap text-sm font-medium">
           Sign in
         </a>
-        <a href="/register/" className="btn-primary !px-4 !py-2">
+        <a href="/register/" className="btn-primary whitespace-nowrap !px-4 !py-2">
           Get started free
         </a>
       </div>
