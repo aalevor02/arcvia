@@ -8,7 +8,11 @@ import Base from '../layouts/Base.astro'
     <p class="lede mt-3" id="handoff-message">One moment.</p>
 
     <div id="handoff-actions" class="mt-8 hidden flex-wrap justify-center gap-3">
-      <a href="/login/" class="btn-primary">Sign in</a>
+      <a href="/login/" class="btn-primary" id="handoff-signin">Sign in</a>
+      <!-- Shown instead of "Sign in" when the session is fine and the studio is
+           simply not answering. Telling a signed-in user to sign in is advice
+           that cannot help, and it reads as though their account is at fault. -->
+      <button type="button" class="btn-primary hidden" id="handoff-retry">Try again</button>
       <a href="/" class="btn-secondary">Back to the site</a>
     </div>
   </section>
@@ -30,12 +34,64 @@ import Base from '../layouts/Base.astro'
   const title = document.getElementById('handoff-title')
   const message = document.getElementById('handoff-message')
   const actions = document.getElementById('handoff-actions')
+  const signIn = document.getElementById('handoff-signin')
+  const retry = document.getElementById('handoff-retry')
 
-  function fail(text: string) {
+  retry?.addEventListener('click', () => location.reload())
+
+  /**
+   * @param offerRetry true when the session is fine and only the studio is
+   *   unreachable — the useful action is then "try again", not "sign in".
+   */
+  function fail(text: string, offerRetry = false) {
     if (title) title.textContent = 'Could not open the studio'
     if (message) message.textContent = text
+    signIn?.classList.toggle('hidden', offerRetry)
+    retry?.classList.toggle('hidden', !offerRetry)
     actions?.classList.remove('hidden')
     actions?.classList.add('flex')
+  }
+
+  /**
+   * Is the studio actually there?
+   *
+   * ── Why this exists ─────────────────────────────────────────────────────
+   * Everything below navigates to another origin, and a cross-origin
+   * navigation reports nothing back: if it fails, the browser replaces this
+   * page with its own error screen and no code here ever runs again. Observed
+   * end to end with the studio stopped — a brand-new account that had just
+   * filled in five fields and an SMS code landed on
+   * `ERR_CONNECTION_REFUSED`, with no Arcvia branding, no explanation, and
+   * **its single-use ticket already spent**. There was no route back.
+   *
+   * The "wait and see if we are still here" trick does not work for this,
+   * because Chrome does navigate — to `chrome-error://chromewebdata/`. The
+   * only way to know is to ask before going.
+   *
+   * ── Why it fails OPEN ───────────────────────────────────────────────────
+   * A probe that wrongly reports the studio down would keep people out of a
+   * studio that works, which is worse than the problem it fixes. So only an
+   * outright network rejection counts. A timeout, or anything else, proceeds
+   * exactly as before — this can add a screen, never remove one.
+   *
+   * `no-cors` because the studio sends no CORS headers for this and none are
+   * needed: the response is opaque and unreadable, and reaching it at all is
+   * the entire question.
+   */
+  async function studioIsReachable(origin: string): Promise<boolean> {
+    try {
+      await fetch(origin, {
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3500),
+      })
+      return true
+    } catch (error) {
+      // A slow-but-alive studio must not be called dead. `AbortSignal.timeout`
+      // raises a TimeoutError; a genuinely unreachable host raises a TypeError
+      // ("Failed to fetch"). Only the second is evidence.
+      return (error as Error)?.name === 'TimeoutError'
+    }
   }
 
   /**
@@ -69,16 +125,31 @@ import Base from '../layouts/Base.astro'
   } else if (!isAuthenticated()) {
     fail('Sign in first, and we will take you straight there.')
   } else {
-    api<{ ticket: string }>('/auth/handoff', { method: 'POST' })
-      .then(({ ticket }) => {
+    void (async () => {
+      // Probe BEFORE minting the ticket, not after. The ticket is single-use,
+      // so spending one on a journey that cannot arrive leaves the visitor
+      // needing a fresh sign-in to try again — which is exactly the dead end
+      // this is here to remove.
+      if (!(await studioIsReachable(new URL(target).origin))) {
+        return fail(
+          'The studio did not respond. Your account is fine — this is usually a ' +
+            'network or a brief outage, so try again in a moment.',
+          true,
+        )
+      }
+
+      try {
+        const { ticket } = await api<{ ticket: string }>('/auth/handoff', {
+          method: 'POST',
+        })
         const url = new URL(target)
         url.searchParams.set('ticket', ticket)
         // `replace`, not `assign`: pressing Back should not re-run a hand-off
         // whose ticket has already been spent.
         location.replace(url.toString())
-      })
-      .catch((error) =>
-        fail(error instanceof Error ? error.message : 'Something went wrong.'),
-      )
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'Something went wrong.')
+      }
+    })()
   }
 </script>
