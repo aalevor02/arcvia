@@ -17,6 +17,10 @@ export default {
           DEFAULT: brand.color.accent,
           hover: brand.color.accentHover,
           soft: brand.color.accentSoft,
+          // Accent as text rather than as a fill — `accent` itself does not
+          // clear WCAG AA on any of the tinted backgrounds this site uses.
+          ink: brand.color.accentInk,
+          'on-dark': brand.color.accentOnDark,
         },
         signal: brand.color.signal,
         warn: brand.color.warn,

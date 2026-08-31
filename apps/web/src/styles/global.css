@@ -78,8 +78,66 @@
     @apply btn border border-line bg-surface text-ink hover:bg-surface-alt;
   }
 
+  /*
+   * The small uppercase label above a section heading.
+   *
+   * `text-accent` here failed WCAG AA on three of the four backgrounds it is
+   * used on — measured in the browser on the built homepage, 4.25 / 4.01 /
+   * 3.95 against the 4.5:1 that 12px semibold text needs. At this size and
+   * weight it is the least legible text on the site, so it is the last place
+   * an accent should be spent for looks.
+   *
+   * `accent-ink` is the darker blue that clears it on white, `surface-alt` and
+   * `accent-soft` (5.5-6.0:1). The dark panels need the opposite correction,
+   * hence the rule below — darkening further would take the eyebrow on `ink`
+   * from 4.01 to 2.85.
+   */
   .eyebrow {
-    @apply text-xs font-semibold uppercase tracking-[0.14em] text-accent;
+    @apply text-xs font-semibold uppercase tracking-[0.14em] text-accent-ink;
+  }
+
+  /*
+   * Accent text on a dark panel.
+   *
+   * Keyed on `bg-ink`, because that is how every dark section on this site is
+   * built — index, services and enterprise all use `bg-ink text-white`. If a
+   * dark section is ever written some other way its accent text silently drops
+   * back to the light-background blue at 4.01:1, so keep the pattern.
+   *
+   * `.text-accent` is listed as well as `.eyebrow`, and it is not redundant.
+   * Three places hand-roll the eyebrow as the raw utility string
+   * `text-xs font-semibold uppercase tracking-[0.14em] text-accent` — which is
+   * character-for-character what `.eyebrow` already is — and all three sit
+   * inside `bg-ink`: index.astro's enterprise panel, enterprise.astro's hero,
+   * and services.astro's "03" step number. A rule that only knew about
+   * `.eyebrow` fixed six labels and left those behind, which is how this
+   * comment came to be written: measured after the change, not before.
+   *
+   * Covering the utility rather than editing those three pages is deliberate.
+   * It states the real rule — accent text on our dark ground uses the on-dark
+   * accent — and it holds for the copy-pasted version too. The pages should
+   * still be collapsed onto `.eyebrow` when someone is next in them.
+   */
+  .bg-ink .eyebrow,
+  .bg-ink .text-accent {
+    @apply text-accent-on-dark;
+  }
+
+  /*
+   * The same correction for the tinted LIGHT grounds.
+   *
+   * `accent` clears AA on plain white by 0.03 and on nothing else: measured at
+   * 4.25:1 on `surface-alt` and 3.95:1 on `accent-soft`. Found on /services/,
+   * where the step numbers "01" and "02" are `font-mono text-sm text-accent`
+   * on a `surface-alt` section — 14px, so they need the full 4.5.
+   *
+   * Written as a ground rule rather than fixed at each site for the same
+   * reason as the dark one: the failing pattern is "accent text on a tinted
+   * ground", and enumerating today's instances would leave tomorrow's.
+   */
+  .bg-surface-alt .text-accent,
+  .bg-accent-soft .text-accent {
+    @apply text-accent-ink;
   }
 
   /* Section headings share one ramp so the page reads as a single document
