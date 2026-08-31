@@ -10,7 +10,8 @@
     "preview": "astro preview --port 4321 --host",
     "check": "astro check",
     "linkcheck": "node test/linkcheck.mjs",
-    "crawlcheck": "node test/crawl-policy.mjs"
+    "crawlcheck": "node test/crawl-policy.mjs",
+    "walkthroughcheck": "node test/walkthrough.mjs"
   },
   "dependencies": {
     "@arcvia/brand": "*",
