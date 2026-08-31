@@ -100,14 +100,23 @@ ok('a released job carries its real charge', olderRow.creditsCharged === cost)
 // The free plan's grant covers both jobs, so both should have released and
 // both should have paid — the fairness rule was proven above on the grant
 // that covered neither.
-const drained = await credits.balanceFor(user.id)
-const granted = (await db.find('creditLedger', (l) => l.userId === user.id && l.reason === 'monthly-grant'))
-  .reduce((sum, l) => sum + l.delta, 0)
-const releasedCount = [olderRow, newerRow].filter(releasedState).length
+// A released test job can fail immediately because its spec is deliberately
+// empty. That failure refunds its charge before this assertion runs, so the
+// current balance alone cannot prove whether each release was charged.
+const releasedRows = [olderRow, newerRow].filter(releasedState)
 ok(
-  'every release charged the balance',
-  drained === cost - 1 + granted - cost * releasedCount,
-  `balance ${drained}, released ${releasedCount}`,
+  'every released job records its real charge',
+  releasedRows.every((job) => job.creditsCharged === cost),
+  releasedRows.map((job) => `${job.status}:${job.creditsCharged}`).join(', '),
+)
+
+const finalBalance = await credits.balanceFor(user.id)
+const ledgerDelta = (await db.find('creditLedger', (l) => l.userId === user.id))
+  .reduce((sum, entry) => sum + entry.delta, 0)
+ok(
+  'the balance reconciles with charges and immediate refunds',
+  finalBalance === cost - 1 + ledgerDelta,
+  `balance ${finalBalance}, ledger delta ${ledgerDelta}`,
 )
 
 console.log(`\n${passed} passed, ${failed} failed`)
