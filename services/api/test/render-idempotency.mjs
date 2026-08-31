@@ -22,7 +22,7 @@
  * Needs the API running: `npm run dev:api`.
  */
 
-const BASE = 'http://localhost:8787'
+const BASE = process.env.API_BASE ?? 'http://localhost:8787'
 const stamp = Date.now()
 
 let passed = 0

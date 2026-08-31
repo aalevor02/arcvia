@@ -23,7 +23,7 @@
 
 import { readFile } from 'node:fs/promises'
 
-const BASE = 'http://localhost:8787'
+const BASE = process.env.API_BASE ?? 'http://localhost:8787'
 const DRAWING = 'A:/Projects/CasaAltinho/_work/cad/dxf/DOWN VILLA -WD 22-1-24.dxf'
 
 let passed = 0

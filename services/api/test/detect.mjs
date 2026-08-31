@@ -1,6 +1,6 @@
 import { deflateSync, crc32 } from 'node:zlib'
 
-const BASE = 'http://localhost:8787'
+const BASE = process.env.API_BASE ?? 'http://localhost:8787'
 const stamp = Date.now()
 
 let passed = 0
