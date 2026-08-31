@@ -11,14 +11,16 @@ import Base from '../layouts/Base.astro'
  * the product, and it is reached by exactly the people already having a bad
  * time: a mistyped address, a stale link, a project that has been unpublished.
  *
- * `noindex` because a 404 that gets indexed competes with the real pages.
+ * Kept out of the index — a 404 that gets indexed competes with the real pages
+ * it exists to replace. The `noindex` tag is no longer passed from here: the
+ * route is listed in `lib/routes.mjs`, which the sitemap reads too, so the two
+ * cannot disagree.
  */
 ---
 
 <Base
   title="Page not found"
   description={`That address does not exist on ${brand.name}.`}
-  noindex
 >
   <section class="shell max-w-2xl py-24 text-center">
     <p class="eyebrow">404</p>

@@ -2,20 +2,33 @@
 import brand from '@arcvia/brand'
 import Header from '../components/Header.astro'
 import Footer from '../components/Footer.astro'
+import { isIndexable } from '../lib/routes.mjs'
 import '../styles/global.css'
 
 interface Props {
   title?: string
   description?: string
-  /** Set on pages that should stay out of search results (thank-you pages etc). */
+  /**
+   * Force a page out of the index.
+   *
+   * Normally you do not pass this: the answer comes from `lib/routes.ts`,
+   * which the sitemap reads too, so the meta tag and the sitemap cannot
+   * disagree. Pass it only for a page whose privacy depends on something this
+   * URL cannot express.
+   */
   noindex?: boolean
 }
 
 const {
   title,
   description = brand.description,
-  noindex = false,
+  noindex: noindexOverride = false,
 } = Astro.props
+
+// The route policy decides, unless a page insists. Deriving it here is what
+// stops the sitemap and the meta tag drifting apart — before this, seven pages
+// said `noindex` while the sitemap submitted them for indexing.
+const noindex = noindexOverride || !isIndexable(Astro.url.pathname)
 
 const pageTitle = title ? `${title} — ${brand.name}` : brand.name
 const canonical = new URL(Astro.url.pathname, Astro.site).href
