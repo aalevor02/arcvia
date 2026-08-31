@@ -17,6 +17,27 @@ const stats = [
   { value: '0', label: 'Files for your buyer to download' },
 ]
 
+const showcase = [
+  {
+    image: '/hero/interior.webp',
+    width: 1920,
+    height: 1080,
+    eyebrow: 'Interior walkthrough',
+    title: "A finished room, built from the architect's drawing",
+    body: 'The walkthrough, room views and campaign stills all come from the same measured model, so a buyer never sees three different versions of the property.',
+    alt: 'A furnished villa living room rendered by Arcvia from an architectural floor plan',
+  },
+  {
+    image: '/hero/exterior-card.webp',
+    width: 720,
+    height: 405,
+    eyebrow: 'Exterior visualisation',
+    title: 'The building in context before construction begins',
+    body: 'Materials, glazing, landscape and daylight are presented together in one project-ready exterior frame for launches, listings and client review.',
+    alt: 'An exterior visualisation of a contemporary home produced by Arcvia',
+  },
+]
+
 const walkthroughPoints = [
   {
     icon: '🔗',
@@ -162,6 +183,56 @@ const table = [
       <div class="mt-9 flex flex-wrap justify-center gap-3">
         <a href="/contact/" class="btn-primary">Talk to us</a>
         <a href="/register/" class="btn-secondary">Or do it yourself, free</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Real output before claims. The services page used to ask visitors to
+       imagine a visual product from text cards alone; these are shipped Arcvia
+       frames from the same project evidence used on the home page. -->
+  <section id="showcase" class="scroll-mt-24 border-b border-line py-section">
+    <div class="shell">
+      <p class="eyebrow">Selected work</p>
+      <div class="mt-3 flex flex-col justify-between gap-5 md:flex-row md:items-end">
+        <h2 class="h2 max-w-2xl text-balance">
+          One measured model, every view the project needs
+        </h2>
+        <p class="max-w-md text-sm leading-relaxed text-ink-soft md:text-right">
+          Real Arcvia output, shown at its native widescreen crop. No stock
+          imagery and no disconnected artist impression.
+        </p>
+      </div>
+
+      <div class="mt-10 grid gap-6 lg:grid-cols-2">
+        {
+          showcase.map((project) => (
+            <article class="group overflow-hidden rounded-card border border-line bg-surface shadow-sm">
+              <div class="overflow-hidden bg-surface-alt">
+                <img
+                  src={project.image}
+                  width={project.width}
+                  height={project.height}
+                  alt={project.alt}
+                  class="aspect-video w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+              <div class="p-6 sm:p-7">
+                <p class="eyebrow">{project.eyebrow}</p>
+                <h3 class="h3 mt-2 text-balance">{project.title}</h3>
+                <p class="mt-3 text-sm leading-relaxed text-ink-soft">
+                  {project.body}
+                </p>
+              </div>
+            </article>
+          ))
+        }
+      </div>
+
+      <div class="mt-8 flex flex-wrap items-center gap-3">
+        <a href="/contact/" class="btn-primary">Build a project with us</a>
+        <a href="/register/" class="btn-secondary">Build it yourself, free</a>
       </div>
     </div>
   </section>
