@@ -33,6 +33,15 @@ const title = 'Walkthrough'
          not marketing pages, and the slug is the only thing keeping one
          private. -->
     <meta name="robots" content="noindex, nofollow" />
+
+    <!-- This page writes its own head rather than using Base.astro, so it was
+         missing the icons the rest of the site declares. A client opening the
+         link they were sent got a blank default tab icon and the browser fired
+         a 404 for /favicon.ico on every load. Both files are emitted at the
+         site root and this page is served from the same origin. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <style is:global>
       :root {
         color-scheme: dark;
