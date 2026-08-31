@@ -276,6 +276,17 @@ function runBuild() {
     run(`build:${workspace}`, npm, ['run', 'build', `--workspace=${workspace}`], ROOT, {
       family: 'build',
     })
+
+    // What the site tells crawlers is a property of the *emitted* files — the
+    // sitemap does not exist until a build writes it — so this belongs to the
+    // build family rather than to `js`, which drives a dev server. It compares
+    // the robots meta tag in each built page against the built sitemap; see
+    // apps/web/test/crawl-policy.mjs for why it reads dist instead of src.
+    if (workspace === 'apps/web') {
+      run('build:web-crawl-policy', npm, ['run', 'crawlcheck', `--workspace=${workspace}`], ROOT, {
+        family: 'build',
+      })
+    }
   }
 }
 

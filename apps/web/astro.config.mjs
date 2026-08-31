@@ -3,6 +3,7 @@ import react from '@astrojs/react'
 import tailwind from '@astrojs/tailwind'
 import sitemap from '@astrojs/sitemap'
 import brand from '@arcvia/brand'
+import { isIndexable } from './src/lib/routes.mjs'
 
 // https://astro.build/config
 export default defineConfig({
@@ -22,7 +23,13 @@ export default defineConfig({
     // (accordion, carousel, booking widget). Everything else ships as zero JS.
     react(),
     tailwind({ applyBaseStyles: false }),
-    sitemap(),
+
+    // The filter reads the same list `Base.astro` uses to emit its robots meta
+    // tag, so the sitemap cannot submit a page that then refuses indexing.
+    // It could, and did: the 2026-08-30 build submitted 18 URLs of which 7
+    // carried `noindex`, including `/view/` — the route that serves client
+    // deliverables. See src/lib/routes.mjs.
+    sitemap({ filter: isIndexable }),
   ],
 
   vite: {
